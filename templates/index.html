@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TalkWithMe</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Top bar -->
+        <header id="topbar">
+            <h1>TalkWithMe</h1>
+            <div class="topbar-actions">
+                <button id="btn-new-chat" title="Start a new chat">New Chat</button>
+                <button id="btn-tts-toggle" title="Toggle TTS playback" class="icon-btn">
+                    <span id="tts-icon">&#128266;</span>
+                </button>
+            </div>
+        </header>
+
+        <div id="main-layout">
+            <!-- Left sidebar -->
+            <aside id="sidebar">
+                <h3>Who should answer?</h3>
+                <div id="who-chooser">
+                    <label class="chooser-option">
+                        <input type="radio" name="who_answers" value="router" checked>
+                        <span>LLM decides</span>
+                    </label>
+                    <label class="chooser-option">
+                        <input type="radio" name="who_answers" value="random">
+                        <span>Surprise me</span>
+                    </label>
+                    <label class="chooser-option">
+                        <input type="radio" name="who_answers" value="selected">
+                        <span>Selected persona</span>
+                    </label>
+                </div>
+
+                <h3>Personas</h3>
+                <div id="persona-list">
+                    <!-- Populated by JS -->
+                </div>
+            </aside>
+
+            <!-- Chat panel -->
+            <main id="chat-panel">
+                <div id="messages">
+                    <!-- Chat bubbles go here -->
+                </div>
+                <div id="input-bar">
+                    <textarea
+                        id="message-input"
+                        placeholder="Type your message..."
+                        rows="1"
+                    ></textarea>
+                    <button id="btn-send" title="Send message">&#9654;</button>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
