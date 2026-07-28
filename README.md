@@ -2,6 +2,8 @@
 
 A local single-user chat web application that connects to a locally running **llama.cpp** server and supports **multi-persona group chats** with optional **TTS playback**.
 
+As seen on YouTube!: https://www.youtube.com/watch?v=1VPydYNt4R8
+
 ## Features
 
 - Chat with one or more AI personas in a simulated group chat
