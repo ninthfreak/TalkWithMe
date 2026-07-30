@@ -154,9 +154,14 @@ If you want to hear each sentence as soon as it has been synthesized, without ha
   - basic text input only
   - manual configuration of personas
   - optional TTS
-- **TODO** v2.0
-  - release notes go here for v2
+- **2026-07-29** v2.0
+  - Add multi-language support (#1)
+  - Add streaming TTS audio output option (#2)
+  - Better size and positioning of avatar images (#3)
+  - Allow microphone voice input for prompting (#6)
+  - Color theme chooser with persistence (#12)
 
 ## License
 
 This project is licensed under the [MIT License](LICENSE)
+
