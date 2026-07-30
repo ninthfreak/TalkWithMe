@@ -64,7 +64,7 @@ async def tts_proxy(req: TTSRequest):
     return result
 
 
-@router.post("/api/stt")
+@router.post("/api/stt", response_model=STTResponse)
 async def stt_proxy(req: STTRequest):
     """Proxy a speech-to-text request to the STT server's /parse endpoint.
 
