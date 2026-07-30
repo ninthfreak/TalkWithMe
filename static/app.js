@@ -13,12 +13,28 @@ let personas = [];
 let selectedPersona = null;   // The persona selected in the sidebar
 let ttsEnabled = false;        // Whether TTS playback is toggled on
 let ttsAvailable = false;      // Whether the TTS server is reachable
+let ttsStreaming = false;       // Whether streaming (sentence-by-sentence) TTS is enabled
 let isStreaming = false;       // Guard: prevent double-sends during streaming
 
-// FIFO audio queue for TTS playback
+// Microphone / STT state
+let mediaRecorder = null;
+let recordedChunks = [];
+
+// Non-streaming: FIFO audio queue (fetch full text, then play)
 const audioQueue = [];
 let audioCtx = null;
 let isPlayingAudio = false;
+
+// Streaming TTS state
+let sentenceBuffer = "";         // Token accumulator for in-progress response
+let currentStreamingPersona = null;
+
+// Streaming: decoupled fetch queue and decoded-buffer playback queue
+const ttsRequestQueue = [];      // [{personaName, text}] waiting to be fetched
+const audioBufferQueue = [];     // AudioBuffers decoded and ready to play
+let isFetchingTTS = false;
+let isPlayingAudioBuffer = false;
+const THEME_STORAGE_KEY = "talkwithme_theme";
 
 /* ==========================================================================
    DOM references
@@ -27,17 +43,20 @@ let isPlayingAudio = false;
 const messagesEl = document.getElementById("messages");
 const inputEl = document.getElementById("message-input");
 const sendBtn = document.getElementById("btn-send");
+const micBtn = document.getElementById("btn-mic");
 const newChatBtn = document.getElementById("btn-new-chat");
 const ttsToggleBtn = document.getElementById("btn-tts-toggle");
 const ttsIcon = document.getElementById("tts-icon");
 const personaListEl = document.getElementById("persona-list");
 const whoChooser = document.getElementById("who-chooser");
+const themeSelectEl = document.getElementById("theme-select");
 
 /* ==========================================================================
    Initialization
    ========================================================================== */
 
 async function init() {
+    initTheme();
     await loadPersonas();
     await checkTTSHealth();
     setupEventListeners();
@@ -70,11 +89,13 @@ async function checkTTSHealth() {
         const resp = await fetch("/api/tts/health");
         const data = await resp.json();
         ttsAvailable = data.available;
+        ttsStreaming = data.streaming || false;
         ttsEnabled = data.available; // Default on if server is available
         updateTTSToggleUI();
     } catch (err) {
         console.warn("TTS health check failed:", err);
         ttsAvailable = false;
+        ttsStreaming = false;
         ttsEnabled = false;
         updateTTSToggleUI();
     }
@@ -98,6 +119,45 @@ function setupEventListeners() {
 
     newChatBtn.addEventListener("click", newChat);
     ttsToggleBtn.addEventListener("click", toggleTTS);
+    micBtn.addEventListener("click", toggleMicrophone);
+    themeSelectEl.addEventListener("change", () => {
+        applyTheme(themeSelectEl.value, true);
+    });
+
+    document.addEventListener("keydown", (e) => {
+        if (e.ctrlKey && e.code === "Space" && !micBtn.disabled) {
+            e.preventDefault();
+            toggleMicrophone();
+        }
+    });
+}
+
+function initTheme() {
+    let storedTheme = "dark";
+    try {
+        const fromStorage = localStorage.getItem(THEME_STORAGE_KEY);
+        if (fromStorage) {
+            storedTheme = fromStorage;
+        }
+    } catch (err) {
+        console.warn("Theme storage unavailable:", err);
+    }
+    applyTheme(storedTheme, false);
+}
+
+function applyTheme(theme, persist) {
+    const allowedThemes = new Set(["dark", "light", "matrix", "blues"]);
+    const normalizedTheme = allowedThemes.has(theme) ? theme : "dark";
+    document.body.dataset.theme = normalizedTheme;
+    themeSelectEl.value = normalizedTheme;
+
+    if (persist) {
+        try {
+            localStorage.setItem(THEME_STORAGE_KEY, normalizedTheme);
+        } catch (err) {
+            console.warn("Failed to persist theme:", err);
+        }
+    }
 }
 
 /* ==========================================================================
@@ -269,6 +329,12 @@ function handleSSEEvent(event, assistantRow) {
                 selectedPersona = event.persona;
                 highlightSelectedPersona();
             }
+
+            // Streaming TTS: track persona and reset sentence accumulator
+            if (ttsStreaming) {
+                currentStreamingPersona = event.persona;
+                sentenceBuffer = "";
+            }
             break;
         }
         case "token": {
@@ -277,14 +343,32 @@ function handleSSEEvent(event, assistantRow) {
                 bubble.textContent += event.token;
                 scrollToBottom();
             }
+
+            // Streaming TTS: accumulate tokens and queue complete sentences immediately
+            if (ttsEnabled && ttsStreaming && currentStreamingPersona) {
+                const persona = personas.find(p => p.name === currentStreamingPersona);
+                if (persona && persona.tts_capable) {
+                    accumulateForTTS(event.token, currentStreamingPersona);
+                }
+            }
             break;
         }
         case "done": {
-            // Streaming complete — enqueue TTS if enabled
             if (ttsEnabled && event.text) {
                 const persona = personas.find(p => p.name === event.persona);
                 if (persona && persona.tts_capable) {
-                    enqueueTTS(event.persona, event.text);
+                    if (ttsStreaming) {
+                        // Flush any remaining partial sentence from the buffer
+                        const remaining = sentenceBuffer.trim();
+                        if (remaining) {
+                            enqueueStreamingTTS(event.persona, remaining);
+                        }
+                        sentenceBuffer = "";
+                        currentStreamingPersona = null;
+                    } else {
+                        // Non-streaming: enqueue full text at once (original behavior)
+                        enqueueTTS(event.persona, event.text);
+                    }
                 }
             }
             break;
@@ -417,6 +501,10 @@ function toggleTTS() {
     updateTTSToggleUI();
 }
 
+// ---------------------------------------------------------------------------
+// Non-streaming TTS (original behavior: enqueue full text after LLM finishes)
+// ---------------------------------------------------------------------------
+
 function enqueueTTS(personaName, text) {
     audioQueue.push({ personaName, text });
     processAudioQueue();
@@ -436,10 +524,98 @@ async function processAudioQueue() {
         console.warn("TTS playback error:", err);
     } finally {
         isPlayingAudio = false;
-        // Process next item in queue
         setTimeout(() => processAudioQueue(), 100);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Streaming TTS (sentence-by-sentence: fetch and play are pipelined)
+// ---------------------------------------------------------------------------
+
+/**
+ * Split accumulated text into complete sentences (ending with . ! ?)
+ * Returns the sentences found and any remaining fragment without a terminal.
+ */
+function extractSentences(text) {
+    const sentences = [];
+    const regex = /[^.!?]*[.!?]+/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        const s = match[0].trim();
+        if (s) sentences.push(s);
+        lastIndex = regex.lastIndex;
+    }
+    return { sentences, remaining: text.slice(lastIndex) };
+}
+
+/**
+ * Append a token to the sentence buffer and queue any newly complete sentences.
+ */
+function accumulateForTTS(token, personaName) {
+    sentenceBuffer += token;
+    const { sentences, remaining } = extractSentences(sentenceBuffer);
+    sentenceBuffer = remaining;
+    for (const sentence of sentences) {
+        enqueueStreamingTTS(personaName, sentence);
+    }
+}
+
+/** Push a sentence into the fetch queue and kick off the fetch pipeline. */
+function enqueueStreamingTTS(personaName, text) {
+    ttsRequestQueue.push({ personaName, text });
+    processTTSRequests();
+}
+
+/**
+ * Fetch TTS for queued sentences serially (to preserve order).
+ * Runs concurrently with audio playback so the next sentence's audio
+ * is ready by the time the current one finishes playing.
+ */
+async function processTTSRequests() {
+    if (isFetchingTTS || ttsRequestQueue.length === 0) return;
+    isFetchingTTS = true;
+
+    const item = ttsRequestQueue.shift();
+    try {
+        const audioBuffer = await fetchTTS(item.personaName, item.text);
+        if (audioBuffer) {
+            audioBufferQueue.push(audioBuffer);
+            processAudioBufferQueue();
+        }
+    } catch (err) {
+        console.warn("TTS streaming fetch error:", err);
+    } finally {
+        isFetchingTTS = false;
+        // Immediately fetch the next sentence if one is waiting
+        setTimeout(() => processTTSRequests(), 0);
+    }
+}
+
+/**
+ * Play decoded audio buffers in order, with a small gap between sentences.
+ * Runs independently of the fetch pipeline so playback starts as soon as
+ * the first buffer is ready.
+ */
+async function processAudioBufferQueue() {
+    if (isPlayingAudioBuffer || audioBufferQueue.length === 0) return;
+    isPlayingAudioBuffer = true;
+
+    const buffer = audioBufferQueue.shift();
+    try {
+        await playAudio(buffer);
+        await new Promise(resolve => setTimeout(resolve, 80)); // brief inter-sentence gap
+    } catch (err) {
+        console.warn("Audio buffer playback error:", err);
+    } finally {
+        isPlayingAudioBuffer = false;
+        processAudioBufferQueue();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared TTS helpers
+// ---------------------------------------------------------------------------
 
 async function fetchTTS(personaName, text) {
     const resp = await fetch("/api/tts", {
@@ -479,6 +655,86 @@ function playAudio(buffer) {
         source.onended = resolve;
         source.start();
     });
+}
+
+/* ==========================================================================
+   STT / Microphone
+   ========================================================================== */
+
+async function toggleMicrophone() {
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+        micBtn.disabled = true; // prevent re-entry until onstop finishes
+        mediaRecorder.stop();
+        return;
+    }
+
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+        console.error("Microphone access denied:", err);
+        appendErrorBubble("Microphone access was denied.");
+        return;
+    }
+
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+
+    mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+        // Stop all tracks to release the microphone
+        stream.getTracks().forEach(t => t.stop());
+        micBtn.classList.remove("recording");
+        micBtn.disabled = true;
+
+        const blob = new Blob(recordedChunks, { type: "audio/webm" });
+
+        const audio_base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(reader.error);
+            reader.onload = () => {
+                const result = String(reader.result || "");
+                resolve(result.split(",")[1] || "");
+            };
+            reader.readAsDataURL(blob);
+        });
+        let sttFailed = false;
+        try {
+            const resp = await fetch("/api/stt", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ audio_base64 }),
+            });
+
+            if (!resp.ok) {
+                console.error("STT request failed:", resp.status);
+                appendErrorBubble("Speech recognition failed. Microphone disabled.");
+                sttFailed = true;
+                return;
+            }
+
+            const data = await resp.json();
+            if (data.text) {
+                // Append transcribed text (never replace existing content)
+                const existing = inputEl.value;
+                inputEl.value = existing ? existing + " " + data.text : data.text;
+                inputEl.dispatchEvent(new Event("input")); // trigger auto-resize
+                sendMessage();
+            }
+        } catch (err) {
+            console.error("STT error:", err);
+            appendErrorBubble("Speech recognition failed. Microphone disabled.");
+            sttFailed = true;
+        } finally {
+            if (!sttFailed) micBtn.disabled = false;
+        }
+    };
+
+    mediaRecorder.start();
+    micBtn.classList.add("recording");
 }
 
 /* ==========================================================================

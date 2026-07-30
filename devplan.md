@@ -2,7 +2,7 @@
 
 ## Overview
 
-A local single-user chat webapp built with Python + FastAPI that connects to a locally running **llama.cpp** server (OpenAI-compatible API, no auth required) and supports **multi-persona group chats** with optional **TTS playback** via a custom local REST server.
+A local single-user chat webapp built with Python + FastAPI that connects to a locally running **llama.cpp** server (OpenAI-compatible API, no auth required) and supports **multi-persona group chats** with optional **TTS playback** and **STT user speech parsing** via a custom local REST server.
 
 ---
 
@@ -13,8 +13,10 @@ A local single-user chat webapp built with Python + FastAPI that connects to a l
 - AI personas defined in a config file (name, system prompt, router hints, avatar color, optional avatar image, etc)
 - Persona answers rendered via streaming
 - Optional TTS: each AI response is automatically spoken aloud after it finishes streaming (if supported)
+- Optional STT: user can use microphone to speak instead of typing a message (transcribed via TTS/STT server)
 - Fully local — no internet required, no auth
 - Single active chat session (in-memory); "New Chat" clears history
+- Top-right theme chooser with Dark (default), Light, Matrix, and Blues options (persisted in browser storage)
 
 ---
 
@@ -33,18 +35,18 @@ TalkWithMe/
 │   │   ├── chat.py          # POST /api/chat → SSE stream
 │   │   ├── personas.py      # GET /api/personas, GET /api/personas/{name}/avatar
 │   │   ├── session.py       # GET /api/session, POST /api/session/new, POST /api/session/personas
-│   │   └── tts.py           # POST /api/tts → proxy to TTS server
+│   │   └── tts.py           # POST /api/tts → proxy to TTS/STT server
 │   └── services/
 │       ├── __init__.py
 │       ├── llm.py           # llama.cpp streaming client (httpx)
-│       └── tts_client.py    # TTS /synthesize client (httpx)
+│       └── tts_client.py    # TTS /synthesize and STT /parse client (httpx)
 ├── static/
 │   ├── style.css            # Dark theme, bubble layout, sidebar
 │   └── app.js               # Chat logic, SSE handling, TTS audio queue
 ├── templates/
 │   └── index.html           # Main page (Jinja2 template)
 ├── personas.yaml            # Persona definitions (user-editable)
-├── settings.yaml            # LLM/TTS server config (user-editable)
+├── settings.yaml            # LLM/TTS/STT server config (user-editable)
 ├── requirements.txt
 └── README.md
 ```
@@ -112,12 +114,13 @@ or "no volume" or similar symbol with the avatar if the persona cannot speak.
 | POST | `/api/session/personas` | Update the active persona list for current session |
 | POST | `/api/chat` | Send user message; returns SSE stream of AI responses |
 | POST | `/api/tts` | Proxy text to TTS server; returns `{audio_base64, sample_rate}` |
+| POST | `/api/stt` | Proxy base64 audio to STT server; returns `{text, language}` |
 
 ---
 
 ## Chat / Streaming Flow
 
-1. User types a message and hits Send
+1. User types or transcribes a message and hits Send
 2. Frontend POSTs `{message, who_answers}` to `/api/chat` - `who_answers` is either "router", "random", or a persona name.
 3. If router is used to decide who answers, a small non-streaming request is made to the LLM with the user's prompt,
    the router hints from all personas, last N conversation turns (N up to and including 3), and a request to return 
@@ -137,7 +140,24 @@ or "no volume" or similar symbol with the avatar if the persona cannot speak.
 
 ---
 
+## STT Flow
+
+1. User clicks the Microphone button next to the text entry field
+2. `getUserMedia` -> `MediaRecorder` records user's speech
+3. User clicks Microphone again to stop speaking
+4. Input audio is Base64-encoded
+5. POST `{audio_base64}` to `/api/stt` endpoint on the app (backend proxies to `/parse` on the TTS/STT server)
+6. If this returns 5xx, show an error and disable the microphone button
+7. Otherwise, parse `text` from the Json response and populate the text input box (append to existing contents, never replace)
+8. On success, implicitly invoke the chat/streaming flow as though the user clicked Send
+
+---
+
 ## TTS Flow
+
+### When not in streaming mode
+
+When the `streaming` config property is set to `false` (or when it is omitted):
 
 1. Frontend receives `done` SSE event for a persona
 2. If TTS enabled and supported for this persona: enqueue `{persona_name, text}` in FIFO audio queue
@@ -151,11 +171,21 @@ or "no volume" or similar symbol with the avatar if the persona cannot speak.
 6. Frontend decodes base64 WAV → Web Audio API → plays audio
 7. Queue processes next item after current audio finishes
 
+### When streaming mode is enabled
+
+When the `streaming` config property is set to `true`:
+
+1. Incoming text streams from the personas are chunked into sentences using a regex to split on common punctuation.
+2. At each sentence boundary, a TTS request for that sentence is queued.
+3. A separate audio playback queue is used to queue up audio responses from the TTS server.
+4. As sentence 1 is being played, sentence 2 can be processing on the TTS server, and so on for sentence 3.
+5. This mode reduces the initial lag time for audio playback to begin, at the expense of possibly causing longer delays between sentences.
+
 ---
 
 ## Frontend Design
 
-- **Dark theme** throughout
+- **Theme chooser** in top bar with Dark (default), Light, Matrix, and Blues palettes
 - **Left sidebar** (~250px):
    - "Who should answer?" chooser with options "LLM decides", "Surprise me", and "Selected persona"
    - Beneath that chooser, show all personas with colored avatar (image or initial circle)
@@ -164,7 +194,7 @@ or "no volume" or similar symbol with the avatar if the persona cannot speak.
 - **Main chat panel**: scrollable bubbles; user right-aligned; AI left-aligned with persona avatar + name
    - Persona response bubbles must be accompanied by avatar (image or initial circle) AND persona name.
 - **Streaming text** renders incrementally inside AI bubble.
-- **Bottom input bar**: text input + Send button; Enter sends, Shift+Enter for newline
+- **Bottom input bar**: text input + Microphone button + Send button; Enter sends, Shift+Enter for newline, Microphone transcribes speech
 - **Top bar**: app title, "New Chat" button, TTS toggle (speaker icon)
 - **Loading indicator**: subtle "..." bubble while a persona is generating
 
@@ -214,5 +244,4 @@ Open `http://localhost:8000`. Ensure llama.cpp is running at the URL in `setting
 TTS is optional — if unreachable, the app logs a warning and disables TTS gracefully.
 The TTS server exposes a simple GET /health endpoint - if this returns 200, assume TTS is available.
 If TTS is available, UI should default the TTS toggle to on. Otherwise, default it to off.
-
 

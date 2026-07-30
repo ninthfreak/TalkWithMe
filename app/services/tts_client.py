@@ -34,6 +34,7 @@ async def synthesize(
     text: str,
     prompt_text: str,
     audio_base64: str,
+    language: str = "en",
 ) -> Optional[dict]:
     """Call the TTS server's /synthesize endpoint.
 
@@ -46,6 +47,7 @@ async def synthesize(
         "text": text,
         "prompt_text": prompt_text,
         "audio_base64": audio_base64,
+        "language": language,
         "num_steps": settings.tts.num_steps,
         "guidance_scale": settings.tts.guidance_scale,
         "seed": settings.tts.seed,
@@ -58,6 +60,26 @@ async def synthesize(
             return resp.json()
     except Exception as exc:
         logger.warning("TTS synthesis failed: %s", exc)
+        return None
+
+
+async def parse_audio(audio_base64: str) -> Optional[dict]:
+    """Call the STT server's /parse endpoint.
+
+    Returns dict with {"text": str, "language": str} or None on failure.
+    """
+    settings = get_settings()
+    url = f"{settings.tts.base_url}/parse"
+
+    payload = {"audio_base64": audio_base64}
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.tts.timeout) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.warning("STT parse failed: %s", exc)
         return None
 
 

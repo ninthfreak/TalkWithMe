@@ -1,7 +1,7 @@
-"""TTS router — proxy to the local TTS server.
+"""TTS/STT router — proxy to the local TTS/STT server.
 
-Handles health checks and synthesis requests. The TTS server is optional;
-the app degrades gracefully if it's unavailable.
+Handles health checks, synthesis requests, and speech-to-text transcription.
+The TTS/STT server is optional; the app degrades gracefully if it's unavailable.
 """
 
 import logging
@@ -10,22 +10,26 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from app.config import get_personas, get_settings
-from app.models import TTSRequest, TTSHealthResponse
-from app.services.tts_client import check_tts_health, encode_reference_audio, read_transcript, synthesize
+from app.models import TTSRequest, TTSHealthResponse, STTRequest, STTResponse
+from app.services.tts_client import check_tts_health, encode_reference_audio, read_transcript, synthesize, parse_audio
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/tts", tags=["tts"])
+router = APIRouter(tags=["tts"])
 
 
-@router.get("/health", response_model=TTSHealthResponse)
+@router.get("/api/tts/health", response_model=TTSHealthResponse)
 async def tts_health():
     """Report TTS availability status to the frontend."""
     settings = get_settings()
     available = await check_tts_health() if settings.tts.enabled else False
-    return TTSHealthResponse(enabled=settings.tts.enabled, available=available)
+    return TTSHealthResponse(
+        enabled=settings.tts.enabled,
+        available=available,
+        streaming=settings.tts.streaming,
+    )
 
 
-@router.post("")
+@router.post("/api/tts")
 async def tts_proxy(req: TTSRequest):
     """Proxy a synthesis request to the TTS server.
 
@@ -51,9 +55,27 @@ async def tts_proxy(req: TTSRequest):
         text=req.text,
         prompt_text=transcript,
         audio_base64=audio_b64,
+        language=persona.language,
     )
 
     if not result:
         return JSONResponse(status_code=502, content={"detail": "TTS server returned no audio"})
+
+    return result
+
+
+@router.post("/api/stt", response_model=STTResponse)
+async def stt_proxy(req: STTRequest):
+    """Proxy a speech-to-text request to the STT server's /parse endpoint.
+
+    Accepts base64-encoded audio and returns the transcribed text.
+    """
+    try:
+        result = await parse_audio(req.audio_base64)
+    except Exception:
+        return JSONResponse(status_code=502, content={"detail": "STT server unavailable or returned an error"})
+
+    if not result or "text" not in result:
+        return JSONResponse(status_code=502, content={"detail": "STT server returned no text"})
 
     return result
