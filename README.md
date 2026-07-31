@@ -160,6 +160,8 @@ If you want to hear each sentence as soon as it has been synthesized, without ha
   - Better size and positioning of avatar images (#3)
   - Allow microphone voice input for prompting (#6)
   - Color theme chooser with persistence (#12)
+- **TODO** v3.0
+  - 3.0 release notes go here
 
 ## License
 
