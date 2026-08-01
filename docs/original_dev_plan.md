@@ -4,6 +4,8 @@
 
 A local single-user chat webapp built with Python + FastAPI that connects to a locally running **llama.cpp** server (OpenAI-compatible API, no auth required) and supports **multi-persona group chats** with optional **TTS playback** and **STT user speech parsing** via a custom local REST server.
 
+(Note: this is the original dev plan for v1 and is now out of date)
+
 ---
 
 ## Goals & Features
