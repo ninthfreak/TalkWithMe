@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app import config as app_config
-from app.routers import chat, personas, session as session_router, tts
+from app.routers import chat, personas, session as session_router, stt, tts
 from app.session import session
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,8 @@ async def lifespan(app: FastAPI):
     session.set_active_personas(all_names)
     logger.info("TalkWithMe started with %d personas: %s", len(all_names), all_names)
     logger.info("LLM endpoint: %s", settings.llm.base_url)
-    logger.info("TTS enabled: %s (endpoint: %s)", settings.tts.enabled, settings.tts.base_url)
+    logger.info("TTS active: %s (endpoint: %s)", settings.tts.is_active, settings.tts.base_url)
+    logger.info("STT active: %s (endpoint: %s)", settings.stt.is_active, settings.stt.base_url)
 
     yield
 
@@ -61,6 +62,7 @@ app.include_router(personas.router)
 app.include_router(session_router.router)
 app.include_router(chat.router)
 app.include_router(tts.router)
+app.include_router(stt.router)
 
 # Jinja2 templates
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))

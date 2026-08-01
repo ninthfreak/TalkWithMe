@@ -3,6 +3,8 @@
 The TTS server is optional. If it's down or misconfigured, the app logs
 a warning and gracefully disables TTS. The frontend gets the status via
 the /api/tts/health endpoint.
+
+STT client code lives in its own module: app.services.stt_client
 """
 
 import base64
@@ -18,14 +20,18 @@ logger = logging.getLogger(__name__)
 
 
 async def check_tts_health() -> bool:
-    """Return True if the TTS server responds 200 on /health."""
+    """Return True if the TTS server is reachable.
+
+    Accepts both 200 (endpoint exists) and 404 (server is up but lacks /health).
+    Any other outcome — connection error, timeout, 5xx — means the server is down.
+    """
     settings = get_settings()
-    if not settings.tts.enabled:
+    if not settings.tts.is_active:
         return False
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(f"{settings.tts.base_url}/health")
-            return resp.status_code == 200
+            return resp.status_code in (200, 404)
     except Exception:
         return False
 
@@ -41,6 +47,9 @@ async def synthesize(
     Returns dict with {"audio_base64": str, "sample_rate": int} or None on failure.
     """
     settings = get_settings()
+    if not settings.tts.is_active:
+        logger.warning("TTS synthesis skipped: feature not active (no base_url or disabled)")
+        return None
     url = f"{settings.tts.base_url}/synthesize"
 
     payload = {
@@ -60,26 +69,6 @@ async def synthesize(
             return resp.json()
     except Exception as exc:
         logger.warning("TTS synthesis failed: %s", exc)
-        return None
-
-
-async def parse_audio(audio_base64: str) -> Optional[dict]:
-    """Call the STT server's /parse endpoint.
-
-    Returns dict with {"text": str, "language": str} or None on failure.
-    """
-    settings = get_settings()
-    url = f"{settings.tts.base_url}/parse"
-
-    payload = {"audio_base64": audio_base64}
-
-    try:
-        async with httpx.AsyncClient(timeout=settings.tts.timeout) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            return resp.json()
-    except Exception as exc:
-        logger.warning("STT parse failed: %s", exc)
         return None
 
 
