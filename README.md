@@ -305,6 +305,7 @@ application, depending on how much VRAM you can throw at it.
   - Break up the `app.js` monolith for code maintainability (#29)
   - Chat persistence (#4)
   - Save generated audio and allow replay (#5)
+  - Add screenshots and better setup guidance to README (#17)
 
 ## License
 
