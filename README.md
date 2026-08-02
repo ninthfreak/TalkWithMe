@@ -32,7 +32,8 @@ Follow the development of this app on my YouTube channel:
 - (Optional) An OpenAI-compatible STT server that exposes a `/v1/audio/transcriptions` endpoint
    accepting multipart form uploads. The `stt.base_url` in `settings.yaml` should point to the
    server's root (e.g., `http://localhost:8181`), and the app will POST to
-   `{base_url}/v1/audio/transcriptions`.
+   `{base_url}/v1/audio/transcriptions`. I strongly recommend [whisper-fastapi](https://github.com/heimoshuiyu/whisper-fastapi)
+   as it is very easy to get up and running (and it is in fact what I use with this app).
 
 ## Quick Start
 
