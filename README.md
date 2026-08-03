@@ -8,7 +8,7 @@ Follow the development of this app on my YouTube channel:
 
 - Initial creation: https://www.youtube.com/watch?v=1VPydYNt4R8
 - Multi-lingual voice cloning: https://www.youtube.com/watch?v=1yiyFYaUlU4
-- Better TTS support: (coming soon!)
+- Better TTS support: https://www.youtube.com/watch?v=jDudeaWppSE
 - MCP integrations: (coming soon!)
 
 ## Features
