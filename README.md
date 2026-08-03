@@ -27,8 +27,10 @@ Follow the development of this app on my YouTube channel:
 - Python 3.10+
 - A locally running llama.cpp server with OpenAI-compatible API (e.g., `--api` flag)
 - (Optional) A local TTS REST server with `/synthesize` and `/health` endpoints.
-   You can use my [server.py](https://github.com/scorbo2/ai-playground/blob/master/dots.tts/server.py)
-   in front of a [dots.tts](https://github.com/studio-dots-ai/dots.tts) server (that's what I use.)
+   You can use my [dots.tts server.py](https://github.com/scorbo2/ai-playground/blob/master/dots.tts/server.py)
+   in front of a [dots.tts](https://github.com/studio-dots-ai/dots.tts) server.
+   Alternatively, you can use my [Qwen3-TTS server.py](https://github.com/scorbo2/ai-playground/blob/master/qwen3-tts/server.py)
+   running in front of a [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) server. I've tested both successfully.
 - (Optional) An OpenAI-compatible STT server that exposes a `/v1/audio/transcriptions` endpoint
    accepting multipart form uploads. The `stt.base_url` in `settings.yaml` should point to the
    server's root (e.g., `http://localhost:8181`), and the app will POST to
@@ -266,19 +268,19 @@ application, depending on how much VRAM you can throw at it.
 ### Modest setup (~12GB VRAM)
 
 - Recommended LLM: Gemma 4 E4B Q4
-- Recommended TTS: `dots.tts`
+- Recommended TTS: `Qwen3-TTS`
 - Recommended STT: `whisper-fastapi`, small model, running on CPU or cuda
 
 ### Large setup (~16GB VRAM)
 
 - Recommended LLM: Gemma 4 E4B Q6
-- Recommended TTS: `dots.tts`
+- Recommended TTS: Either `Qwen3-TTS` or `dots.tts`
 - Recommended STT: `whisper-fastapi`, large-v3-turbo, running on cuda
 
 ### X-Large setup (24GB or higher)
 
 - Recommended LLM: Gemma 4 26B A4B
-- Recommended TTS: `dots.tts`
+- Recommended TTS: Either `Qwen3-TTS` or `dots.tts`
 - Recommended STT: `whisper-fastapi`, large-v3-turbo, running on cuda
 
 ## Release history
@@ -294,7 +296,7 @@ application, depending on how much VRAM you can throw at it.
   - Better size and positioning of avatar images (#3)
   - Allow microphone voice input for prompting (#6)
   - Color theme chooser with persistence (#12)
-- **RELEASE DATE GOES HERE** v3.0
+- **2026-08-02** v3.0
   - In-app persona editor: create, edit, clone, and delete personas from the browser UI (#11)
   - Migrate STT to OpenAI-compatible `/v1/audio/transcriptions` endpoint (#21)
   - Split TTS and STT into separate features with separate configuration (#19)
@@ -306,6 +308,7 @@ application, depending on how much VRAM you can throw at it.
   - Chat persistence (#4)
   - Save generated audio and allow replay (#5)
   - Add screenshots and better setup guidance to README (#17)
+  - Add read-only "server type" field in TTS server settings (Qwen3-TTS or dots.tts) (#36)
 
 ## License
 
