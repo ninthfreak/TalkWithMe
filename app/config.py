@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -24,17 +24,55 @@ class LLMSettings(BaseModel):
 
 class TTSConfig(BaseModel):
     enabled: bool = True
-    base_url: str = "http://localhost:5500"
+    base_url: Optional[str] = None
     num_steps: int = 10
     guidance_scale: float = 3.0
     seed: Optional[int] = None
     timeout: float = 60.0
     streaming: bool = False
 
+    @model_validator(mode="after")
+    def _normalize_base_url(self) -> "TTSConfig":
+        """Treat blank strings as None so a missing URL implicitly disables TTS."""
+        if self.base_url is not None and not self.base_url.strip():
+            self.base_url = None
+        return self
+
+    @property
+    def is_active(self) -> bool:
+        """Feature is active only when explicitly enabled AND a base_url is configured."""
+        return self.enabled and bool(self.base_url)
+
+
+class STTConfig(BaseModel):
+    """Speech-to-text configuration, independent of TTS."""
+    enabled: bool = True
+    base_url: Optional[str] = None
+    timeout: float = 30.0
+
+    @model_validator(mode="after")
+    def _normalize_base_url(self) -> "STTConfig":
+        """Treat blank strings as None so a missing URL implicitly disables STT."""
+        if self.base_url is not None and not self.base_url.strip():
+            self.base_url = None
+        return self
+
+    @property
+    def is_active(self) -> bool:
+        """Feature is active only when explicitly enabled AND a base_url is configured."""
+        return self.enabled and bool(self.base_url)
+
+
+class GeneralConfig(BaseModel):
+    """Application-wide feature flags and preferences."""
+    persona_name_mentions: bool = True
+
 
 class AppSettings(BaseModel):
     llm: LLMSettings = LLMSettings()
     tts: TTSConfig = TTSConfig()
+    stt: STTConfig = STTConfig()
+    general: GeneralConfig = GeneralConfig()
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +101,27 @@ class PersonasConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Chat Rooms
+# ---------------------------------------------------------------------------
+
+class ChatRoom(BaseModel):
+    """A named grouping of personas."""
+    name: str
+    persona_names: List[str] = Field(default_factory=list)
+
+
+class ChatRoomsConfig(BaseModel):
+    chat_rooms: List[ChatRoom] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Loading helpers
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _settings_cache: Optional[AppSettings] = None
 _personas_cache: Optional[PersonasConfig] = None
+_chatrooms_cache: Optional[ChatRoomsConfig] = None
 
 
 def load_settings(path: Optional[Path] = None) -> AppSettings:
@@ -82,6 +135,8 @@ def load_settings(path: Optional[Path] = None) -> AppSettings:
     _settings_cache = AppSettings(
         llm=LLMSettings(**raw.get("llm", {})),
         tts=TTSConfig(**raw.get("tts", {})),
+        stt=STTConfig(**raw.get("stt", {})),
+        general=GeneralConfig(**raw.get("general", {})),
     )
     return _settings_cache
 
@@ -114,10 +169,78 @@ def get_personas() -> PersonasConfig:
     return _personas_cache
 
 
+def save_personas(config: PersonasConfig, path: Optional[Path] = None) -> None:
+    """Serialize PersonasConfig back to personas.yaml and update the in-memory cache."""
+    global _personas_cache
+    target = path or _PROJECT_ROOT / "personas.yaml"
+    raw = {
+        "personas": [
+            p.model_dump(exclude_none=False)
+            for p in config.personas
+        ]
+    }
+    with open(target, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    _personas_cache = config
+
+
+def save_settings(config: AppSettings, path: Optional[Path] = None) -> None:
+    """Serialize AppSettings back to settings.yaml and update the in-memory cache."""
+    global _settings_cache
+    target = path or _PROJECT_ROOT / "settings.yaml"
+    raw = {
+        "llm": config.llm.model_dump(exclude_none=False),
+        "tts": config.tts.model_dump(exclude_none=False),
+        "stt": config.stt.model_dump(exclude_none=False),
+        "general": config.general.model_dump(exclude_none=False),
+    }
+    with open(target, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    _settings_cache = config
+
+
+def get_chatrooms() -> ChatRoomsConfig:
+    """Return cached chat rooms, loading if necessary."""
+    if _chatrooms_cache is None:
+        return load_chatrooms()
+    return _chatrooms_cache
+
+
+def load_chatrooms(path: Optional[Path] = None) -> ChatRoomsConfig:
+    """Parse chatrooms.yaml. Returns empty config if file is missing."""
+    global _chatrooms_cache
+    target = path or _PROJECT_ROOT / "chatrooms.yaml"
+    if not target.exists():
+        return ChatRoomsConfig()
+    with open(target) as f:
+        raw = yaml.safe_load(f) or {}
+    _chatrooms_cache = ChatRoomsConfig(
+        chat_rooms=[ChatRoom(**cr) for cr in raw.get("chat_rooms", [])]
+    )
+    return _chatrooms_cache
+
+
+def save_chatrooms(config: ChatRoomsConfig, path: Optional[Path] = None) -> None:
+    """Serialize ChatRoomsConfig back to chatrooms.yaml and update the in-memory cache."""
+    global _chatrooms_cache
+    target = path or _PROJECT_ROOT / "chatrooms.yaml"
+    raw = {
+        "chat_rooms": [
+            cr.model_dump(exclude_none=False)
+            for cr in config.chat_rooms
+        ]
+    }
+    with open(target, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    _chatrooms_cache = config
+
+
 def reload_all():
-    """Force-reload both config files. Useful for dev hot-reload."""
-    global _settings_cache, _personas_cache
+    """Force-reload all config files. Useful for dev hot-reload."""
+    global _settings_cache, _personas_cache, _chatrooms_cache
     _settings_cache = None
     _personas_cache = None
+    _chatrooms_cache = None
     load_settings()
     load_personas()
+    load_chatrooms()

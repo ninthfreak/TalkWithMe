@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TalkWithMe</title>
+    <title>TalkWithMe v3.0</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div id="app">
         <!-- Top bar -->
         <header id="topbar">
-            <h1>TalkWithMe</h1>
+            <h1>TalkWithMe v3.0</h1>
             <div class="topbar-actions">
                 <label for="theme-select" class="theme-label">Theme</label>
                 <select id="theme-select" title="Choose color theme">
@@ -19,6 +19,9 @@
                     <option value="matrix">Matrix</option>
                     <option value="blues">Blues</option>
                 </select>
+                <button id="btn-persona-editor" title="Open persona editor">&#9998; Personas</button>
+                <button id="btn-chat-rooms" title="Manage chat rooms">&#127970; Chat Rooms</button>
+                <button id="btn-settings" title="Open settings">&#9881; Settings</button>
                 <button id="btn-new-chat" title="Start a new chat">New Chat</button>
                 <button id="btn-tts-toggle" title="Toggle TTS playback" class="icon-btn">
                     <span id="tts-icon">&#128266;</span>
@@ -29,6 +32,14 @@
         <div id="main-layout">
             <!-- Left sidebar -->
             <aside id="sidebar">
+                <!-- Chat room selector -->
+                <div id="chat-room-selector">
+                    <h3>Chat Room</h3>
+                    <select id="chat-room-dropdown" title="Choose a chat room">
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+
                 <h3>Who should answer?</h3>
                 <div id="who-chooser">
                     <label class="chooser-option">
@@ -46,6 +57,7 @@
                 </div>
 
                 <h3>Personas</h3>
+                <button id="btn-add-persona" class="btn-add-persona hidden" title="Add personas to this chat room">+ Add Persona</button>
                 <div id="persona-list">
                     <!-- Populated by JS -->
                 </div>
@@ -69,6 +81,279 @@
         </div>
     </div>
 
+    <!-- Persona Editor Modal -->
+    <div id="persona-editor-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="persona-editor-title">
+        <div class="modal-box">
+            <!-- List view -->
+            <div id="pe-list-view">
+                <div class="modal-header">
+                    <h2 id="persona-editor-title">Persona Editor</h2>
+                    <div class="modal-header-actions">
+                        <button id="pe-btn-new" class="btn-accent" title="Create new persona">&#43; New Persona</button>
+                        <button id="pe-btn-close" class="btn-icon-close" title="Close">&#10005;</button>
+                    </div>
+                </div>
+                <div id="pe-list" class="pe-list">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Form view (create / edit) -->
+            <div id="pe-form-view" class="hidden">
+                <div class="modal-header">
+                    <h2 id="pe-form-title">New Persona</h2>
+                    <button id="pe-form-btn-cancel" class="btn-icon-close" title="Cancel">&#10005;</button>
+                </div>
+                <div id="pe-form-error" class="pe-form-error hidden"></div>
+                <form id="pe-form" novalidate>
+                    <div class="form-row">
+                        <label for="pf-name">Name <span class="required">*</span></label>
+                        <input id="pf-name" type="text" maxlength="25" placeholder="Max 25 chars" required>
+                        <span class="field-hint">25 chars max, must be unique (not 'user')</span>
+                    </div>
+                    <div class="form-row">
+                        <label for="pf-description">Description</label>
+                        <input id="pf-description" type="text" maxlength="30" placeholder="Max 30 chars (optional)">
+                    </div>
+                    <div class="form-row">
+                        <label for="pf-system-prompt">System Prompt <span class="required">*</span></label>
+                        <textarea id="pf-system-prompt" maxlength="8192" rows="6" placeholder="System prompt sent to the LLM (max 8192 chars)" required></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label for="pf-router-hints">Router Hints <span class="required">*</span></label>
+                        <input id="pf-router-hints" type="text" maxlength="256" placeholder="Keywords for routing, e.g. science, math" required>
+                        <span class="field-hint">256 chars max</span>
+                    </div>
+                    <div class="form-row form-row-inline">
+                        <div class="form-col">
+                            <label for="pf-avatar-color">Avatar Color</label>
+                            <input id="pf-avatar-color" type="color" value="#FF0000">
+                        </div>
+                        <div class="form-col">
+                            <label for="pf-language">Language</label>
+                            <input id="pf-language" type="text" maxlength="2" minlength="2" placeholder="en" style="width:60px">
+                            <span class="field-hint">2-letter code</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label for="pf-avatar-image">Avatar Image Path</label>
+                        <input id="pf-avatar-image" type="text" placeholder="Path to local image file (optional)">
+                    </div>
+                    <div class="form-row">
+                        <label for="pf-reference-audio">Reference Audio Path</label>
+                        <input id="pf-reference-audio" type="text" placeholder="Path to WAV file for TTS cloning (optional)">
+                    </div>
+                    <div class="form-row">
+                        <label for="pf-reference-audio-transcript">Reference Audio Transcript Path</label>
+                        <input id="pf-reference-audio-transcript" type="text" placeholder="Path to transcript TXT file (optional)">
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="pe-form-btn-cancel2" class="btn-secondary">Cancel</button>
+                        <button type="submit" id="pe-form-btn-save" class="btn-accent">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete confirmation modal -->
+    <div id="pe-confirm-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true">
+        <div class="modal-box modal-box-sm">
+            <div class="modal-header">
+                <h2>Delete Persona</h2>
+            </div>
+            <p id="pe-confirm-msg" class="pe-confirm-msg"></p>
+            <div class="form-actions">
+                <button id="pe-confirm-cancel" class="btn-secondary">Cancel</button>
+                <button id="pe-confirm-delete" class="btn-danger">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Rooms Editor Modal -->
+    <div id="chatrooms-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="chatrooms-title">
+        <div class="modal-box modal-box-sm">
+            <div class="modal-header">
+                <h2 id="chatrooms-title">Chat Rooms</h2>
+                <div class="modal-header-actions">
+                    <button id="cr-btn-new" class="btn-accent" title="Create new chat room">&#43; New Room</button>
+                    <button id="cr-btn-close" class="btn-icon-close" title="Close">&#10005;</button>
+                </div>
+            </div>
+            <div id="cr-form-error" class="pe-form-error hidden"></div>
+            <!-- New room form (initially hidden) -->
+            <div id="cr-new-form" class="hidden">
+                <div class="form-row" style="padding: 12px 20px;">
+                    <label for="cr-name-input">Room Name <span class="required">*</span></label>
+                    <input id="cr-name-input" type="text" maxlength="20" placeholder="Max 20 chars">
+                    <span class="field-hint">Letters, numbers, hyphens, underscores only. 20 chars max, must be unique (not 'default')</span>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="cr-new-cancel" class="btn-secondary">Cancel</button>
+                    <button type="button" id="cr-new-save" class="btn-accent">Create</button>
+                </div>
+            </div>
+            <!-- Room list -->
+            <div id="cr-list" class="cr-list">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Room delete confirmation modal -->
+    <div id="cr-confirm-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cr-confirm-title" aria-describedby="cr-confirm-msg">
+        <div class="modal-box modal-box-sm">
+            <div class="modal-header">
+                <h2 id="cr-confirm-title">Delete Chat Room</h2>
+            </div>
+            <p id="cr-confirm-msg" class="pe-confirm-msg"></p>
+            <div class="form-actions">
+                <button id="cr-confirm-cancel" class="btn-secondary">Cancel</button>
+                <button id="cr-confirm-delete" class="btn-danger">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Persona Picker Modal (for adding personas to a chat room) -->
+    <div id="persona-picker-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="persona-picker-title">
+        <div class="modal-box modal-box-sm">
+            <div class="modal-header">
+                <h2 id="persona-picker-title">Add Personas</h2>
+                <button id="pp-btn-close" class="btn-icon-close" title="Close">&#10005;</button>
+            </div>
+            <div id="pp-list" class="pp-list">
+                <!-- Populated by JS -->
+            </div>
+            <div class="form-actions">
+                <button type="button" id="pp-btn-cancel" class="btn-secondary">Cancel</button>
+                <button type="button" id="pp-btn-add" class="btn-accent">Add Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2 id="settings-title">Settings</h2>
+                <button id="settings-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close settings">&#10005;</button>
+            </div>
+            <div id="settings-error" class="pe-form-error hidden"></div>
+            <form id="settings-form" novalidate>
+                <div class="settings-body">
+                    <!-- LLM Section (always enabled) -->
+                    <fieldset class="settings-section">
+                        <legend>LLM</legend>
+                        <div class="form-row">
+                            <label for="sf-llm-base-url">Base URL</label>
+                            <input id="sf-llm-base-url" type="text" required>
+                        </div>
+                        <div class="form-row">
+                            <label for="sf-llm-model">Model</label>
+                            <input id="sf-llm-model" type="text" required>
+                        </div>
+                        <div class="form-row form-row-inline">
+                            <div class="form-col">
+                                <label for="sf-llm-max-tokens">Max Tokens</label>
+                                <input id="sf-llm-max-tokens" type="number" min="1" required>
+                            </div>
+                            <div class="form-col">
+                                <label for="sf-llm-temperature">Temperature</label>
+                                <input id="sf-llm-temperature" type="number" min="0" max="1" step="0.01" required>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <!-- TTS Section -->
+                    <fieldset class="settings-section">
+                        <legend>
+                            <label class="settings-toggle-label">
+                                <input id="sf-tts-enabled" type="checkbox" class="settings-toggle">
+                                <span class="settings-toggle-slider"></span>
+                                <span class="settings-toggle-text">TTS</span>
+                            </label>
+                        </legend>
+                        <div id="sf-tts-fields" class="settings-fields">
+                            <div class="form-row">
+                                <label for="sf-tts-base-url">Base URL</label>
+                                <input id="sf-tts-base-url" type="text">
+                            </div>
+                            <div class="form-row form-row-inline">
+                                <div class="form-col">
+                                    <label for="sf-tts-num-steps">Step Count <span class="field-hint">(4–20)</span></label>
+                                    <input id="sf-tts-num-steps" type="number" min="4" max="20">
+                                </div>
+                                <div class="form-col">
+                                    <label for="sf-tts-guidance-scale">CFG <span class="field-hint">(1.0–2.0)</span></label>
+                                    <input id="sf-tts-guidance-scale" type="number" min="1.0" max="2.0" step="0.1">
+                                </div>
+                            </div>
+                            <div class="form-row form-row-inline">
+                                <div class="form-col">
+                                    <label for="sf-tts-seed">Seed <span class="field-hint">(0 = random)</span></label>
+                                    <input id="sf-tts-seed" type="number" min="0">
+                                </div>
+                                <div class="form-col">
+                                    <label for="sf-tts-timeout">Timeout <span class="field-hint">(5–300s)</span></label>
+                                    <input id="sf-tts-timeout" type="number" min="5" max="300">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <label class="settings-checkbox-label">
+                                    <input id="sf-tts-streaming" type="checkbox">
+                                    <span>Streaming (sentence-by-sentence)</span>
+                                </label>
+                            </div>
+                            <div class="form-row">
+                                <label for="sf-tts-server-type">Server Type</label>
+                                <input id="sf-tts-server-type" type="text" readonly class="form-input-readonly">
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <!-- STT Section -->
+                    <fieldset class="settings-section">
+                        <legend>
+                            <label class="settings-toggle-label">
+                                <input id="sf-stt-enabled" type="checkbox" class="settings-toggle">
+                                <span class="settings-toggle-slider"></span>
+                                <span class="settings-toggle-text">STT</span>
+                            </label>
+                        </legend>
+                        <div id="sf-stt-fields" class="settings-fields">
+                            <div class="form-row">
+                                <label for="sf-stt-base-url">Base URL</label>
+                                <input id="sf-stt-base-url" type="text">
+                            </div>
+                            <div class="form-row">
+                                <label for="sf-stt-timeout">Timeout <span class="field-hint">(5–300s)</span></label>
+                                <input id="sf-stt-timeout" type="number" min="5" max="300">
+                            </div>
+                        </div>
+                    </fieldset>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" id="settings-btn-cancel" class="btn-secondary">Cancel</button>
+                    <button type="submit" id="settings-btn-save" class="btn-accent">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Load modules in dependency order -->
+    <!-- Be careful with the load order!  -->
+    <!-- state.js first, app.js last.     -->
+    <script src="/static/state.js"></script>
+    <script src="/static/utils.js"></script>
+    <script src="/static/theme.js"></script>
+    <script src="/static/persistence.js"></script>
+    <script src="/static/tts.js"></script>
+    <script src="/static/stt.js"></script>
+    <script src="/static/chat.js"></script>
+    <script src="/static/persona.js"></script>
+    <script src="/static/chatrooms.js"></script>
+    <script src="/static/settings.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

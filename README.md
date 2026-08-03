@@ -2,26 +2,40 @@
 
 A local single-user chat web application that connects to a locally running **llama.cpp** server and supports **multi-persona group chats** with optional **TTS playback**.
 
-As seen on YouTube!: https://www.youtube.com/watch?v=1VPydYNt4R8
+![Main chat interface](screenshots/chat_panel.png)
+
+Follow the development of this app on my YouTube channel:
+
+- Initial creation: https://www.youtube.com/watch?v=1VPydYNt4R8
+- Multi-lingual voice cloning: https://www.youtube.com/watch?v=1yiyFYaUlU4
+- Better TTS support: (coming soon!)
+- MCP integrations: (coming soon!)
 
 ## Features
 
 - Chat with one or more AI personas in a simulated group chat
+- Set up chat rooms and assign personas to them
 - Smart persona routing: let the LLM decide, pick randomly, or choose manually
-- Streaming responses rendered incrementally
-- Optional TTS: AI responses spoken aloud via a local TTS server
+- Optional TTS: AI responses spoken aloud via a TTS server
 - Optional STT: Click the microphone icon to speak your prompt
 - Fully local — no internet required, no authentication
 - Theme chooser in the top-right: Dark (default), Light, Matrix, and Blues
-- Theme preference persists between visits in local browser storage
+- Each room persists its text and audio messages
 
 ## Prerequisites
 
 - Python 3.10+
 - A locally running llama.cpp server with OpenAI-compatible API (e.g., `--api` flag)
-- (Optional) A local TTS/STT REST server with `/synthesize`, `/parse`, and `/health` endpoints.
-   You can use my [server.py](https://github.com/scorbo2/ai-playground/blob/master/dots.tts/server.py)
-   in front of a [dots.tts](https://github.com/studio-dots-ai/dots.tts) server (that's what I use.)
+- (Optional) A local TTS REST server with `/synthesize` and `/health` endpoints.
+   You can use my [dots.tts server.py](https://github.com/scorbo2/ai-playground/blob/master/dots.tts/server.py)
+   in front of a [dots.tts](https://github.com/studio-dots-ai/dots.tts) server.
+   Alternatively, you can use my [Qwen3-TTS server.py](https://github.com/scorbo2/ai-playground/blob/master/qwen3-tts/server.py)
+   running in front of a [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) server. I've tested both successfully.
+- (Optional) An OpenAI-compatible STT server that exposes a `/v1/audio/transcriptions` endpoint
+   accepting multipart form uploads. The `stt.base_url` in `settings.yaml` should point to the
+   server's root (e.g., `http://localhost:8181`), and the app will POST to
+   `{base_url}/v1/audio/transcriptions`. I strongly recommend [whisper-fastapi](https://github.com/heimoshuiyu/whisper-fastapi)
+   as it is very easy to get up and running (and it is in fact what I use with this app).
 
 ## Quick Start
 
@@ -37,9 +51,19 @@ Open `http://localhost:8000` in your browser.
 
 ## Configuration
 
-### `settings.yaml`
+Most settings can be changed in the UI. Behind the scenes, configuration is stored on disk:
 
-Configure your LLM and TTS server endpoints:
+- `settings.yaml` stores LLM, TTS, and STT server endpoints
+- `chatrooms.yaml` stores configured chat rooms (if any)
+- `personas.yaml` stores all personas
+
+### Server settings
+
+The UI offers a "Settings" control in the top right, which brings up the server settings dialog:
+
+![Server settings](screenshots/server_settings.png)
+
+The `settings.yaml` file on disk persists these settings:
 
 ```yaml
 llm:
@@ -56,11 +80,38 @@ tts:
   seed: null
   timeout: 60
   streaming: false
+
+stt:
+  enabled: true
+  base_url: http://localhost:8181
+  timeout: 30
+
+general:
+  persona_name_mentions: true
 ```
 
-### `personas.yaml`
+Note that TTS and STT are both optional! You can mark them as disabled
+and/or leave the base_url field blank or null. The only mandatory
+configuration here is the LLM.
 
-Define your AI personas:
+### Personas
+
+Select the "Personas" control in the top right to bring up the Personas editor:
+
+![Personas editor](screenshots/persona_setup.png)
+
+In this editor, you can:
+
+- **Create** a new persona with the **+ New Persona** button
+- **Edit** any existing persona's properties inline
+- **Clone** a persona (a numeric suffix is added to the name, e.g. `Mark_2`)
+- **Delete** a persona (with a confirmation prompt)
+
+Changes are persisted immediately to `personas.yaml` and the sidebar persona list is refreshed automatically. No server restart is needed.
+
+> **Note**: renaming or deleting a persona does not modify messages already visible in the chat panel — those retain the name they were created with.
+
+The `personas.yaml` file persists these settings:
 
 ```yaml
 personas:
@@ -74,6 +125,10 @@ personas:
     reference_audio_transcript: null
     language: "en"
 ```
+
+(Note that the `language` field does not control what language the persona speaks. It refers
+specifically to the language of the supplied reference audio, if any, so that voice cloning
+can be more accurate)
 
 #### Persona fields
 
@@ -91,38 +146,66 @@ personas:
 
 **TTS support**: Both `reference_audio` and `reference_audio_transcript` must be set for a persona to have TTS capability.
 
-## API Endpoints
+#### Who answers next?
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | Chat UI |
-| `GET` | `/api/personas` | List all personas |
-| `GET` | `/api/personas/{name}/avatar` | Serve persona avatar image |
-| `GET` | `/api/session` | Current session state |
-| `POST` | `/api/session/new` | Reset session |
-| `POST` | `/api/session/personas` | Update active personas |
-| `POST` | `/api/chat` | Send message (SSE stream response) |
-| `GET` | `/api/tts/health` | TTS availability status |
-| `POST` | `/api/tts` | Synthesize speech from text |
-| `POST` | `/api/stt` | Transcribe speech from voice |
+The "Who should answer?" chooser in the UI offers the following options:
+- **LLM decides** - based on your prompt, and the personas currently in the room, the LLM will decide who is best suited to answer.
+- **Surprise me** - each prompt causes a randomly-selected persona in the current room to answer.
+- **Selected persona** - the highlighted persona in the persona list will answer next.
 
-## Project Structure
+Note that if `persona_name_mentions` is `true` in `settings.yaml`, mentioning a specific persona in your prompt will override
+the above settings and force that persona to answer you. For example, prompting "What do you think, Alex?" will automatically
+switch "Who should answer?" to "Selected persona", and make Alex the selected persona, before proceeding with the chat flow.
+If you don't like this feature, you can set `persona_name_mentions` to `false` and restart the application. (There is currently
+no UI control over this setting - it has to be hand-edited in `settings.yaml` and is only read once on startup).
 
+### Chat rooms
+
+Selecting the "Chat rooms" control in the top right brings up the chat room editor:
+
+![Chat room setup](screenshots/chatroom_setup.png)
+
+Here, you can:
+
+- **Create** a new chat room (names must be unique)
+- **Delete** a chat room (and its chat history)
+
+The `chatrooms.yaml` file persists these settings:
+
+```yaml
+chat_rooms:
+- name: TNG
+  persona_names:
+  - Worf
+  - Troi
+  - Data
+  - Picard
+- name: Language_learning
+  persona_names:
+  - English expert
+  - German expert
+  - Spanish expert
+- name: chit-chat
+  persona_names:
+  - kstew
 ```
-TalkWithMe/
-├── app/
-│   ├── main.py              # FastAPI entry point
-│   ├── config.py            # YAML config loading
-│   ├── models.py            # Pydantic models
-│   ├── session.py           # In-memory session state
-│   ├── routers/             # API route handlers
-│   └── services/            # LLM and TTS clients
-├── static/                  # CSS and JavaScript
-├── templates/               # Jinja2 HTML templates
-├── personas.yaml            # Persona definitions
-├── settings.yaml            # Server configuration
-└── requirements.txt
-```
+
+Personas can be added/removed to a chat room via the main chat interface's left panel:
+
+![Left panel](screenshots/left_panel.png)
+
+The "Chat room" control at the top allows you to switch chat rooms. The messages in the current
+chat room are persisted, so you can come back later without losing anything.
+
+Select "Add persona" to add personas to the current room.
+
+Click the red "x" control next to a persona in the list to unassign them from this room.
+This does not delete the persona - they are still available to be assigned to other rooms.
+A persona can be assigned to any number of rooms simultaneously.
+
+## API Endpoints and project structure
+
+Moved to [copilot-instructions.md](.github/copilot-instructions.md)
 
 ## Cloning non-English voices
 
@@ -141,11 +224,64 @@ If you prefer to hear the persona's response in one clear, contiguous audio play
 
 If you want to hear each sentence as soon as it has been synthesized, without having to wait for the ENTIRE response to be synthesized, and you don't mind the occasional pause in between sentences, then enable streaming mode in configuration.
 
-## Notes
+## Chat persistence
 
-- The TTS server is optional. If unreachable, TTS/STT is silently disabled.
-- Single-user design: only one active chat session exists at a time.
-- "New Chat" clears all conversation history.
+Each chat room persists its chat history to a dedicated subdirectory in the top-level `chatrooms` directory.
+For example, a chat room named `chit-chat` will persist to `<projectDir>/chatrooms/chit-chat`. All text and
+audio are saved there. If the history gets too long, you may overflow the context limit of the LLM. You can
+select "New Chat" at any time to clear the chat history and start over. 
+
+Each chat room persists separately! Selecting "New Chat" in the `chit-chat-1` room will not clear the
+history in the `chit-chat-2` room, and vice versa.
+
+## Replaying audio
+
+A small "replay" icon will appear underneath messages that have audio associated with them. This applies both
+to persona-generated messages that were sent to the TTS server, and also user-supplied microphone input.
+Clicking this "replay" button will replay the audio for that message. 
+
+In non-streaming mode, a single "replay" button will be shown underneath each persona message:
+
+![Chat replay non-streaming](screenshots/chat_audio_replay.png)
+
+In streaming mode, there will be one replay icon per sentence in the response. Clicking each button
+will play the respective sentence:
+
+![Chat replay streaming](screenshots/chat_audio_replay_streaming.png)
+
+## Detailed setup guide
+
+I have tested this application against `llama-server` running on a local server.
+Security and authentication were **not** considered, as the intent is for everything
+to run on a secure local network. Other LLM providers such as LMStudio should also
+work, if they provide an OpenAI-compatible API.
+
+Because both TTS and STT are optional, you have several options for running the
+application, depending on how much VRAM you can throw at it.
+
+### Minimal setup (~4GB VRAM)
+
+- Recommended LLM: Gemma 4 E4B Q4
+- Recommended TTS: (disabled)
+- Recommended STT: `whisper-fastapi`, any model, running on CPU (not on cuda!)
+
+### Modest setup (~12GB VRAM)
+
+- Recommended LLM: Gemma 4 E4B Q4
+- Recommended TTS: `Qwen3-TTS`
+- Recommended STT: `whisper-fastapi`, small model, running on CPU or cuda
+
+### Large setup (~16GB VRAM)
+
+- Recommended LLM: Gemma 4 E4B Q6
+- Recommended TTS: Either `Qwen3-TTS` or `dots.tts`
+- Recommended STT: `whisper-fastapi`, large-v3-turbo, running on cuda
+
+### X-Large setup (24GB or higher)
+
+- Recommended LLM: Gemma 4 26B A4B
+- Recommended TTS: Either `Qwen3-TTS` or `dots.tts`
+- Recommended STT: `whisper-fastapi`, large-v3-turbo, running on cuda
 
 ## Release history
 
@@ -160,6 +296,19 @@ If you want to hear each sentence as soon as it has been synthesized, without ha
   - Better size and positioning of avatar images (#3)
   - Allow microphone voice input for prompting (#6)
   - Color theme chooser with persistence (#12)
+- **2026-08-02** v3.0
+  - In-app persona editor: create, edit, clone, and delete personas from the browser UI (#11)
+  - Migrate STT to OpenAI-compatible `/v1/audio/transcriptions` endpoint (#21)
+  - Split TTS and STT into separate features with separate configuration (#19)
+  - Add UI for server connection settings (#23)
+  - Clicking a persona now updates "Who should answer?" to "Selected persona" (#24)
+  - Added configurable chat rooms for grouping personas (#18)
+  - Mentioning a persona causes them to answer next (can be disabled in settings.yaml) (#28)
+  - Break up the `app.js` monolith for code maintainability (#29)
+  - Chat persistence (#4)
+  - Save generated audio and allow replay (#5)
+  - Add screenshots and better setup guidance to README (#17)
+  - Add read-only "server type" field in TTS server settings (Qwen3-TTS or dots.tts) (#36)
 
 ## License
 

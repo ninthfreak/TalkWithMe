@@ -163,8 +163,8 @@ html, body {
 }
 
 /* --------------------------------------------------------------------------
-   Sidebar
-   -------------------------------------------------------------------------- */
+    Sidebar
+    -------------------------------------------------------------------------- */
 #sidebar {
     width: var(--sidebar-width);
     min-width: var(--sidebar-width);
@@ -183,6 +183,74 @@ html, body {
     color: var(--text-muted);
     letter-spacing: 1px;
     margin-top: 8px;
+}
+
+/* Chat room selector dropdown */
+#chat-room-selector {
+    margin-bottom: 4px;
+}
+
+#chat-room-dropdown {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 0.85rem;
+    width: 100%;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+#chat-room-dropdown:focus {
+    border-color: var(--accent);
+}
+
+/* "Add persona" button in sidebar */
+.btn-add-persona {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px dashed var(--border-color);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    width: 100%;
+    text-align: center;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-add-persona:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    border-style: solid;
+    color: #fff;
+}
+
+.btn-add-persona.hidden {
+    display: none;
+}
+
+/* Remove persona "x" button on persona cards */
+.persona-remove-btn {
+    background: transparent;
+    border: none;
+    color: #e74c3c;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+    opacity: 0.5;
+}
+
+.persona-remove-btn:hover {
+    background: rgba(231, 76, 60, 0.2);
+    opacity: 1;
 }
 
 /* Who-chooser */
@@ -555,4 +623,667 @@ html, body {
     font-size: 0.8rem;
     color: var(--text-muted);
     opacity: 0.6;
+}
+
+/* --------------------------------------------------------------------------
+   Persona Editor Modal
+   -------------------------------------------------------------------------- */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.modal-overlay.hidden {
+    display: none;
+}
+
+.modal-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    width: 100%;
+    max-width: 680px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.modal-box-sm {
+    max-width: 400px;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.modal-header h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.modal-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.btn-icon-close {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    line-height: 1;
+    transition: color 0.15s, background 0.15s;
+}
+
+.btn-icon-close:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.btn-accent {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn-accent:hover {
+    background: var(--accent-hover);
+}
+
+.btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn-secondary:hover {
+    background: var(--border-color);
+}
+
+.btn-danger {
+    background: #c0392b;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn-danger:hover {
+    background: #e74c3c;
+}
+
+/* Persona editor list */
+.pe-list {
+    overflow-y: auto;
+    padding: 12px 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 60px;
+}
+
+.pe-list-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+}
+
+.pe-list-item-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #fff;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.pe-list-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.pe-list-item-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.pe-list-item-desc {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pe-list-item-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.pe-list-item-actions button {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.pe-list-item-actions button:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.pe-list-item-actions button.btn-delete:hover {
+    background: #c0392b;
+    border-color: #c0392b;
+}
+
+.pe-empty {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 24px 0;
+}
+
+/* Persona editor form */
+#pe-form-view {
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+#pe-form {
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+}
+
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.form-row label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.required {
+    color: var(--accent);
+}
+
+.field-hint {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.form-row input[type="text"],
+.form-row textarea {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.88rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+    resize: vertical;
+}
+
+.form-row input[type="text"]:focus,
+.form-row textarea:focus {
+    border-color: var(--accent);
+}
+
+/* Read-only fields — slightly muted, no focus ring */
+.form-row input.form-input-readonly {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    cursor: default;
+}
+
+.form-row input.form-input-readonly:focus {
+    border-color: var(--border-color);
+}
+
+.form-row input[type="color"] {
+    width: 48px;
+    height: 34px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-input);
+    cursor: pointer;
+    padding: 2px;
+}
+
+.form-row-inline {
+    flex-direction: row;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+.form-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.pe-form-error {
+    background: rgba(192, 57, 43, 0.18);
+    color: #e74c3c;
+    border: 1px solid #c0392b;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    margin: 0 20px 0 20px;
+}
+
+.pe-form-error.hidden {
+    display: none;
+}
+
+.pe-confirm-msg {
+    padding: 16px 20px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   Settings Modal
+   ========================================================================== */
+
+#settings-form {
+    display: flex;
+    flex-direction: column;
+}
+
+.settings-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-height: 65vh;
+}
+
+/* Fieldset sections */
+.settings-section {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.settings-section legend {
+    padding: 0 6px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: default;
+}
+
+/* Settings fields container (shown/hidden based on toggle) */
+.settings-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.settings-fields.disabled {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+/* Toggle switch (for TTS/STT enable/disable) */
+.settings-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.settings-toggle {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.settings-toggle-slider {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+    background: var(--border-color);
+    border-radius: 10px;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.settings-toggle-slider::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: var(--text-secondary);
+    border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.settings-toggle:checked + .settings-toggle-slider {
+    background: var(--accent);
+}
+
+.settings-toggle:checked + .settings-toggle-slider::after {
+    transform: translateX(16px);
+    background: #fff;
+}
+
+.settings-toggle-text {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Styled checkbox (for streaming toggle) */
+.settings-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+.settings-checkbox-label input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+/* Number input styling for settings */
+.settings-body .form-row input[type="number"] {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.88rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+    width: 100%;
+}
+
+.settings-body .form-row input[type="number"]:focus {
+    border-color: var(--accent);
+}
+
+/* Remove spinner arrows from number inputs */
+.settings-body input[type="number"]::-webkit-inner-spin-button,
+.settings-body input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.settings-body input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* ==========================================================================
+   Chat Rooms Editor Modal
+   ========================================================================== */
+
+.cr-list {
+    overflow-y: auto;
+    padding: 12px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 60px;
+    max-height: 50vh;
+}
+
+.cr-list-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+}
+
+.cr-list-item-name {
+    flex: 1;
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cr-list-item-count {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.cr-list-item-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+}
+
+.cr-list-item-delete:hover {
+    color: #e74c3c;
+    background: rgba(231, 76, 60, 0.15);
+}
+
+.cr-empty {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 24px 0;
+}
+
+/* ==========================================================================
+   Persona Picker Modal (for adding to chat rooms)
+   ========================================================================== */
+
+.pp-list {
+    overflow-y: auto;
+    padding: 12px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 60px;
+    max-height: 50vh;
+}
+
+.pp-list-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    border: 1px solid transparent;
+}
+
+.pp-list-item:hover {
+    background: var(--bg-tertiary);
+}
+
+.pp-list-item.selected {
+    background: var(--bg-tertiary);
+    border-color: var(--accent);
+}
+
+.pp-list-item-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.pp-list-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.pp-list-item-name {
+    font-weight: 600;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pp-list-item-desc {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Custom checkbox for persona picker */
+.pp-checkbox {
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.pp-empty {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 24px 0;
+}
+
+/* ==========================================================================
+   Message audio playback (persisted chat)
+   ========================================================================== */
+
+/* Wrapper for user messages — keeps bubble + audio stacked vertically
+   despite the row using flex-direction: row-reverse. */
+.user-message-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.message-audio {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+
+.audio-play-btn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1;
+}
+
+.audio-play-btn:hover {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.audio-play-btn:active {
+    transform: scale(0.95);
 }
