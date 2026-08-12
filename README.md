@@ -309,6 +309,7 @@ application, depending on how much VRAM you can throw at it.
   - Save generated audio and allow replay (#5)
   - Add screenshots and better setup guidance to README (#17)
   - Add read-only "server type" field in TTS server settings (Qwen3-TTS or dots.tts) (#36)
+- **TODO All release notes for v4 go here**
 
 ## License
 
