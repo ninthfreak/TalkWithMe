@@ -301,8 +301,8 @@ async function createChatRoom() {
         crFormError.classList.remove("hidden");
         return;
     }
-    if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-        crFormError.textContent = "Name may only contain letters, numbers, hyphens, and underscores.";
+    if (!/^[a-zA-Z0-9 _-]+$/.test(name)) {
+        crFormError.textContent = "Name may only contain letters, numbers, spaces, hyphens, and underscores.";
         crFormError.classList.remove("hidden");
         return;
     }

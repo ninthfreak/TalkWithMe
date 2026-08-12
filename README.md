@@ -310,6 +310,7 @@ application, depending on how much VRAM you can throw at it.
   - Add screenshots and better setup guidance to README (#17)
   - Add read-only "server type" field in TTS server settings (Qwen3-TTS or dots.tts) (#36)
 - **TODO All release notes for v4 go here**
+  - Relax chat room name restrictions to allow spaces (#45)
 
 ## License
 
