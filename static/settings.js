@@ -138,6 +138,7 @@ function collectSettingsFromForm() {
         general: {
             persona_name_mentions: personaNameMentionsEnabled,
             max_persona_replies: maxPersonaReplies,
+            max_turns_for_context: maxTurnsForContext ?? 6,
         },
         tts: {
             enabled: sfTtsEnabled.checked,
@@ -222,6 +223,7 @@ async function submitSettings(e) {
         if (data.general != null) {
             personaNameMentionsEnabled = data.general.persona_name_mentions;
             maxPersonaReplies = data.general.max_persona_replies ?? 1;
+            maxTurnsForContext = data.general.max_turns_for_context ?? 6;
         }
         // Re-check service health to update UI availability after settings change
         await checkTTSHealth();

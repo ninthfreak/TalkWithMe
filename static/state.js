@@ -13,6 +13,7 @@ let personas = [];
 let selectedPersona = null;
 let personaNameMentionsEnabled = true;
 let maxPersonaReplies = 1;
+let maxTurnsForContext = 6;
 let ttsEnabled = false;
 let ttsAvailable = false;
 let ttsStreaming = false;

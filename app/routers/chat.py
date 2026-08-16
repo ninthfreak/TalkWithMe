@@ -146,6 +146,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
 
     if not eligible:
         yield f'data: {json.dumps({"type": "error", "message": "No eligible personas for this room"})}\n\n'
+        yield f'data: {json.dumps({"type": "complete"})}\n\n'
         return
 
     settings = get_settings()

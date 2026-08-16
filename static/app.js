@@ -40,6 +40,7 @@ async function loadGeneralSettings() {
         if (data.general != null) {
             personaNameMentionsEnabled = data.general.persona_name_mentions;
             maxPersonaReplies = data.general.max_persona_replies ?? 1;
+            maxTurnsForContext = data.general.max_turns_for_context ?? 6;
         }
     } catch (err) {
         console.warn("Failed to load general settings, using defaults:", err);
