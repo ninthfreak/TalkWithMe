@@ -4,11 +4,14 @@ Loads settings.yaml and personas.yaml from the project root.
 Caches parsed config so we're not hitting disk on every request.
 """
 
+import logging
 from pathlib import Path
 from typing import List, Optional
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +69,8 @@ class STTConfig(BaseModel):
 class GeneralConfig(BaseModel):
     """Application-wide feature flags and preferences."""
     persona_name_mentions: bool = True
+    max_persona_replies: int = Field(default=1, ge=1, le=4)
+    max_turns_for_context: int = Field(default=6, ge=1, le=50, description="Max history turns sent to the LLM")
 
 
 class AppSettings(BaseModel):
@@ -88,7 +93,7 @@ class Persona(BaseModel):
     avatar_image: Optional[str] = None
     reference_audio: Optional[str] = None
     reference_audio_transcript: Optional[str] = None
-    language: str = "en"
+    reference_audio_language: str = "en"
 
     @property
     def tts_capable(self) -> bool:
@@ -108,6 +113,7 @@ class ChatRoom(BaseModel):
     """A named grouping of personas."""
     name: str
     persona_names: List[str] = Field(default_factory=list)
+    echo_chamber: bool = False
 
 
 class ChatRoomsConfig(BaseModel):
@@ -142,16 +148,29 @@ def load_settings(path: Optional[Path] = None) -> AppSettings:
 
 
 def load_personas(path: Optional[Path] = None) -> PersonasConfig:
-    """Parse personas.yaml. Returns empty list if file is missing."""
+    """Parse personas.yaml. Returns empty list if file is missing.
+
+    Migrates the legacy 'language' key to 'reference_audio_language' on the
+    fly, so existing personas.yaml files from before the rename still load
+    without requiring manual edits.
+    """
     global _personas_cache
     target = path or _PROJECT_ROOT / "personas.yaml"
     if not target.exists():
         return PersonasConfig()
     with open(target) as f:
         raw = yaml.safe_load(f) or {}
-    _personas_cache = PersonasConfig(
-        personas=[Persona(**p) for p in raw.get("personas", [])]
-    )
+    migrated = []
+    for p in raw.get("personas", []):
+        if "language" in p and "reference_audio_language" not in p:
+            name = p.get("name", "<unknown>")
+            logger.info(
+                "Persona '%s': migrating legacy 'language' key to 'reference_audio_language'",
+                name,
+            )
+            p["reference_audio_language"] = p.pop("language")
+        migrated.append(p)
+    _personas_cache = PersonasConfig(personas=[Persona(**p) for p in migrated])
     return _personas_cache
 
 

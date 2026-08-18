@@ -43,7 +43,7 @@ class PersonaCreateRequest(BaseModel):
     avatar_image: Optional[str] = None
     reference_audio: Optional[str] = None
     reference_audio_transcript: Optional[str] = None
-    language: str = Field(default="en", min_length=2, max_length=2)
+    reference_audio_language: str = Field(default="en", min_length=2, max_length=2)
 
 
 class PersonaUpdateRequest(PersonaCreateRequest):
@@ -89,7 +89,7 @@ class PersonaDetailResponse(BaseModel):
     avatar_image: Optional[str] = None
     reference_audio: Optional[str] = None
     reference_audio_transcript: Optional[str] = None
-    language: str
+    reference_audio_language: str
     tts_capable: bool = False
 
 
@@ -194,6 +194,8 @@ class STTSettingsRequest(BaseModel):
 class GeneralSettingsRequest(BaseModel):
     """General configuration from the settings editor."""
     persona_name_mentions: bool = True
+    max_persona_replies: int = Field(default=1, ge=1, le=4)
+    max_turns_for_context: int = Field(default=6, ge=1, le=50)
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -233,6 +235,8 @@ class STTSettingsResponse(BaseModel):
 class GeneralSettingsResponse(BaseModel):
     """General configuration for the frontend."""
     persona_name_mentions: bool
+    max_persona_replies: int
+    max_turns_for_context: int
 
 
 class SettingsResponse(BaseModel):
@@ -263,6 +267,7 @@ class ChatRoomResponse(BaseModel):
     """A chat room returned to the frontend."""
     name: str
     persona_names: List[str] = Field(default_factory=list)
+    echo_chamber: bool = False
 
 
 class ChatRoomCreateRequest(BaseModel):
@@ -273,3 +278,8 @@ class ChatRoomCreateRequest(BaseModel):
 class AssignPersonasRequest(BaseModel):
     """Assign personas to a chat room."""
     persona_names: List[str] = Field(..., min_length=1)
+
+
+class EchoChamberRequest(BaseModel):
+    """Toggle echo chamber mode for a chat room."""
+    echo_chamber: bool

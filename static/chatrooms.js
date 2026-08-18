@@ -94,6 +94,12 @@ function applyChatRoomFilter() {
 
     // Update dropdown selection
     chatRoomDropdown.value = currentChatRoom;
+
+    // Update echo chamber checkbox state (case-insensitive, matching backend behavior)
+    const roomInfo = allChatRooms.find(r => r.name.toLowerCase() === currentChatRoom.toLowerCase());
+    const echoEnabled = roomInfo ? roomInfo.echo_chamber : false;
+    echoChamberToggle.checked = echoEnabled;
+    echoChamberToggle.disabled = !isActiveRoom;
 }
 
 /**
@@ -101,7 +107,13 @@ function applyChatRoomFilter() {
  */
 function renderChatRoomDropdown() {
     chatRoomDropdown.innerHTML = "";
-    for (const room of allChatRooms) {
+    // "default" (All Personas) always first; remainder sorted alphabetically, case-insensitive
+    const sorted = [...allChatRooms].sort((a, b) => {
+        if (a.name === "default") return -1;
+        if (b.name === "default") return 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    });
+    for (const room of sorted) {
         const opt = document.createElement("option");
         opt.value = room.name;
         opt.textContent = room.name === "default" ? "All Personas" : room.name;
@@ -117,6 +129,11 @@ function setupChatRoomEventListeners() {
     // Dropdown change: switch rooms
     chatRoomDropdown.addEventListener("change", () => {
         switchChatRoom(chatRoomDropdown.value);
+    });
+
+    // Echo chamber toggle
+    echoChamberToggle.addEventListener("change", () => {
+        updateEchoChamber(currentChatRoom, echoChamberToggle.checked);
     });
 
     // "Add persona" button in sidebar
@@ -179,6 +196,40 @@ async function switchChatRoom(roomName) {
 }
 
 /**
+ * Persist echo chamber toggle for the current chat room.
+ */
+async function updateEchoChamber(roomName, enabled) {
+    if (roomName === "default") {
+        // Default room cannot be modified
+        echoChamberToggle.checked = false;
+        return;
+    }
+    // Skip no-op to avoid unnecessary PUTs (and handle case-insensitive room matching)
+    const currentRoom = allChatRooms.find(r => r.name.toLowerCase() === roomName.toLowerCase());
+    if (currentRoom && currentRoom.echo_chamber === enabled) {
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/chatrooms/${encodeURIComponent(roomName)}/echo-chamber`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ echo_chamber: enabled }),
+        });
+        if (!resp.ok) {
+            console.error("Failed to update echo chamber:", resp.status);
+            // Revert UI on failure
+            echoChamberToggle.checked = !enabled;
+            return;
+        }
+        // Reload from server to sync all state (persona lists, echo flag, etc.)
+        await loadChatRooms();
+    } catch (err) {
+        console.error("Update echo chamber error:", err);
+        echoChamberToggle.checked = !enabled;
+    }
+}
+
+/**
  * Remove a persona from the current chat room.
  */
 async function removePersonaFromRoom(personaName) {
@@ -230,8 +281,10 @@ function closeChatRoomsEditor() {
 function renderChatRoomList() {
     crListEl.innerHTML = "";
 
-    // Only show non-default rooms
-    const rooms = allChatRooms.filter(r => r.name !== "default");
+    // Only show non-default rooms, sorted alphabetically (case-insensitive)
+    const rooms = allChatRooms
+        .filter(r => r.name !== "default")
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 
     if (rooms.length === 0) {
         crListEl.innerHTML = '<p class="cr-empty">No chat rooms yet. Click &ldquo;+ New Room&rdquo; to create one.</p>';
@@ -301,8 +354,8 @@ async function createChatRoom() {
         crFormError.classList.remove("hidden");
         return;
     }
-    if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-        crFormError.textContent = "Name may only contain letters, numbers, hyphens, and underscores.";
+    if (!/^[a-zA-Z0-9 _-]+$/.test(name)) {
+        crFormError.textContent = "Name may only contain letters, numbers, spaces, hyphens, and underscores.";
         crFormError.classList.remove("hidden");
         return;
     }

@@ -12,6 +12,8 @@
 let personas = [];
 let selectedPersona = null;
 let personaNameMentionsEnabled = true;
+let maxPersonaReplies = 1;
+let maxTurnsForContext = 6;
 let ttsEnabled = false;
 let ttsAvailable = false;
 let ttsStreaming = false;
@@ -45,10 +47,9 @@ let isPlayingAudioBuffer = false;
 
 // Chat persistence — track message IDs for audio association
 let pendingUserMessageId = null; // UUID generated before sending, used for STT audio
-let currentAssistantMessageId = null; // UUID from server's "done" event, used for TTS audio
-// Buffers audio fetched during streaming TTS (before message_id is known).
-// Each entry: { audio_base64, mime_type }. Flushed when "done" event arrives.
-let ttsAudioBuffer = [];
+// UUID issued by the server in the "start" event; stamped onto TTS items at enqueue time
+let currentAssistantMessageId = null;
+let currentAssistantRow = null; // The active assistant bubble row (updated on each "start" event)
 
 const THEME_STORAGE_KEY = "talkwithme_theme";
 
@@ -69,6 +70,7 @@ const themeSelectEl = document.getElementById("theme-select");
 
 // Chat room selector (used by chatrooms.js)
 const chatRoomDropdown = document.getElementById("chat-room-dropdown");
+const echoChamberToggle = document.getElementById("echo-chamber-toggle");
 const btnAddPersona = document.getElementById("btn-add-persona");
 
 // Persona Editor (used by persona.js)
@@ -88,7 +90,7 @@ const pfDescription = document.getElementById("pf-description");
 const pfSystemPrompt = document.getElementById("pf-system-prompt");
 const pfRouterHints = document.getElementById("pf-router-hints");
 const pfAvatarColor = document.getElementById("pf-avatar-color");
-const pfLanguage = document.getElementById("pf-language");
+const pfReferenceAudioLanguage = document.getElementById("pf-reference-audio-language");
 const pfAvatarImage = document.getElementById("pf-avatar-image");
 const pfReferenceAudio = document.getElementById("pf-reference-audio");
 const pfReferenceAudioTx = document.getElementById("pf-reference-audio-transcript");
@@ -137,3 +139,11 @@ const sfSttEnabled = document.getElementById("sf-stt-enabled");
 const sfSttFields = document.getElementById("sf-stt-fields");
 const sfSttBaseUrl = document.getElementById("sf-stt-base-url");
 const sfSttTimeout = document.getElementById("sf-stt-timeout");
+
+// General Settings Modal (used by gen-settings.js)
+const genSettingsOverlay = document.getElementById("gen-settings-overlay");
+const genSettingsForm = document.getElementById("gen-settings-form");
+const genSettingsError = document.getElementById("gen-settings-error");
+const gsfMaxPersonaReplies = document.getElementById("gsf-max-persona-replies");
+const gsfPersonaNameMentions = document.getElementById("gsf-persona-name-mentions");
+const gsfMaxTurnsForContext = document.getElementById("gsf-max-turns-for-context");

@@ -88,6 +88,8 @@ stt:
 
 general:
   persona_name_mentions: true
+  max_persona_replies: 1
+  max_turns_for_context: 6
 ```
 
 Note that TTS and STT are both optional! You can mark them as disabled
@@ -123,10 +125,10 @@ personas:
     avatar_image: null
     reference_audio: null
     reference_audio_transcript: null
-    language: "en"
+    reference_audio_language: "en"
 ```
 
-(Note that the `language` field does not control what language the persona speaks. It refers
+(Note that the `reference_audio_language` field does not control what language the persona speaks. It refers
 specifically to the language of the supplied reference audio, if any, so that voice cloning
 can be more accurate)
 
@@ -142,7 +144,7 @@ can be more accurate)
 | `avatar_image` | Path to a local image file (optional) |
 | `reference_audio` | Path to a WAV file for TTS voice cloning (optional) |
 | `reference_audio_transcript` | Path to a TXT file with the audio transcript (required with `reference_audio`) |
-| `language` | Two-letter language code describing the reference audio (defaults to `en`) |
+| `reference_audio_language` | Two-letter language code describing the reference audio (defaults to `en`) |
 
 **TTS support**: Both `reference_audio` and `reference_audio_transcript` must be set for a persona to have TTS capability.
 
@@ -180,6 +182,7 @@ chat_rooms:
   - Troi
   - Data
   - Picard
+  echo_chamber: false
 - name: Language_learning
   persona_names:
   - English expert
@@ -188,6 +191,7 @@ chat_rooms:
 - name: chit-chat
   persona_names:
   - kstew
+  echo_chamber: true
 ```
 
 Personas can be added/removed to a chat room via the main chat interface's left panel:
@@ -211,7 +215,7 @@ Moved to [copilot-instructions.md](.github/copilot-instructions.md)
 
 If your reference audio is in English, you're all set.
 
-If your reference audio is in some other language, you must specify the language code in the `language` field for the persona in question. This helps the voice cloner understand the reference audio. This may also prevent the cloned voice from speaking in languages other than the reference audio language, but your mileage may vary.
+If your reference audio is in some other language, you must specify the language code in the `reference_audio_language` field for the persona in question. This helps the voice cloner understand the reference audio. This may also prevent the cloned voice from speaking in languages other than the reference audio language, but your mileage may vary.
 
 ## Streaming TTS responses
 
@@ -223,6 +227,10 @@ If `streaming` is enabled in the TTS configuration, text responses from AI perso
 If you prefer to hear the persona's response in one clear, contiguous audio playback, and you don't mind the lag time for audio playback to begin, leave streaming mode disabled in configuration (this is the default).
 
 If you want to hear each sentence as soon as it has been synthesized, without having to wait for the ENTIRE response to be synthesized, and you don't mind the occasional pause in between sentences, then enable streaming mode in configuration.
+
+## Persona-to-persona chat
+
+By default, only one AI persona in the current chat room will answer your prompt. You can make it feel more like a group chat by turning up the `max_persona_replies` option in `settings.yaml` (or by visiting the settings dialog). You can choose any number between 1 and 4. The given number of AI personas will answer your prompt (or reply to the persona who responded before them). Your personas may argue amongst themselves, depending on their respective system prompts!
 
 ## Chat persistence
 
@@ -248,6 +256,12 @@ In streaming mode, there will be one replay icon per sentence in the response. C
 will play the respective sentence:
 
 ![Chat replay streaming](screenshots/chat_audio_replay_streaming.png)
+
+## Echo chamber
+
+Enabling the "echo chamber" option in a chat room will cause the responding persona to simply echo back
+whatever you type or speak, verbatim. This is useful with TTS servers, if you want to hear a persona
+speak a specific line of dialogue. This option is disabled by default.
 
 ## Detailed setup guide
 
@@ -309,6 +323,17 @@ application, depending on how much VRAM you can throw at it.
   - Save generated audio and allow replay (#5)
   - Add screenshots and better setup guidance to README (#17)
   - Add read-only "server type" field in TTS server settings (Qwen3-TTS or dots.tts) (#36)
+- **2026-08-18** v4.0
+  - Relax chat room name restrictions to allow spaces (#45)
+  - Rename `language` to `reference_audio_language` in persona config (#46)
+  - Avoid Jinja2 version 3.1.5 as a mitigation for #50
+  - Add "echo chamber" option to chat rooms (#51)
+  - Add persona-to-persona chat with new option `max_persona_replies` (#43)
+  - Fix scroll problem in Personas dialog (#58)
+  - Fix audio misattribution bug (#62)
+  - Expose `max_turns_for_context` in config, and wire it up properly (#61)
+  - Force UTF-8 for history file writing, and make it atomic (#49)
+  - Fix chatroom sorting in UI (#66)
 
 ## License
 
