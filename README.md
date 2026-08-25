@@ -336,6 +336,8 @@ application, depending on how much VRAM you can throw at it.
   - Expose `max_turns_for_context` in config, and wire it up properly (#61)
   - Force UTF-8 for history file writing, and make it atomic (#49)
   - Fix chatroom sorting in UI (#66)
+- **Work in progress; update with release date when ready** v5.0
+  - TODO release notes for v5 go here
 
 ## License
 
