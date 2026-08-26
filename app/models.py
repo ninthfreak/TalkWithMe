@@ -194,11 +194,18 @@ class STTSettingsRequest(BaseModel):
 
 
 class GeneralSettingsRequest(BaseModel):
-    """General configuration from the settings editor."""
-    persona_name_mentions: bool = True
-    max_persona_replies: int = Field(default=1, ge=1, le=4)
-    max_turns_for_context: int = Field(default=6, ge=1, le=50)
-    show_tool_calls: bool = True
+    """General configuration from the settings editor.
+
+    A partial update: all fields are optional, and omitted fields (None)
+    keep their current values (see update_settings in routers/settings.py).
+    With required-with-default fields, any client that didn't manage a
+    field silently reset it to its default — e.g. the Servers dialog used
+    to wipe out show_tool_calls on every save.
+    """
+    persona_name_mentions: Optional[bool] = None
+    max_persona_replies: Optional[int] = Field(default=None, ge=1, le=4)
+    max_turns_for_context: Optional[int] = Field(default=None, ge=1, le=50)
+    show_tool_calls: Optional[bool] = None
 
 
 class SettingsUpdateRequest(BaseModel):

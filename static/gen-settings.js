@@ -119,9 +119,11 @@ async function submitGenSettings(e) {
             return showGenSettingsError(extractApiErrorMessage(err, resp.status));
         }
 
-        // Sync in-memory state
+        // Sync in-memory state (forgetting one of these lets the next
+        // settings save from another dialog persist a stale value)
         personaNameMentionsEnabled = gsfPersonaNameMentions.checked;
         maxPersonaReplies = maxReplies;
+        maxTurnsForContext = maxTurns;
 
         closeGenSettings();
     } catch (err) {

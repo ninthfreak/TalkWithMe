@@ -133,13 +133,11 @@ function collectSettingsFromForm() {
             max_tokens: parseInt(sfLlmMaxTokens.value, 10),
             temperature: parseFloat(sfLlmTemperature.value),
         },
-        // No UI for general settings in this dialog; preserve current values so they
-        // survive a settings save round-trip.
-        general: {
-            persona_name_mentions: personaNameMentionsEnabled,
-            max_persona_replies: maxPersonaReplies,
-            max_turns_for_context: maxTurnsForContext ?? 6,
-        },
+        // This dialog doesn't edit general settings, so it sends none: the
+        // backend treats `general` as a partial update (omitted fields keep
+        // their current values). Carrying in-memory state here previously let
+        // a stale copy clobber values the user changed in the General
+        // Settings dialog (e.g. show_tool_calls).
         tts: {
             enabled: sfTtsEnabled.checked,
             base_url: sfTtsBaseUrl.value.trim(),
@@ -219,11 +217,14 @@ async function submitSettings(e) {
 
         // Update in-memory TTS state based on new settings
         ttsStreaming = data.tts.streaming;
-        // Update in-memory general settings
-        if (data.general != null) {
-            personaNameMentionsEnabled = data.general.persona_name_mentions;
-            maxPersonaReplies = data.general.max_persona_replies ?? 1;
-            maxTurnsForContext = data.general.max_turns_for_context ?? 6;
+        // Refresh in-memory general settings from the server's authoritative
+        // response (we no longer send them, so there is nothing to read back
+        // from our own payload).
+        const saved = await resp.json();
+        if (saved.general != null) {
+            personaNameMentionsEnabled = saved.general.persona_name_mentions;
+            maxPersonaReplies = saved.general.max_persona_replies ?? 1;
+            maxTurnsForContext = saved.general.max_turns_for_context ?? 6;
         }
         // Re-check service health to update UI availability after settings change
         await checkTTSHealth();

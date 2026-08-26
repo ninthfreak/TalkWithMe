@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter
 
 from app import config as app_config
-from app.config import AppSettings, GeneralConfig, LLMSettings, STTConfig, TTSConfig
+from app.config import AppSettings, LLMSettings, STTConfig, TTSConfig
 from app.models import (
     GeneralSettingsResponse,
     LLMSettingsResponse,
@@ -74,6 +74,17 @@ def update_settings(req: SettingsUpdateRequest):
     # would silently wipe it from settings.yaml.
     current = app_config.get_settings()
 
+    # The general section is a partial update: fields the client omitted
+    # (None) keep their current values. Dialogs that don't edit general
+    # settings (Servers) rely on this instead of carrying possibly-stale
+    # in-memory values around. Merging via model_dump(exclude_none=True)
+    # means any field added to GeneralConfig in the future is preserved
+    # automatically — no per-field wiring to forget, which is exactly what
+    # bit us with show_tool_calls.
+    updated_general = current.general.model_copy(
+        update=req.general.model_dump(exclude_none=True)
+    )
+
     updated = AppSettings(
         llm=LLMSettings(
             base_url=req.llm.base_url,
@@ -95,12 +106,7 @@ def update_settings(req: SettingsUpdateRequest):
             base_url=stt_base,
             timeout=req.stt.timeout,
         ),
-        general=GeneralConfig(
-            persona_name_mentions=req.general.persona_name_mentions,
-            max_persona_replies=req.general.max_persona_replies,
-            max_turns_for_context=req.general.max_turns_for_context,
-            show_tool_calls=req.general.show_tool_calls,
-        ),
+        general=updated_general,
         mcp=current.mcp,
     )
 
