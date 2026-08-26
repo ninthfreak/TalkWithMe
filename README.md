@@ -10,8 +10,8 @@ Follow the development of this app on my YouTube channel:
 - Multi-lingual voice cloning: https://www.youtube.com/watch?v=1yiyFYaUlU4
 - Better TTS support: https://www.youtube.com/watch?v=jDudeaWppSE
 - Persona-to-persona chat: https://www.youtube.com/watch?v=4J3Ao2RitKs
+- Cleaning audio samples for better voice cloning: https://www.youtube.com/watch?v=s33vyuiKDfs
 - MCP integrations: (coming soon!)
-- Cleaning audio samples for better voice cloning: (coming soon!)
 
 ## Features
 
@@ -30,10 +30,9 @@ Follow the development of this app on my YouTube channel:
 - Python 3.10+
 - A locally running llama.cpp server with OpenAI-compatible API (e.g., `--api` flag)
 - (Optional) A local TTS REST server with `/synthesize` and `/health` endpoints.
-   You can use my [dots.tts server.py](https://github.com/scorbo2/ai-playground/blob/master/dots.tts/server.py)
-   in front of a [dots.tts](https://github.com/studio-dots-ai/dots.tts) server.
-   Alternatively, you can use my [Qwen3-TTS server.py](https://github.com/scorbo2/ai-playground/blob/master/qwen3-tts/server.py)
-   running in front of a [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) server. I've tested both successfully.
+   You can use one of my [TTS server scripts](https://github.com/scorbo2/ai-playground/tree/master/TTS)
+   in front of [dots.tts](https://github.com/studio-dots-ai/dots.tts), [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS),
+   or [OmniVoice](https://github.com/k2-fsa/OmniVoice) server.
 - (Optional) An OpenAI-compatible STT server that exposes a `/v1/audio/transcriptions` endpoint
    accepting multipart form uploads. The `stt.base_url` in `settings.yaml` should point to the
    server's root (e.g., `http://localhost:8181`), and the app will POST to
@@ -107,7 +106,7 @@ Note that TTS, STT, and MCP are all optional! You can mark them as disabled
 and/or leave the base_url field blank or null. The only mandatory
 configuration here is the LLM.
 
-The `mcp` section has no UI — it is edited in `settings.yaml` directly and only
+The `mcp` section currently has no UI — it is edited in `settings.yaml` directly and only
 read on startup (restart the app after changes).
 
 ### Personas
@@ -160,7 +159,7 @@ can be more accurate)
 | `reference_audio` | Path to a WAV file for TTS voice cloning (optional) |
 | `reference_audio_transcript` | Path to a TXT file with the audio transcript (required with `reference_audio`) |
 | `reference_audio_language` | Two-letter language code describing the reference audio (defaults to `en`) |
-| `allow_tool_calls` | If `true`, this persona may call MCP tools while replying (requires at least one configured MCP server) |
+| `allow_tool_calls` | If `true`, this persona may call MCP tools while replying (if at least one MCP server is configured) |
 
 **TTS support**: Both `reference_audio` and `reference_audio_transcript` must be set for a persona to have TTS capability.
 
@@ -244,6 +243,8 @@ If you prefer to hear the persona's response in one clear, contiguous audio play
 
 If you want to hear each sentence as soon as it has been synthesized, without having to wait for the ENTIRE response to be synthesized, and you don't mind the occasional pause in between sentences, then enable streaming mode in configuration.
 
+For lowest lag time, consider OmniVoice as the TTS server. It is considerably faster than `dots.tts` or `Qwen3-TTS`.
+
 ## Persona-to-persona chat
 
 By default, only one AI persona in the current chat room will answer your prompt. You can make it feel more like a group chat by turning up the `max_persona_replies` option in `settings.yaml` (or by visiting the settings dialog). You can choose any number between 1 and 4. The given number of AI personas will answer your prompt (or reply to the persona who responded before them). Your personas may argue amongst themselves, depending on their respective system prompts!
@@ -324,6 +325,9 @@ work, if they provide an OpenAI-compatible API.
 Because both TTS and STT are optional, you have several options for running the
 application, depending on how much VRAM you can throw at it.
 
+Refer to the [TTS README](https://github.com/scorbo2/ai-playground/blob/master/TTS/README.md) for more
+details about setting up the server-side TTS script.
+
 ### Minimal setup (~4GB VRAM)
 
 - Recommended LLM: Gemma 4 E4B Q4
@@ -333,19 +337,19 @@ application, depending on how much VRAM you can throw at it.
 ### Modest setup (~12GB VRAM)
 
 - Recommended LLM: Gemma 4 E4B Q4
-- Recommended TTS: `Qwen3-TTS`
+- Recommended TTS: `OmniVoice`
 - Recommended STT: `whisper-fastapi`, small model, running on CPU or cuda
 
 ### Large setup (~16GB VRAM)
 
 - Recommended LLM: Gemma 4 E4B Q6
-- Recommended TTS: Either `Qwen3-TTS` or `dots.tts`
+- Recommended TTS: Any of `OmniVoice`, `Qwen3-TTS`, or `dots.tts`
 - Recommended STT: `whisper-fastapi`, large-v3-turbo, running on cuda
 
 ### X-Large setup (24GB or higher)
 
 - Recommended LLM: Gemma 4 26B A4B
-- Recommended TTS: Either `Qwen3-TTS` or `dots.tts`
+- Recommended TTS: Any of `OmniVoice`, `Qwen3-TTS`, or `dots.tts`
 - Recommended STT: `whisper-fastapi`, large-v3-turbo, running on cuda
 
 ## Release history
@@ -385,7 +389,7 @@ application, depending on how much VRAM you can throw at it.
   - Expose `max_turns_for_context` in config, and wire it up properly (#61)
   - Force UTF-8 for history file writing, and make it atomic (#49)
   - Fix chatroom sorting in UI (#66)
-- **Work in progress; update with release date when ready** v5.0
+- **2026-08-25** v5.0
   - Add MCP support with agentic tool calling (#47)
   - Bug fix: validation errors now properly displayed (#72)
   - Bug fix: broken INFO logging (#74)
