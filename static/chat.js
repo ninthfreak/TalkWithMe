@@ -400,7 +400,14 @@ function addToolCallChip(event) {
     chip.textContent = `🔧 ${event.tool_name}`;
 
     // Display-only tooltip: what was called, with what, and what came back
-    let tooltip = `Arguments: ${JSON.stringify(event.arguments ?? {})}`;
+    let argsStr;
+    try {
+        argsStr = JSON.stringify(event.arguments ?? {});
+    } catch (_) {
+        argsStr = "[unserializable arguments]";
+    }
+    if (argsStr.length > 300) argsStr = argsStr.slice(0, 300) + "…";
+    let tooltip = `Arguments: ${argsStr}`;
     if (event.result) {
         const result = event.result.length > 300 ? event.result.slice(0, 300) + "…" : event.result;
         tooltip += `\nResult: ${result}`;
