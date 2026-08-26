@@ -112,6 +112,8 @@ def _merge_tool_call_delta(pending: Dict[int, dict], delta: dict) -> None:
 
     Tool calls arrive in fragments: the first chunk carries id/type/name,
     later chunks append to function.arguments (and occasionally name).
+    Backends that re-send the full name in later deltas are handled by
+    resyncing to the latest copy rather than concatenating it.
     """
     index = delta.get("index", 0)
     entry = pending.setdefault(
@@ -123,7 +125,17 @@ def _merge_tool_call_delta(pending: Dict[int, dict], delta: dict) -> None:
         entry["type"] = delta["type"]
     fn = delta.get("function") or {}
     if fn.get("name"):
-        entry["function"]["name"] += fn["name"]
+        current_name = entry["function"]["name"]
+        if current_name and current_name in fn["name"]:
+            # The incoming name CONTAINS what we already have — this is the
+            # signature of a backend re-sending the name (in full) in a later
+            # delta; concatenating would yield "get_timeget_time". The check
+            # is directional on purpose: a genuine name fragment is almost
+            # never a superstring of the accumulated name, so normal
+            # fragment streaming is unaffected.
+            entry["function"]["name"] = fn["name"]
+        else:
+            entry["function"]["name"] = current_name + fn["name"]
     if fn.get("arguments"):
         entry["function"]["arguments"] += fn["arguments"]
 
