@@ -76,10 +76,11 @@ def _parse_response_body(resp: httpx.Response) -> Optional[dict]:
         # carrying our request id. Other lines (server requests,
         # notifications) are irrelevant to a stateless client.
         for line in resp.text.splitlines():
-            if not line.startswith("data: "):
+            if not line.startswith("data:"):
                 continue
+            data = line[len("data:"):].lstrip()
             try:
-                payload = json.loads(line[len("data: "):])
+                payload = json.loads(data)
             except json.JSONDecodeError:
                 continue
             if isinstance(payload, dict) and _is_response(payload):
