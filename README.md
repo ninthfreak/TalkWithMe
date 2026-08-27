@@ -11,7 +11,7 @@ Follow the development of this app on my YouTube channel:
 - Better TTS support: https://www.youtube.com/watch?v=jDudeaWppSE
 - Persona-to-persona chat: https://www.youtube.com/watch?v=4J3Ao2RitKs
 - Cleaning audio samples for better voice cloning: https://www.youtube.com/watch?v=s33vyuiKDfs
-- MCP integrations: (coming soon!)
+- MCP integrations: https://www.youtube.com/watch?v=XhD9soU3hFM
 
 ## Features
 
@@ -389,7 +389,7 @@ details about setting up the server-side TTS script.
   - Expose `max_turns_for_context` in config, and wire it up properly (#61)
   - Force UTF-8 for history file writing, and make it atomic (#49)
   - Fix chatroom sorting in UI (#66)
-- **2026-08-25** v5.0
+- **2026-08-26** v5.0
   - Add MCP support with agentic tool calling (#47)
   - Bug fix: validation errors now properly displayed (#72)
   - Bug fix: broken INFO logging (#74)
