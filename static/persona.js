@@ -235,6 +235,7 @@ async function openPersonaForm(name) {
             pfAvatarImage.value       = p.avatar_image || "";
             pfReferenceAudio.value    = p.reference_audio || "";
             pfReferenceAudioTx.value  = p.reference_audio_transcript || "";
+            pfAllowToolCalls.checked  = p.allow_tool_calls ?? false;
         } catch (err) {
             showPersonaFormError("Failed to load persona details.");
             return;
@@ -250,6 +251,7 @@ async function openPersonaForm(name) {
         pfAvatarImage.value       = "";
         pfReferenceAudio.value    = "";
         pfReferenceAudioTx.value  = "";
+        pfAllowToolCalls.checked  = false;
     }
 
     peListView.classList.add("hidden");
@@ -287,6 +289,7 @@ async function submitPersonaForm(e) {
         avatar_image: avatarImage || null,
         reference_audio: refAudio || null,
         reference_audio_transcript: refAudioTx || null,
+        allow_tool_calls: pfAllowToolCalls.checked,
     };
 
     try {
@@ -307,7 +310,7 @@ async function submitPersonaForm(e) {
 
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            return showPersonaFormError(err.detail || `Error ${resp.status}`);
+            return showPersonaFormError(extractApiErrorMessage(err, resp.status));
         }
 
         // Refresh sidebar persona list
@@ -327,7 +330,7 @@ async function clonePersona(name) {
         const resp = await fetch(`/api/personas/${encodeURIComponent(name)}/clone`, { method: "POST" });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            console.error("Clone failed:", err.detail);
+            console.error("Clone failed:", extractApiErrorMessage(err, resp.status));
             return;
         }
         await loadPersonas();

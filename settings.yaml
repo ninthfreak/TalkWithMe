@@ -19,3 +19,7 @@ general:
   persona_name_mentions: true
   max_persona_replies: 1
   max_turns_for_context: 6
+  show_tool_calls: true
+mcp:
+  servers: []
+  max_tool_iterations: 8

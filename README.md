@@ -10,8 +10,8 @@ Follow the development of this app on my YouTube channel:
 - Multi-lingual voice cloning: https://www.youtube.com/watch?v=1yiyFYaUlU4
 - Better TTS support: https://www.youtube.com/watch?v=jDudeaWppSE
 - Persona-to-persona chat: https://www.youtube.com/watch?v=4J3Ao2RitKs
-- MCP integrations: (coming soon!)
-- Cleaning audio samples for better voice cloning: (coming soon!)
+- Cleaning audio samples for better voice cloning: https://www.youtube.com/watch?v=s33vyuiKDfs
+- MCP integrations: https://www.youtube.com/watch?v=XhD9soU3hFM
 
 ## Features
 
@@ -20,6 +20,7 @@ Follow the development of this app on my YouTube channel:
 - Smart persona routing: let the LLM decide, pick randomly, or choose manually
 - Optional TTS: AI responses spoken aloud via a TTS server
 - Optional STT: Click the microphone icon to speak your prompt
+- Optional MCP tools: let any persona call tools served by MCP servers (e.g. fetch web pages, run queries)
 - Fully local — no internet required, no authentication
 - Theme chooser in the top-right: Dark (default), Light, Matrix, and Blues
 - Each room persists its text and audio messages
@@ -29,15 +30,17 @@ Follow the development of this app on my YouTube channel:
 - Python 3.10+
 - A locally running llama.cpp server with OpenAI-compatible API (e.g., `--api` flag)
 - (Optional) A local TTS REST server with `/synthesize` and `/health` endpoints.
-   You can use my [dots.tts server.py](https://github.com/scorbo2/ai-playground/blob/master/dots.tts/server.py)
-   in front of a [dots.tts](https://github.com/studio-dots-ai/dots.tts) server.
-   Alternatively, you can use my [Qwen3-TTS server.py](https://github.com/scorbo2/ai-playground/blob/master/qwen3-tts/server.py)
-   running in front of a [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) server. I've tested both successfully.
+   You can use one of my [TTS server scripts](https://github.com/scorbo2/ai-playground/tree/master/TTS)
+   in front of [dots.tts](https://github.com/studio-dots-ai/dots.tts), [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS),
+   or [OmniVoice](https://github.com/k2-fsa/OmniVoice) server.
 - (Optional) An OpenAI-compatible STT server that exposes a `/v1/audio/transcriptions` endpoint
    accepting multipart form uploads. The `stt.base_url` in `settings.yaml` should point to the
    server's root (e.g., `http://localhost:8181`), and the app will POST to
    `{base_url}/v1/audio/transcriptions`. I strongly recommend [whisper-fastapi](https://github.com/heimoshuiyu/whisper-fastapi)
-   as it is very easy to get up and running (and it is in fact what I use with this app).
+    as it is very easy to get up and running (and it is in fact what I use with this app).
+- (Optional) One or more MCP (Model Context Protocol) servers exposing the
+    [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports/streamable-http).
+    See [MCP tools](#mcp-tools-optional) for setup.
 
 ## Quick Start
 
@@ -55,7 +58,7 @@ Open `http://localhost:8000` in your browser.
 
 Most settings can be changed in the UI. Behind the scenes, configuration is stored on disk:
 
-- `settings.yaml` stores LLM, TTS, and STT server endpoints
+- `settings.yaml` stores LLM, TTS, STT, and MCP server endpoints plus general chat parameters
 - `chatrooms.yaml` stores configured chat rooms (if any)
 - `personas.yaml` stores all personas
 
@@ -78,7 +81,7 @@ tts:
   enabled: true
   base_url: http://localhost:5500
   num_steps: 10
-  guidance_scale: 3.0
+  guidance_scale: 1.5
   seed: null
   timeout: 60
   streaming: false
@@ -92,11 +95,19 @@ general:
   persona_name_mentions: true
   max_persona_replies: 1
   max_turns_for_context: 6
+  show_tool_calls: true
+
+mcp:
+  servers: []
+  max_tool_iterations: 8
 ```
 
-Note that TTS and STT are both optional! You can mark them as disabled
+Note that TTS, STT, and MCP are all optional! You can mark them as disabled
 and/or leave the base_url field blank or null. The only mandatory
 configuration here is the LLM.
+
+The `mcp` section currently has no UI — it is edited in `settings.yaml` directly and only
+read on startup (restart the app after changes).
 
 ### Personas
 
@@ -128,6 +139,7 @@ personas:
     reference_audio: null
     reference_audio_transcript: null
     reference_audio_language: "en"
+    allow_tool_calls: false
 ```
 
 (Note that the `reference_audio_language` field does not control what language the persona speaks. It refers
@@ -147,6 +159,7 @@ can be more accurate)
 | `reference_audio` | Path to a WAV file for TTS voice cloning (optional) |
 | `reference_audio_transcript` | Path to a TXT file with the audio transcript (required with `reference_audio`) |
 | `reference_audio_language` | Two-letter language code describing the reference audio (defaults to `en`) |
+| `allow_tool_calls` | If `true`, this persona may call MCP tools while replying (if at least one MCP server is configured) |
 
 **TTS support**: Both `reference_audio` and `reference_audio_transcript` must be set for a persona to have TTS capability.
 
@@ -230,9 +243,46 @@ If you prefer to hear the persona's response in one clear, contiguous audio play
 
 If you want to hear each sentence as soon as it has been synthesized, without having to wait for the ENTIRE response to be synthesized, and you don't mind the occasional pause in between sentences, then enable streaming mode in configuration.
 
+For lowest lag time, consider OmniVoice as the TTS server. It is considerably faster than `dots.tts` or `Qwen3-TTS`.
+
 ## Persona-to-persona chat
 
 By default, only one AI persona in the current chat room will answer your prompt. You can make it feel more like a group chat by turning up the `max_persona_replies` option in `settings.yaml` (or by visiting the settings dialog). You can choose any number between 1 and 4. The given number of AI personas will answer your prompt (or reply to the persona who responded before them). Your personas may argue amongst themselves, depending on their respective system prompts!
+
+## MCP tools (optional)
+
+If you want your personas to be able to *do* things — fetch a web page, query a database, check the weather — you can connect one or more [MCP (Model Context Protocol)](https://modelcontextprotocol.io) servers. When a persona with tools enabled replies, TalkWithMe runs an agentic loop: the LLM may request tool calls, TalkWithMe executes them against the configured MCP servers, feeds the results back to the LLM, and repeats until the LLM produces a final text answer.
+
+### 1. Configure your MCP server(s)
+
+Edit the `mcp` section of `settings.yaml` directly (there is no UI for this yet):
+
+```yaml
+mcp:
+  servers:
+    - name: web
+      url: http://localhost:9000/mcp    # the server's Streamable HTTP transport endpoint
+      timeout: 10                       # per-request timeout in seconds (default 10)
+  max_tool_iterations: 8                # max tool-call rounds per reply, 1-50 (default 8)
+```
+
+Restart the app after changes. Tools are discovered at startup, and the log will show a line like `MCP tools available: 5`. If a server is down or unreachable at startup, a warning is logged and its tools are simply unavailable — the app keeps working fine without them.
+
+### 2. Enable tools for a persona
+
+Open the persona editor and tick **"Allow tool calls"** for any persona that should get tool access. Personas without the flag never see the tools, no matter how many servers you have configured.
+
+### 3. (Optional) Hide the tool chips
+
+By default, every tool a persona calls shows up in the chat as a small chip (e.g. `🔧 get_time`); hover over a chip to see the arguments and the result. If you'd rather not see them, untick **"Show tool calls"** in the general settings dialog. The tools still work — only the chips are hidden.
+
+### Notes and gotchas
+
+- **Your LLM must support tool calling.** The loop speaks OpenAI-style `tools`/`tool_calls`, so the underlying model needs to be capable of it (works with recent Gemma and Qwen models served via llama.cpp's `--api`).
+- **Tool names are global across servers.** If two servers expose a tool with the same name, the first server listed wins and the duplicate is ignored (a warning is logged).
+- **Only the final answer is persisted.** Chat history stores the persona's text reply; tool calls and results are not saved. Tool chips are a live, in-view decoration only — they disappear on page reload or room switch.
+- **Errors become feedback.** If an MCP server fails or reports an error, the LLM receives a plain-text `Error: ...` result and can retry or explain the failure — the reply will never silently vanish because of a broken tool.
+- **Connections are stateless.** Every tool call opens a fresh MCP session (`initialize` handshake) and closes it afterwards. If your MCP server keeps long-lived session state, TalkWithMe does not preserve it between calls.
 
 ## Chat persistence
 
@@ -275,6 +325,9 @@ work, if they provide an OpenAI-compatible API.
 Because both TTS and STT are optional, you have several options for running the
 application, depending on how much VRAM you can throw at it.
 
+Refer to the [TTS README](https://github.com/scorbo2/ai-playground/blob/master/TTS/README.md) for more
+details about setting up the server-side TTS script.
+
 ### Minimal setup (~4GB VRAM)
 
 - Recommended LLM: Gemma 4 E4B Q4
@@ -284,19 +337,19 @@ application, depending on how much VRAM you can throw at it.
 ### Modest setup (~12GB VRAM)
 
 - Recommended LLM: Gemma 4 E4B Q4
-- Recommended TTS: `Qwen3-TTS`
+- Recommended TTS: `OmniVoice`
 - Recommended STT: `whisper-fastapi`, small model, running on CPU or cuda
 
 ### Large setup (~16GB VRAM)
 
 - Recommended LLM: Gemma 4 E4B Q6
-- Recommended TTS: Either `Qwen3-TTS` or `dots.tts`
+- Recommended TTS: Any of `OmniVoice`, `Qwen3-TTS`, or `dots.tts`
 - Recommended STT: `whisper-fastapi`, large-v3-turbo, running on cuda
 
 ### X-Large setup (24GB or higher)
 
 - Recommended LLM: Gemma 4 26B A4B
-- Recommended TTS: Either `Qwen3-TTS` or `dots.tts`
+- Recommended TTS: Any of `OmniVoice`, `Qwen3-TTS`, or `dots.tts`
 - Recommended STT: `whisper-fastapi`, large-v3-turbo, running on cuda
 
 ## Release history
@@ -336,6 +389,11 @@ application, depending on how much VRAM you can throw at it.
   - Expose `max_turns_for_context` in config, and wire it up properly (#61)
   - Force UTF-8 for history file writing, and make it atomic (#49)
   - Fix chatroom sorting in UI (#66)
+- **2026-08-26** v5.0
+  - Add MCP support with agentic tool calling (#47)
+  - Bug fix: validation errors now properly displayed (#72)
+  - Bug fix: broken INFO logging (#74)
+  - Code cleanup: add comprehensive pytest suite (#79)
 
 ## License
 
