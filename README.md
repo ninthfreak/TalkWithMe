@@ -224,7 +224,7 @@ A persona can be assigned to any number of rooms simultaneously.
 
 ## API Endpoints and project structure
 
-Moved to [copilot-instructions.md](.github/copilot-instructions.md)
+Moved to [AGENTS.md](AGENTS.md)
 
 ## Cloning non-English voices
 
