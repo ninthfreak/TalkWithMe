@@ -148,16 +148,15 @@
                         <span class="field-hint">This persona may invoke tools from MCP servers configured in settings.yaml</span>
                     </div>
                     <div class="form-row">
-                        <label for="pf-typical-length">Typical Response Length</label>
-                        <select id="pf-typical-length">
-                            <option value="">Use room default</option>
-                            <option value="terse">Terse &mdash; one or two short sentences</option>
-                            <option value="brief">Brief &mdash; two to four sentences</option>
-                            <option value="normal">Normal &mdash; a short paragraph</option>
-                            <option value="detailed">Detailed &mdash; a few paragraphs</option>
-                            <option value="unrestricted">Unrestricted &mdash; no guidance</option>
+                        <label for="pf-length-bias">Reply Length vs. the Room</label>
+                        <select id="pf-length-bias">
+                            <option value="much_shorter">Much shorter than the room</option>
+                            <option value="shorter">Shorter than the room</option>
+                            <option value="match">Same as the room</option>
+                            <option value="longer">Longer than the room</option>
+                            <option value="much_longer">Much longer than the room</option>
                         </select>
-                        <span class="field-hint">Overrides the room&rsquo;s setting for this persona only. Longer replies are still allowed when the situation calls for it.</span>
+                        <span class="field-hint">Relative to whatever the room is set to, so a laconic persona stays laconic <em>for that room</em> rather than a fixed length. Longer replies are still allowed when the moment calls for it.</span>
                     </div>
                     <div class="form-row">
                         <label for="pf-avatar-color">Avatar Color</label>
@@ -446,10 +445,11 @@
                         <div class="form-row">
                             <label for="gsf-typical-length">Typical Response Length</label>
                             <select id="gsf-typical-length">
-                                <option value="terse">Terse &mdash; one or two short sentences</option>
-                                <option value="brief">Brief &mdash; two to four sentences</option>
-                                <option value="normal">Normal &mdash; a short paragraph</option>
-                                <option value="detailed">Detailed &mdash; a few paragraphs</option>
+                                <option value="terse">Terse &mdash; a few words</option>
+                                <option value="brief">Brief &mdash; one short sentence</option>
+                                <option value="normal">Normal &mdash; a sentence or two</option>
+                                <option value="detailed">Detailed &mdash; two or three sentences</option>
+                                <option value="verbose">Verbose &mdash; a short paragraph</option>
                                 <option value="unrestricted">Unrestricted &mdash; no guidance</option>
                             </select>
                             <span class="field-hint">Default for the &ldquo;default&rdquo; room and for any room that has not set its own. Shapes length by instructing the persona &mdash; use this instead of lowering Max Tokens.</span>

@@ -164,9 +164,9 @@ def _build_room_preamble(
     spec = TYPICAL_LENGTH_SPECS[length]
     if spec.words:
         lines.append(
-            f"- Aim for about {spec.phrasing} (~{spec.words} words). Go longer only "
-            "when the question genuinely needs it. Always finish your sentence — "
-            "never stop mid-thought."
+            f"- This is a chat room, not an essay: aim for about {spec.phrasing} "
+            f"(~{spec.words} words). Go longer only when the thought genuinely "
+            "needs it. Stop at a natural end — never break off mid-word."
         )
 
     return "\n".join(lines)

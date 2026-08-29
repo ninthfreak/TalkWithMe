@@ -16,6 +16,7 @@ from app.config import (
     GeneralConfig,
     Persona,
     PersonasConfig,
+    LengthBias,
     PlayerProfile,
     TypicalLength,
 )
@@ -512,15 +513,27 @@ class TestTypicalLength:
         _chat(client, who_answers="Alex", chat_room="Terse")
 
         system = _system_prompt(calls[0])
-        assert "one or two short sentences" in system
-        assert "~25 words" in system
+        assert "a few words" in system
+        assert "~4 words" in system
+        # The register is stated outright — this is chat, not prose.
+        assert "This is a chat room, not an essay" in system
         # The escape hatch must survive: typical is a target, not a ceiling.
-        assert "Go longer only when the question genuinely needs it" in system
+        assert "Go longer only when the thought genuinely needs it" in system
 
-    def test_persona_tier_overrides_the_room(self, client, monkeypatch):
+    def test_normal_room_asks_for_a_sentence_or_two(self, client, monkeypatch):
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        system = _system_prompt(calls[0])
+        assert "a sentence or two" in system
+        assert "~20 words" in system
+
+    def test_persona_bias_shifts_within_the_rooms_scale(self, client, monkeypatch):
+        # Relative, not absolute: "shorter" in a DETAILED room means NORMAL,
+        # not the shortest tier there is.
         _patch_personas(monkeypatch, PersonasConfig(personas=[
             Persona(name="Alex", description="", system_prompt="You are Alex.",
-                    router_hints="x", typical_length=TypicalLength.TERSE),
+                    router_hints="x", length_bias=LengthBias.SHORTER),
         ]))
         _patch_chatrooms(
             monkeypatch,
@@ -530,7 +543,22 @@ class TestTypicalLength:
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="Long")
 
-        assert "~25 words" in _system_prompt(calls[0])  # persona wins
+        assert "a sentence or two" in _system_prompt(calls[0])
+
+    def test_the_same_bias_lands_differently_in_a_shorter_room(self, client, monkeypatch):
+        _patch_personas(monkeypatch, PersonasConfig(personas=[
+            Persona(name="Alex", description="", system_prompt="You are Alex.",
+                    router_hints="x", length_bias=LengthBias.SHORTER),
+        ]))
+        _patch_chatrooms(
+            monkeypatch,
+            [ChatRoom(name="Short", persona_names=["Alex"],
+                      typical_length=TypicalLength.BRIEF)],
+        )
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Short")
+
+        assert "a few words" in _system_prompt(calls[0])
 
     def test_default_room_uses_the_global_tier(self, client, monkeypatch):
         # "default" has no chatrooms.yaml entry, so it has nowhere to store
@@ -539,7 +567,7 @@ class TestTypicalLength:
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="default")
 
-        assert "two to four sentences" in _system_prompt(calls[0])
+        assert "one short sentence" in _system_prompt(calls[0])
 
     def test_unrestricted_omits_the_length_line_entirely(self, client, monkeypatch):
         _patch_general(monkeypatch, typical_length=TypicalLength.UNRESTRICTED)
@@ -555,9 +583,9 @@ class TestTypicalLength:
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="default")
 
-        # Well above the ~120 word target, and below llm.max_tokens (1024):
+        # Far above the ~20 word target, and below llm.max_tokens (1024):
         # a runaway guard, not a style control.
-        assert calls[0]["max_tokens"] == 504
+        assert calls[0]["max_tokens"] == 256
 
     def test_stop_sequences_cover_the_other_personas(self, client, monkeypatch):
         calls = _capture(monkeypatch)

@@ -28,13 +28,51 @@ logger = logging.getLogger(__name__)
 
 
 class TypicalLength(str, Enum):
-    """How long a persona's replies should typically be."""
+    """How long replies in a room should typically be.
+
+    Calibrated for *chat*, not prose. People in a chat room write a
+    fragment, sometimes a full sentence, occasionally two when the thought
+    needs it — so NORMAL is a sentence or two, and even VERBOSE is only a
+    short paragraph. An earlier version put NORMAL at a paragraph, which
+    made every room read like an essay thread.
+
+    The members are ordered shortest to longest; LENGTH_SCALE below depends
+    on that order, and UNRESTRICTED sits outside it.
+    """
 
     TERSE = "terse"
     BRIEF = "brief"
     NORMAL = "normal"
     DETAILED = "detailed"
+    VERBOSE = "verbose"
     UNRESTRICTED = "unrestricted"
+
+
+class LengthBias(str, Enum):
+    """How a persona's replies sit *relative to* their room.
+
+    Relative, not absolute: a laconic persona should be laconic for the
+    room they are in. In a clipped room they answer in a couple of words;
+    in a talkative one they are still the short one, but not mute. An
+    absolute per-persona length fights the room instead of sitting inside
+    it.
+    """
+
+    MUCH_SHORTER = "much_shorter"
+    SHORTER = "shorter"
+    MATCH = "match"
+    LONGER = "longer"
+    MUCH_LONGER = "much_longer"
+
+
+# How many steps along LENGTH_SCALE each bias moves a persona.
+LENGTH_BIAS_STEPS: Dict[LengthBias, int] = {
+    LengthBias.MUCH_SHORTER: -2,
+    LengthBias.SHORTER: -1,
+    LengthBias.MATCH: 0,
+    LengthBias.LONGER: 1,
+    LengthBias.MUCH_LONGER: 2,
+}
 
 
 class LengthSpec(NamedTuple):
@@ -48,12 +86,23 @@ class LengthSpec(NamedTuple):
 
 
 TYPICAL_LENGTH_SPECS: Dict[TypicalLength, LengthSpec] = {
-    TypicalLength.TERSE: LengthSpec(25, "one or two short sentences"),
-    TypicalLength.BRIEF: LengthSpec(60, "two to four sentences"),
-    TypicalLength.NORMAL: LengthSpec(120, "a short paragraph"),
-    TypicalLength.DETAILED: LengthSpec(250, "a few paragraphs"),
+    TypicalLength.TERSE: LengthSpec(4, "a few words — often not even a full sentence"),
+    TypicalLength.BRIEF: LengthSpec(10, "one short sentence"),
+    TypicalLength.NORMAL: LengthSpec(20, "a sentence or two"),
+    TypicalLength.DETAILED: LengthSpec(45, "two or three sentences"),
+    TypicalLength.VERBOSE: LengthSpec(110, "a short paragraph"),
     TypicalLength.UNRESTRICTED: LengthSpec(0, ""),
 }
+
+# The ordinal scale a LengthBias moves along. UNRESTRICTED is deliberately
+# absent: it is "no target at all", so there is nothing to be relative to.
+LENGTH_SCALE: List[TypicalLength] = [
+    TypicalLength.TERSE,
+    TypicalLength.BRIEF,
+    TypicalLength.NORMAL,
+    TypicalLength.DETAILED,
+    TypicalLength.VERBOSE,
+]
 
 # Rough English tokens-per-word for the derived cap. Deliberately not a
 # setting — it is a constant of the encoding, not a preference.
@@ -62,8 +111,9 @@ _TOKENS_PER_WORD = 1.4
 # it" stays possible. Only a runaway reply should ever hit it.
 _LENGTH_HEADROOM = 3.0
 # Below this, the cap starts shaping replies again instead of guarding them
-# — which is the exact failure this feature exists to remove. TERSE and
-# BRIEF therefore share this floor; the prompt line is what separates them.
+# — which is the exact failure this feature exists to remove. At chat
+# lengths every tier below VERBOSE lands on this floor, and that is the
+# point: the prompt does the shaping, the cap only stops a runaway.
 _MIN_DERIVED_MAX_TOKENS = 256
 
 
@@ -194,9 +244,9 @@ class Persona(BaseModel):
     reference_audio_transcript: Optional[str] = None
     reference_audio_language: str = "en"
     allow_tool_calls: bool = False
-    # None inherits the room's tier — a terse persona can stay terse in a
-    # room of ramblers, but most personas should just follow the room.
-    typical_length: Optional[TypicalLength] = None
+    # Relative to the room, never absolute: this nudges the persona a step
+    # or two along the room's own scale. See LengthBias.
+    length_bias: LengthBias = LengthBias.MATCH
 
     @property
     def tts_capable(self) -> bool:
@@ -257,16 +307,28 @@ def resolve_typical_length(
     room: Optional[ChatRoom],
     general_default: TypicalLength,
 ) -> TypicalLength:
-    """Resolve the effective tier: persona override, else room, else global.
+    """The tier a persona actually replies at: the room's, nudged by bias.
+
+    The room sets the register; the persona only shifts a step or two
+    within it, and the shift clamps at both ends of LENGTH_SCALE — a
+    laconic persona in an already-terse room is simply terse, not silent.
 
     *room* is None for the implicit "default" room, which has no
     chatrooms.yaml entry and therefore falls back to the global value.
+
+    An UNRESTRICTED room ignores bias entirely: with no target set there is
+    nothing for a persona to be shorter or longer *than*.
     """
-    if persona is not None and persona.typical_length is not None:
-        return persona.typical_length
-    if room is not None:
-        return room.typical_length
-    return general_default
+    base = room.typical_length if room is not None else general_default
+    if base is TypicalLength.UNRESTRICTED or persona is None:
+        return base
+
+    steps = LENGTH_BIAS_STEPS[persona.length_bias]
+    if steps == 0:
+        return base
+
+    index = LENGTH_SCALE.index(base) + steps
+    return LENGTH_SCALE[max(0, min(index, len(LENGTH_SCALE) - 1))]
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +374,16 @@ def load_personas(path: Optional[Path] = None) -> PersonasConfig:
         raw = yaml.safe_load(f) or {}
     migrated = []
     for p in raw.get("personas", []):
+        if "typical_length" in p:
+            # Superseded by length_bias, which is relative to the room. An
+            # absolute tier cannot be mapped onto a relative one without
+            # knowing the room, so it is dropped — loudly, not silently.
+            logger.info(
+                "Persona '%s': 'typical_length: %s' is no longer supported; "
+                "personas now use 'length_bias' relative to the room. "
+                "Defaulting to 'match'.",
+                p.get("name", "<unknown>"), p.pop("typical_length"),
+            )
         if "language" in p and "reference_audio_language" not in p:
             name = p.get("name", "<unknown>")
             logger.info(

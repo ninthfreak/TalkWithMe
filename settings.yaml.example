@@ -24,7 +24,8 @@ general:
   max_persona_replies: 1
   max_turns_for_context: 6
   show_tool_calls: true
-  # terse | brief | normal | detailed | unrestricted
+  # terse | brief | normal | detailed | verbose | unrestricted
+  # Calibrated for chat: normal is a sentence or two, not a paragraph.
   # Used by the "default" room and any room that has not set its own.
   typical_length: normal
 mcp:

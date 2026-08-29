@@ -11,8 +11,9 @@ personas:
   reference_audio_transcript: null
   reference_audio_language: en
   allow_tool_calls: false
-  # Omit or set to null to follow the room's setting.
-  typical_length: null
+  # Relative to the room's typical_length, never absolute:
+  # much_shorter | shorter | match | longer | much_longer
+  length_bias: match
 - name: Luna
   description: A philosophical poet
   system_prompt: You are Luna, a thoughtful and poetic AI. You speak in a contemplative,
@@ -24,4 +25,4 @@ personas:
   reference_audio_transcript: null
   reference_audio_language: en
   allow_tool_calls: false
-  typical_length: null
+  length_bias: match

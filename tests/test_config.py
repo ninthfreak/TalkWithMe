@@ -15,6 +15,9 @@ from app.config import (
     MCPServerConfig,
     Persona,
     PersonasConfig,
+    LENGTH_SCALE,
+    TYPICAL_LENGTH_SPECS,
+    LengthBias,
     PlayerProfile,
     STTConfig,
     TTSConfig,
@@ -288,45 +291,111 @@ class TestCaching:
 # ---------------------------------------------------------------------------
 
 class TestTypicalLengthDefaults:
-    def test_persona_defaults_to_inheriting(self):
-        assert Persona(name="A", system_prompt="p").typical_length is None
+    def test_persona_defaults_to_matching_the_room(self):
+        assert Persona(name="A", system_prompt="p").length_bias is LengthBias.MATCH
 
     def test_room_and_global_default_to_normal(self):
         assert ChatRoom(name="R").typical_length is TypicalLength.NORMAL
         assert GeneralConfig().typical_length is TypicalLength.NORMAL
 
 
-class TestResolveTypicalLength:
-    def test_persona_override_wins(self):
-        persona = Persona(name="A", system_prompt="p", typical_length=TypicalLength.TERSE)
-        room = ChatRoom(name="R", typical_length=TypicalLength.DETAILED)
-        assert resolve_typical_length(persona, room, TypicalLength.BRIEF) is TypicalLength.TERSE
+class TestChatCalibration:
+    """The scale is for chat, not prose — a real chat line is a fragment,
+    a sentence, or two when the thought needs it."""
 
-    def test_room_wins_when_persona_inherits(self):
-        persona = Persona(name="A", system_prompt="p")
-        room = ChatRoom(name="R", typical_length=TypicalLength.DETAILED)
-        assert resolve_typical_length(persona, room, TypicalLength.BRIEF) is TypicalLength.DETAILED
+    def test_normal_is_a_sentence_or_two(self):
+        spec = TYPICAL_LENGTH_SPECS[TypicalLength.NORMAL]
+        assert spec.words <= 25
+        assert spec.phrasing == "a sentence or two"
+
+    def test_even_the_longest_tier_is_only_a_paragraph(self):
+        assert TYPICAL_LENGTH_SPECS[TypicalLength.VERBOSE].words <= 120
+
+    def test_scale_increases_monotonically(self):
+        words = [TYPICAL_LENGTH_SPECS[t].words for t in LENGTH_SCALE]
+        assert words == sorted(words)
+        assert len(set(words)) == len(words)
+
+    def test_unrestricted_is_outside_the_ordinal_scale(self):
+        # It means "no target", so there is nothing to be relative to.
+        assert TypicalLength.UNRESTRICTED not in LENGTH_SCALE
+        assert TYPICAL_LENGTH_SPECS[TypicalLength.UNRESTRICTED].words == 0
+
+
+class TestResolveTypicalLength:
+    @pytest.mark.parametrize("bias, expected", [
+        (LengthBias.MUCH_SHORTER, TypicalLength.TERSE),
+        (LengthBias.SHORTER, TypicalLength.BRIEF),
+        (LengthBias.MATCH, TypicalLength.NORMAL),
+        (LengthBias.LONGER, TypicalLength.DETAILED),
+        (LengthBias.MUCH_LONGER, TypicalLength.VERBOSE),
+    ])
+    def test_bias_moves_along_the_rooms_scale(self, bias, expected):
+        persona = Persona(name="A", system_prompt="p", length_bias=bias)
+        room = ChatRoom(name="R", typical_length=TypicalLength.NORMAL)
+        assert resolve_typical_length(persona, room, TypicalLength.NORMAL) is expected
+
+    def test_the_same_persona_shifts_with_the_room(self):
+        # The point of a relative bias: a laconic persona is laconic *for
+        # the room*, not laconic in absolute terms.
+        persona = Persona(name="A", system_prompt="p", length_bias=LengthBias.SHORTER)
+        in_terse = resolve_typical_length(
+            persona, ChatRoom(name="R", typical_length=TypicalLength.BRIEF), TypicalLength.NORMAL
+        )
+        in_wordy = resolve_typical_length(
+            persona, ChatRoom(name="R", typical_length=TypicalLength.VERBOSE), TypicalLength.NORMAL
+        )
+        assert in_terse is TypicalLength.TERSE
+        assert in_wordy is TypicalLength.DETAILED
+
+    @pytest.mark.parametrize("base, bias, expected", [
+        (TypicalLength.TERSE, LengthBias.MUCH_SHORTER, TypicalLength.TERSE),
+        (TypicalLength.BRIEF, LengthBias.MUCH_SHORTER, TypicalLength.TERSE),
+        (TypicalLength.VERBOSE, LengthBias.MUCH_LONGER, TypicalLength.VERBOSE),
+        (TypicalLength.DETAILED, LengthBias.MUCH_LONGER, TypicalLength.VERBOSE),
+    ])
+    def test_bias_clamps_at_both_ends(self, base, bias, expected):
+        # A laconic persona in an already-terse room is terse, not silent.
+        persona = Persona(name="A", system_prompt="p", length_bias=bias)
+        room = ChatRoom(name="R", typical_length=base)
+        assert resolve_typical_length(persona, room, TypicalLength.NORMAL) is expected
+
+    def test_unrestricted_room_ignores_bias(self):
+        persona = Persona(name="A", system_prompt="p", length_bias=LengthBias.MUCH_SHORTER)
+        room = ChatRoom(name="R", typical_length=TypicalLength.UNRESTRICTED)
+        assert resolve_typical_length(persona, room, TypicalLength.NORMAL) is (
+            TypicalLength.UNRESTRICTED
+        )
 
     def test_global_used_when_there_is_no_room(self):
         # room=None is the implicit "default" room: no entry, no override.
         persona = Persona(name="A", system_prompt="p")
         assert resolve_typical_length(persona, None, TypicalLength.BRIEF) is TypicalLength.BRIEF
 
+    def test_bias_applies_to_the_global_default_too(self):
+        persona = Persona(name="A", system_prompt="p", length_bias=LengthBias.LONGER)
+        assert resolve_typical_length(persona, None, TypicalLength.BRIEF) is (
+            TypicalLength.NORMAL
+        )
+
 
 class TestDeriveMaxTokens:
-    def test_cap_sits_well_above_the_word_target(self):
-        # ~120 words at NORMAL; the cap must not be shaping replies.
-        assert derive_max_tokens(TypicalLength.NORMAL, 1024) == 504
+    def test_chat_tiers_all_land_on_the_floor(self):
+        # At chat lengths the derived cap would be tiny, so the floor takes
+        # over. That is intended: the prompt shapes the reply, the cap only
+        # stops a runaway. A lower floor would start truncating again.
+        for tier in [TypicalLength.TERSE, TypicalLength.BRIEF,
+                     TypicalLength.NORMAL, TypicalLength.DETAILED]:
+            assert derive_max_tokens(tier, 1024) == 256
 
-    def test_short_tiers_share_the_floor(self):
-        # Below the floor the cap would start truncating again, which is the
-        # failure this feature removes. The prompt line separates the tiers.
-        assert derive_max_tokens(TypicalLength.TERSE, 1024) == 256
-        assert derive_max_tokens(TypicalLength.BRIEF, 1024) == 256
+    def test_cap_sits_well_above_the_word_target(self):
+        spec = TYPICAL_LENGTH_SPECS[TypicalLength.VERBOSE]
+        cap = derive_max_tokens(TypicalLength.VERBOSE, 1024)
+        assert cap > spec.words * 2
 
     def test_configured_ceiling_is_never_exceeded(self):
-        assert derive_max_tokens(TypicalLength.DETAILED, 1024) == 1024
-        assert derive_max_tokens(TypicalLength.NORMAL, 300) == 300
+        assert derive_max_tokens(TypicalLength.VERBOSE, 300) == 300
+        assert derive_max_tokens(TypicalLength.NORMAL, 100) == 100
 
     def test_unrestricted_uses_the_ceiling_unchanged(self):
         assert derive_max_tokens(TypicalLength.UNRESTRICTED, 777) == 777
@@ -344,7 +413,7 @@ class TestTypicalLengthPersistence:
         personas = load_personas(tmp_path / "personas.yaml")
         rooms = load_chatrooms(tmp_path / "chatrooms.yaml")
 
-        assert personas.personas[0].typical_length is None
+        assert personas.personas[0].length_bias is LengthBias.MATCH
         assert rooms.chat_rooms[0].typical_length is TypicalLength.NORMAL
 
     def test_round_trips_as_a_plain_string(self, tmp_path):
@@ -359,12 +428,25 @@ class TestTypicalLengthPersistence:
         assert "typical_length: terse" in target.read_text()
         assert load_chatrooms(target).chat_rooms[0].typical_length is TypicalLength.TERSE
 
-    def test_persona_none_round_trips(self, tmp_path):
+    def test_bias_round_trips_as_a_plain_string(self, tmp_path):
         target = tmp_path / "personas.yaml"
-        save_personas(
-            PersonasConfig(personas=[Persona(name="Alex", system_prompt="hi")]), target
+        save_personas(PersonasConfig(personas=[
+            Persona(name="Alex", system_prompt="hi", length_bias=LengthBias.MUCH_SHORTER)
+        ]), target)
+        assert "length_bias: much_shorter" in target.read_text()
+        assert load_personas(target).personas[0].length_bias is LengthBias.MUCH_SHORTER
+
+    def test_legacy_persona_typical_length_is_dropped_not_fatal(self, tmp_path, caplog):
+        # The absolute per-persona tier is gone; an old file must still load.
+        target = tmp_path / "personas.yaml"
+        target.write_text(
+            "personas:\n- name: Alex\n  system_prompt: hi\n  typical_length: detailed\n"
         )
-        assert load_personas(target).personas[0].typical_length is None
+        with caplog.at_level("INFO"):
+            persona = load_personas(target).personas[0]
+
+        assert persona.length_bias is LengthBias.MATCH
+        assert "no longer supported" in caplog.text
 
 
 class TestPlayerProfile:

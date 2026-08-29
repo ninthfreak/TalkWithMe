@@ -80,7 +80,7 @@ def _to_detail(p: Persona) -> PersonaDetailResponse:
         reference_audio_transcript=p.reference_audio_transcript,
         reference_audio_language=p.reference_audio_language,
         allow_tool_calls=p.allow_tool_calls,
-        typical_length=p.typical_length,
+        length_bias=p.length_bias,
         tts_capable=p.tts_capable,
     )
 
@@ -117,7 +117,7 @@ def create_persona(req: PersonaCreateRequest):
         reference_audio_transcript=req.reference_audio_transcript or None,
         reference_audio_language=req.reference_audio_language,
         allow_tool_calls=req.allow_tool_calls,
-        typical_length=req.typical_length,
+        length_bias=req.length_bias,
     )
     save_personas(PersonasConfig(personas=config.personas + [new_persona]))
     return _to_detail(new_persona)
@@ -165,7 +165,7 @@ def update_persona(name: str, req: PersonaUpdateRequest):
         reference_audio_transcript=req.reference_audio_transcript or None,
         reference_audio_language=req.reference_audio_language,
         allow_tool_calls=req.allow_tool_calls,
-        typical_length=req.typical_length,
+        length_bias=req.length_bias,
     )
     new_list = [updated_persona if p.name == name else p for p in config.personas]
     save_personas(PersonasConfig(personas=new_list))
@@ -213,7 +213,7 @@ def clone_persona(name: str):
         reference_audio_transcript=source.reference_audio_transcript,
         reference_audio_language=source.reference_audio_language,
         allow_tool_calls=source.allow_tool_calls,
-        typical_length=source.typical_length,
+        length_bias=source.length_bias,
     )
     save_personas(PersonasConfig(personas=config.personas + [clone]))
     return _to_detail(clone)

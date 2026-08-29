@@ -340,35 +340,53 @@ So length is set by telling the persona how long to be, not by cutting it off. P
 
 | Tier | Roughly | Prompted as |
 |------|---------|-------------|
-| Terse | ~25 words | one or two short sentences |
-| Brief | ~60 words | two to four sentences |
-| Normal (default) | ~120 words | a short paragraph |
-| Detailed | ~250 words | a few paragraphs |
+| Terse | ~4 words | a few words — often not even a full sentence |
+| Brief | ~10 words | one short sentence |
+| Normal (default) | ~20 words | a sentence or two |
+| Detailed | ~45 words | two or three sentences |
+| Verbose | ~110 words | a short paragraph |
 | Unrestricted | — | no guidance at all |
 
+The scale is calibrated for **chat, not prose**. People in a chat room write a fragment,
+sometimes a whole sentence, occasionally two when the thought needs it — so "normal" is a
+sentence or two, and even "verbose" is only a short paragraph.
+
 It is a *target*, not a limit. A persona is explicitly told it may go longer when the
-question genuinely needs it, so a terse persona can still give you a real answer when you
+thought genuinely needs it, so a terse persona can still give you a real answer when you
 ask a real question.
 
-Set it in three places, most specific first:
+### Rooms set the register; personas sit relative to it
 
-- **Per persona** (persona editor) — optional. "Use room default" means inherit.
-- **Per chat room** (chat rooms editor) — the room's house style.
-- **Globally** (settings dialog, "Chat Behaviour") — used by the `default` room and by
-  any room that has not set its own.
+The **room** picks the tier. A **persona** does not get a length of its own — it gets a
+nudge along whatever scale the room is using:
+
+- Much shorter than the room
+- Shorter than the room
+- Same as the room (default)
+- Longer than the room
+- Much longer than the room
+
+This is the difference between "Sig always writes four words" and "Sig is the quiet one".
+A persona set to *much shorter* answers in a few words in a brisk room, and in a sentence
+or two in a wordy one — still the shortest voice in the room either way. The nudge clamps
+at both ends, so a laconic persona in an already-terse room is simply terse, not silent,
+and an unrestricted room ignores the nudge entirely (there is no target to be relative to).
 
 ```yaml
-# chatrooms.yaml
+# chatrooms.yaml — the room sets the register
 chat_rooms:
   - name: debate-club
-    persona_names: [Alex, Luna]
-    typical_length: brief
+    persona_names: [Alex, Sig]
+    typical_length: normal
 
-# personas.yaml — omit the key, or set it to null, to follow the room
+# personas.yaml — the persona sits relative to it
 personas:
-  - name: Alex
-    typical_length: terse
+  - name: Sig
+    length_bias: much_shorter
 ```
+
+Set the room tier in the chat rooms editor, the persona nudge in the persona editor, and
+the fallback tier (used by the "All Personas" room) in the settings dialog.
 
 ### If you already lowered Max Tokens
 

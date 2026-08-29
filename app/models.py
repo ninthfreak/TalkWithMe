@@ -4,7 +4,7 @@ from typing import List, Optional, Literal
 
 from pydantic import BaseModel, Field
 
-from app.config import PlayerProfile, TypicalLength
+from app.config import LengthBias, PlayerProfile, TypicalLength
 
 
 # ---------------------------------------------------------------------------
@@ -47,8 +47,8 @@ class PersonaCreateRequest(BaseModel):
     reference_audio_transcript: Optional[str] = None
     reference_audio_language: str = Field(default="en", min_length=2, max_length=2)
     allow_tool_calls: bool = False
-    # None inherits the room's tier.
-    typical_length: Optional[TypicalLength] = None
+    # Relative to the room, not absolute.
+    length_bias: LengthBias = LengthBias.MATCH
 
 
 class PersonaUpdateRequest(PersonaCreateRequest):
@@ -96,7 +96,7 @@ class PersonaDetailResponse(BaseModel):
     reference_audio_transcript: Optional[str] = None
     reference_audio_language: str
     allow_tool_calls: bool = False
-    typical_length: Optional[TypicalLength] = None
+    length_bias: LengthBias = LengthBias.MATCH
     tts_capable: bool = False
 
 

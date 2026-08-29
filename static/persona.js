@@ -236,8 +236,8 @@ async function openPersonaForm(name) {
             pfReferenceAudio.value    = p.reference_audio || "";
             pfReferenceAudioTx.value  = p.reference_audio_transcript || "";
             pfAllowToolCalls.checked  = p.allow_tool_calls ?? false;
-            // "" is the inherit option: no persona-level override.
-            pfTypicalLength.value     = p.typical_length || "";
+            // Relative to the room; "match" means simply follow it.
+            pfLengthBias.value        = p.length_bias || "match";
         } catch (err) {
             showPersonaFormError("Failed to load persona details.");
             return;
@@ -254,7 +254,7 @@ async function openPersonaForm(name) {
         pfReferenceAudio.value    = "";
         pfReferenceAudioTx.value  = "";
         pfAllowToolCalls.checked  = false;
-        pfTypicalLength.value     = "";
+        pfLengthBias.value        = "match";
     }
 
     peListView.classList.add("hidden");
@@ -293,8 +293,7 @@ async function submitPersonaForm(e) {
         reference_audio: refAudio || null,
         reference_audio_transcript: refAudioTx || null,
         allow_tool_calls: pfAllowToolCalls.checked,
-        // null (not "") so the backend sees "inherit the room's tier".
-        typical_length: pfTypicalLength.value || null,
+        length_bias: pfLengthBias.value || "match",
     };
 
     try {
