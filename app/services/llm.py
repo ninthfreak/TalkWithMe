@@ -95,13 +95,26 @@ async def stream_chat(
     """
     payload = _base_payload(messages, max_tokens=max_tokens, stop=stop)
     finish_reason: Optional[str] = None
-    async for choice in _iter_completion_chunks(payload):
-        token = (choice.get("delta") or {}).get("content") or ""
-        if token:
-            yield {"type": "token", "token": token}
-        # Intermediate chunks carry null; keep the last non-null value.
-        if choice.get("finish_reason"):
-            finish_reason = choice["finish_reason"]
+    # Hold a handle on the inner generator so it can be closed explicitly.
+    # `async for` does NOT close it: when a caller stops early (the reply
+    # guard cutting at a speaker prefix) and closes *this* generator,
+    # GeneratorExit lands here, the loop unwinds, and the inner generator
+    # is left suspended inside `async with httpx.AsyncClient(...)` with the
+    # HTTP response still open. Its cleanup then waits on the event loop's
+    # asyncgen finalisation hook, so the abandoned request keeps holding a
+    # llama.cpp slot and the *next* persona's call queues behind it — which
+    # is what made the chat stall after a cut reply.
+    chunks = _iter_completion_chunks(payload)
+    try:
+        async for choice in chunks:
+            token = (choice.get("delta") or {}).get("content") or ""
+            if token:
+                yield {"type": "token", "token": token}
+            # Intermediate chunks carry null; keep the last non-null value.
+            if choice.get("finish_reason"):
+                finish_reason = choice["finish_reason"]
+    finally:
+        await chunks.aclose()
     yield {"type": "finish", "reason": finish_reason}
 
 
@@ -238,17 +251,23 @@ async def stream_chat_with_tools(
         content_parts: List[str] = []
         pending_tool_calls: Dict[int, dict] = {}
         finish_reason: Optional[str] = None
-        async for choice in _iter_completion_chunks(payload):
-            delta = choice.get("delta") or {}
-            token = delta.get("content") or ""
-            if token:
-                content_parts.append(token)
-                yield {"type": "token", "token": token}
-            for tc_delta in delta.get("tool_calls") or []:
-                _merge_tool_call_delta(pending_tool_calls, tc_delta)
-            # Intermediate chunks carry null; keep the last non-null value.
-            if choice.get("finish_reason"):
-                finish_reason = choice["finish_reason"]
+        # Explicit close for the same reason as stream_chat: a caller that
+        # stops early must not strand the HTTP response and its llama.cpp slot.
+        chunks = _iter_completion_chunks(payload)
+        try:
+            async for choice in chunks:
+                delta = choice.get("delta") or {}
+                token = delta.get("content") or ""
+                if token:
+                    content_parts.append(token)
+                    yield {"type": "token", "token": token}
+                for tc_delta in delta.get("tool_calls") or []:
+                    _merge_tool_call_delta(pending_tool_calls, tc_delta)
+                # Intermediate chunks carry null; keep the last non-null value.
+                if choice.get("finish_reason"):
+                    finish_reason = choice["finish_reason"]
+        finally:
+            await chunks.aclose()
 
         if not pending_tool_calls:
             # Plain text response — the loop is done.

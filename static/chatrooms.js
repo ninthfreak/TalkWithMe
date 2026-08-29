@@ -601,6 +601,18 @@ function emptyProfile() {
     return { name: "", description: "", appearance: "" };
 }
 
+/**
+ * The name to show on the human's own messages, or "" for none.
+ *
+ * Takes a room name so persisted history renders with the character who
+ * belongs to *that* room, not whichever room happens to be selected.
+ */
+function playerDisplayName(roomName) {
+    const name = roomName || currentChatRoom;
+    const room = allChatRooms.find(r => r.name.toLowerCase() === String(name).toLowerCase());
+    return ((room && room.player_profile && room.player_profile.name) || "").trim();
+}
+
 function profileIsComplete(profile) {
     // Must match PlayerProfile.is_complete on the server: appearance stays
     // optional, so a character can be described without being pictured.

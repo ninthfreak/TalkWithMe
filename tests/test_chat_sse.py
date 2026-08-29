@@ -865,8 +865,10 @@ class TestNeverSpeakAsTheUser:
         assert [m for m in session.history if m.role == "assistant"] == []
         assert [e["type"] for e in events][-1] == "complete"
 
-    def test_a_dropped_reply_does_not_block_the_next_persona(self, client, monkeypatch):
-        _patch_general(monkeypatch, max_persona_replies=2)
+    def test_a_dropped_reply_does_not_use_up_a_reply_slot(self, client, monkeypatch):
+        # One reply was asked for, the first persona was cut, so the next
+        # persona is tried rather than the turn ending empty-handed.
+        _patch_general(monkeypatch, max_persona_replies=1)
         calls = {"n": 0}
 
         async def alternating(messages, max_tokens=None, stop=None):
@@ -878,8 +880,47 @@ class TestNeverSpeakAsTheUser:
         monkeypatch.setattr(chat_router, "stream_chat", alternating)
         events = _chat(client, who_answers="Alex", chat_room="TNG")
 
-        dones = sse_events_by_type(events, "done")
-        assert [d["text"] for d in dones] == ["A real answer."]
+        assert [d["text"] for d in sse_events_by_type(events, "done")] == ["A real answer."]
+
+    def test_retries_after_a_cut_are_bounded(self, client, monkeypatch):
+        # Every persona is cut, so the turn re-rolls until the attempt
+        # budget runs out rather than looping forever.
+        _patch_general(monkeypatch, max_persona_replies=2)
+        _stub_stream(monkeypatch, ["User: nope"])
+
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        starts = sse_events_by_type(events, "start")
+        assert len(starts) == 2 + chat_router.MAX_CUT_RETRIES
+        assert set(e["persona"] for e in starts) <= {"Alex", "Luna"}
+
+    def test_a_persona_that_replied_is_never_asked_again(self, client, monkeypatch):
+        _patch_general(monkeypatch, max_persona_replies=2)
+        _stub_stream(monkeypatch, ["A real answer."])
+
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        who = [e["persona"] for e in sse_events_by_type(events, "done")]
+        assert sorted(who) == ["Alex", "Luna"]
+        assert len(who) == len(set(who))
+
+    def test_everyone_cut_reports_it_instead_of_going_silent(self, client, monkeypatch):
+        # A turn that ends with a start event and nothing after it is
+        # indistinguishable from the app hanging.
+        _stub_stream(monkeypatch, ["User: nope"])
+
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert sse_events_by_type(events, "done") == []
+        errors = sse_events_by_type(events, "error")
+        assert len(errors) == 1
+        assert "in their own voice" in errors[0]["message"]
+        assert [e["type"] for e in events][-1] == "complete"
+
+    def test_a_normal_turn_reports_no_error(self, client, monkeypatch):
+        _stub_stream(monkeypatch, ["A real answer."])
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+        assert sse_events_by_type(events, "error") == []
 
     def test_the_turn_is_stated_at_the_end_of_the_preamble(self, client, monkeypatch):
         calls = _capture(monkeypatch)
@@ -890,3 +931,70 @@ class TestNeverSpeakAsTheUser:
         assert _system_prompt(calls[0]).rstrip().endswith(
             "It is Alex's turn. Reply as Alex, and no one else."
         )
+
+
+class TestReplyCountIsReached:
+    """max_persona_replies must actually be reachable.
+
+    Two separate reasons it silently was not: a cut reply used up the only
+    remaining persona, and the global setting is capped by how many personas
+    the room has.
+    """
+
+    def _room_of(self, monkeypatch, size, max_replies):
+        names = [f"P{i}" for i in range(size)]
+        _patch_personas(monkeypatch, PersonasConfig(personas=[
+            Persona(name=n, description=n, system_prompt=f"You are {n}.", router_hints="x")
+            for n in names
+        ]))
+        _patch_chatrooms(monkeypatch, [ChatRoom(name="Big", persona_names=names)])
+        settings = make_settings()
+        settings.general = GeneralConfig(max_persona_replies=max_replies)
+        monkeypatch.setattr(app_config, "_settings_cache", settings)
+        return names
+
+    def test_six_replies_when_the_room_is_big_enough(self, client, monkeypatch):
+        self._room_of(monkeypatch, size=8, max_replies=6)
+        _stub_stream(monkeypatch, ["fine"])
+
+        events = _chat(client, who_answers="P0", chat_room="Big")
+
+        assert len(sse_events_by_type(events, "done")) == 6
+
+    def test_a_cut_reply_is_replaced_even_at_full_room_size(self, client, monkeypatch):
+        # The room has exactly as many personas as replies requested, so
+        # without a retry budget one cut would make 6 unreachable.
+        self._room_of(monkeypatch, size=6, max_replies=6)
+        calls = {"n": 0}
+
+        async def one_cut(messages, max_tokens=None, stop=None):
+            calls["n"] += 1
+            token = "User: nope" if calls["n"] == 2 else "fine"
+            yield {"type": "token", "token": token}
+            yield {"type": "finish", "reason": "stop"}
+
+        monkeypatch.setattr(chat_router, "stream_chat", one_cut)
+        events = _chat(client, who_answers="P0", chat_room="Big")
+
+        assert len(sse_events_by_type(events, "done")) == 6
+
+    def test_room_smaller_than_the_setting_caps_and_says_so(self, client, monkeypatch, caplog):
+        # Not a bug, but the commonest reason the setting looks ignored —
+        # so it is logged rather than left to guesswork.
+        self._room_of(monkeypatch, size=4, max_replies=6)
+        _stub_stream(monkeypatch, ["fine"])
+
+        with caplog.at_level("INFO"):
+            events = _chat(client, who_answers="P0", chat_room="Big")
+
+        assert len(sse_events_by_type(events, "done")) == 4
+        assert "has 4 persona(s), so at most 4 can reply" in caplog.text
+
+    def test_no_cap_log_when_the_room_is_large_enough(self, client, monkeypatch, caplog):
+        self._room_of(monkeypatch, size=6, max_replies=6)
+        _stub_stream(monkeypatch, ["fine"])
+
+        with caplog.at_level("INFO"):
+            _chat(client, who_answers="P0", chat_room="Big")
+
+        assert "can reply" not in caplog.text

@@ -462,3 +462,79 @@ class TestStreamChatWithTools:
         assert events[-1]["type"] == "finish"
         assert events[-2]["type"] == "tool_call"
         assert tool_events[0]["failed"] is False
+
+
+# ---------------------------------------------------------------------------
+# Early close must tear the HTTP stream down immediately
+# ---------------------------------------------------------------------------
+
+class TestEarlyCloseReleasesTheConnection:
+    """The reply guard stops reading mid-stream on every cut reply.
+
+    When that happens the upstream response has to be closed *then*, not
+    whenever the event loop gets round to finalising an abandoned async
+    generator. llama.cpp serialises on its slots, so a request nobody is
+    reading blocks the next persona's call and the chat stalls — which is
+    exactly what was observed after "produced no reply of its own".
+    """
+
+    def _client_tracking_close(self, monkeypatch):
+        closed = []
+
+        class TrackingStream(FakeStreamResponse):
+            async def __aexit__(self, *exc_info):
+                closed.append(True)
+                return False
+
+        class TrackingClient(FakeLLMClient):
+            def stream(self, method, url, json=None):
+                self.payloads.append(json)
+                return TrackingStream([token_line(str(i)) for i in range(500)])
+
+            async def __aexit__(self, *exc_info):
+                closed.append(True)
+                return False
+
+        patch_llm_client(monkeypatch, TrackingClient([]))
+        return closed
+
+    def test_aclose_after_break_closes_the_response(self, monkeypatch):
+        closed = self._client_tracking_close(monkeypatch)
+
+        async def consume_two_then_close():
+            stream = llm.stream_chat([{"role": "user", "content": "hi"}])
+            seen = 0
+            async for event in stream:
+                if event["type"] == "token":
+                    seen += 1
+                    if seen == 2:
+                        break
+            await stream.aclose()
+            return seen
+
+        assert _run_until_complete(consume_two_then_close()) == 2
+        # Closed by the aclose() above, not left to the GC finaliser.
+        assert closed, "the HTTP response was still open after aclose()"
+
+    def test_tool_stream_also_closes_on_early_break(self, monkeypatch):
+        closed = self._client_tracking_close(monkeypatch)
+
+        async def consume_one_then_close():
+            stream = llm.stream_chat_with_tools([{"role": "user", "content": "hi"}], [])
+            async for event in stream:
+                if event["type"] == "token":
+                    break
+            await stream.aclose()
+
+        _run_until_complete(consume_one_then_close())
+        assert closed, "the HTTP response was still open after aclose()"
+
+    def test_a_fully_consumed_stream_still_closes(self, monkeypatch):
+        closed = self._client_tracking_close(monkeypatch)
+
+        async def consume_all():
+            return [e async for e in llm.stream_chat([{"role": "user", "content": "hi"}])]
+
+        events = _run_until_complete(consume_all())
+        assert events[-1]["type"] == "finish"
+        assert closed

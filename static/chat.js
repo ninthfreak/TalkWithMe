@@ -291,6 +291,21 @@ function handleSSEEvent(event) {
    Bubble creation
    ========================================================================== */
 
+/**
+ * Label the human's own bubble with their character name, matching how
+ * persona bubbles are labelled. Nothing is added when the room has no
+ * character, so an ordinary chat looks exactly as it did.
+ */
+function addUserNameLabel(wrapper, roomName) {
+    const name = playerDisplayName(roomName);
+    if (!name) return;
+    const nameEl = document.createElement("div");
+    nameEl.className = "bubble-name";
+    nameEl.textContent = name;
+    wrapper.appendChild(nameEl);
+}
+
+
 function appendUserBubble(text, messageId) {
     const row = document.createElement("div");
     row.className = "message-row user";
@@ -302,6 +317,8 @@ function appendUserBubble(text, messageId) {
     // otherwise place audio to the left of the bubble).
     const wrapper = document.createElement("div");
     wrapper.className = "user-message-content";
+
+    addUserNameLabel(wrapper);
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";
@@ -478,6 +495,8 @@ function appendPersistedUserBubble(msg, roomName) {
     // Wrapper keeps bubble + audio stacked vertically.
     const wrapper = document.createElement("div");
     wrapper.className = "user-message-content";
+
+    addUserNameLabel(wrapper, roomName);
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";

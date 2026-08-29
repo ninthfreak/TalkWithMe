@@ -39,6 +39,18 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 # frontend matches on this to pop the profile editor open.
 PROFILE_REQUIRED_MESSAGE = "This room needs your character profile before you can chat."
 
+# Shown when every persona's reply was cut for writing as somebody else, so
+# the turn produced nothing. Silence here looks identical to a hang.
+# Extra attempts allowed per turn to replace replies the guard cut. Without
+# slack, a room whose size equals max_persona_replies could never reach the
+# requested count once a single reply was cut.
+MAX_CUT_RETRIES = 3
+
+NO_USABLE_REPLY_MESSAGE = (
+    "No one managed a reply in their own voice — they kept answering as each other. "
+    "Try sending again."
+)
+
 
 # ---------------------------------------------------------------------------
 # Persona pool resolution — derive eligible personas from chat room config
@@ -309,7 +321,17 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
         return
 
     settings = get_settings()
-    max_replies = min(settings.general.max_persona_replies, len(eligible))
+    requested_replies = settings.general.max_persona_replies
+    max_replies = min(requested_replies, len(eligible))
+    if max_replies < requested_replies:
+        # The commonest reason "max persona replies" appears not to work:
+        # the setting is global but the room is smaller than it. Say so,
+        # rather than leaving the user to guess why 6 produced 4.
+        logger.info(
+            "Room '%s' has %d persona(s), so at most %d can reply "
+            "(max_persona_replies is %d)",
+            req.chat_room, len(eligible), max_replies, requested_replies,
+        )
 
     # Pick the first persona using the configured strategy
     first_persona_name = await _pick_persona(req.who_answers, req.message, req.chat_room)
@@ -328,23 +350,36 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     if echo_enabled:
         max_replies = 1
 
+    # A cut reply costs an attempt but not a slot. Tracking attempts per
+    # persona (rather than a flat "already tried" list) lets a persona whose
+    # reply was cut be re-rolled once everyone untried has had a go — which
+    # matters most when max_replies equals the room size, where a single cut
+    # would otherwise make the requested count unreachable. A persona that
+    # actually replied is never asked again in the same turn.
     replied_personas: list[str] = []
+    attempts: dict[str, int] = {}
+    attempt_budget = max_replies + MAX_CUT_RETRIES
 
-    for reply_idx in range(max_replies):
-        if reply_idx == 0:
+    while len(replied_personas) < max_replies and sum(attempts.values()) < attempt_budget:
+        if not attempts:
             persona_name = first_persona_name
         else:
-            remaining = [n for n in eligible if n not in replied_personas]
-            if not remaining:
+            candidates = [n for n in eligible if n not in replied_personas]
+            if not candidates:
                 break
-            persona_name = random.choice(remaining)
+            # Untried personas first; only re-roll a cut one when nobody
+            # fresh is left.
+            fewest = min(attempts.get(n, 0) for n in candidates)
+            persona_name = random.choice(
+                [n for n in candidates if attempts.get(n, 0) == fewest]
+            )
 
         persona = next((p for p in config.personas if p.name == persona_name), None)
         if not persona:
             yield f'data: {json.dumps({"type": "error", "message": f"Persona {persona_name} not found"})}\n\n'
             return
 
-        replied_personas.append(persona_name)
+        attempts[persona_name] = attempts.get(persona_name, 0) + 1
 
         # Generate the assistant message ID BEFORE emitting "start". The
         # frontend stamps it onto every TTS item enqueued during this
@@ -452,7 +487,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
             # a meaningless "[Name]: " line. Skip it; the frontend reuses the
             # untouched row for whoever speaks next.
             logger.info(
-                "%s produced no reply of its own (cut at %r); skipping",
+                "%s produced no reply of its own (cut at %r); trying the next persona",
                 persona_name, guard.cut_at,
             )
             continue
@@ -462,7 +497,19 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
             full_text, persona_name, assistant_message_id, truncated=truncated
         )
 
+        replied_personas.append(persona_name)
+
         yield f'data: {json.dumps({"type": "done", "persona": persona_name, "text": full_text, "message_id": assistant_message_id})}\n\n'
+
+    if not replied_personas:
+        # Every persona was cut. Without this the turn ends with a start
+        # event and nothing after it: an empty bubble and no explanation,
+        # which reads as the app having hung.
+        logger.warning(
+            "No persona produced a usable reply in room '%s' (tried %s)",
+            req.chat_room, ", ".join(attempts) or "nobody",
+        )
+        yield f'data: {json.dumps({"type": "error", "message": NO_USABLE_REPLY_MESSAGE})}\n\n'
 
     yield f'data: {json.dumps({"type": "complete"})}\n\n'
 

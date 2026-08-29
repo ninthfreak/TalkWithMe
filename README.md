@@ -287,6 +287,8 @@ For lowest lag time, consider OmniVoice as the TTS server. It is considerably fa
 
 By default, only one AI persona in the current chat room will answer your prompt. You can make it feel more like a group chat by turning up the `max_persona_replies` option in `settings.yaml` (or by visiting the settings dialog). You can choose any number between 1 and 6. The given number of AI personas will answer your prompt (or reply to the persona who responded before them). Your personas may argue amongst themselves, depending on their respective system prompts!
 
+**A room can only field as many repliers as it has personas.** The setting is global, so a room with four personas assigned answers at most four times however high you set it — check the persona list in the left panel if you are getting fewer replies than you asked for. The startup log says so explicitly when it happens.
+
 If replies come out too long, set a [typical response length](#response-length) rather than lowering `max_tokens`.
 
 ## MCP tools (optional)
@@ -440,7 +442,9 @@ behalf.
 Because models do not always listen, that instruction is backed up mechanically. If a
 reply starts producing another speaker's turn — another persona's *or yours* — it is cut
 at that point, and you see the persona's own words and nothing else. If nothing of its
-own survives the cut, the reply is dropped rather than shown as an empty bubble. A persona that prefixes its own reply with its own
+own survives the cut, the reply is dropped and the next persona is asked instead, so a
+cut reply does not cost you one of your requested answers. In the rare case where nobody
+manages a reply in their own voice, the chat says so rather than sitting there empty. A persona that prefixes its own reply with its own
 name has that prefix removed. And if a reply *does* hit the token ceiling, the next
 persona is handed it trimmed to its last complete sentence, so there is no dangling
 thought inviting them to finish it.
@@ -462,6 +466,10 @@ Personas") and fill in:
 - **What you look like** — optional. This is the "picture", and it is deliberately
   *text*: the personas are the audience for it and they read descriptions, so write
   "short, scarred hands, a patched green coat and a limp" rather than uploading a photo.
+
+Once your character has a name, your own messages are labelled with it, the same way
+persona messages are labelled — still on the right-hand side, so it stays obvious which
+are yours.
 
 Each room has its own profile, so you can be a different character in each one. Ticking
 **Require my character** makes the room refuse messages until the profile has a name and
