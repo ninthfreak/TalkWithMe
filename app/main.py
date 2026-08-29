@@ -42,6 +42,16 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load config and initialize the session on startup."""
+    # One-time copy of any repo-root config into config/, upgrading the
+    # schema on the way. Must run before the loads below so they pick up
+    # the migrated files.
+    migrated = app_config.migrate_config_files()
+    if migrated:
+        logger.info(
+            "Migrated config into %s: %s",
+            app_config.config_dir(), ", ".join(migrated),
+        )
+
     # Load configuration files
     personas_cfg = app_config.load_personas()
     settings = app_config.load_settings()

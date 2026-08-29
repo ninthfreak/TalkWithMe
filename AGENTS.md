@@ -29,16 +29,13 @@ python3 -m pytest        # from the project root; config in pytest.ini
 
 ## Config — three YAML files, cached at startup
 
-| File | Purpose |
-|------|---------|
-| `settings.yaml` | LLM, TTS, STT endpoints and parameters, general chat parameters, MCP server list |
-| `personas.yaml` | Persona definitions (name, system prompt, TTS voice, etc.) |
-| `chatrooms.yaml` | Chat room groupings (may not exist; code handles gracefully) |
+**Two locations, one of them inert.** The app reads and writes `config/settings.yaml`, `config/personas.yaml`, `config/chatrooms.yaml` (gitignored). The identically-named files at the **repo root are tracked shipped defaults and are never written to.** Do not "tidy this up" by untracking the root copies: `git rm --cached` on them makes the next `git pull` try to delete files users have edited locally, and git aborts the merge with *"Your local changes to the following files would be overwritten by merge"*. That is the bug this layout exists to prevent.
 
-All three are loaded once at startup and cached as module-level globals in `app/config.py`.
-In request handlers, **always use** `get_settings()`, `get_personas()`, `get_chatrooms()` — never call `load_*()` directly.
-To force a re-read of all three files, call `app.config.reload_all()`.
-**Caveat:** `reload_all()` does NOT re-run MCP tool discovery — the tool cache in `app/services/tool_registry.py` is built once at startup. Changes to the `mcp:` section of settings.yaml require a full app restart.
+`config_path()` in `app/config.py` prefers `config/` and falls back to the root copy, so the very first run after an upgrade still sees the user's existing settings. `migrate_config_files()` (called from the `app/main.py` lifespan, before any load) **copies** root → `config/`, upgrading the schema on the way; it never moves or deletes, and never overwrites an existing `config/` file. `save_*()` always writes to `config/`. All path helpers read `_PROJECT_ROOT` at call time so `tests/conftest.py` can repoint them at `tmp_path`.
+
+**Schema versioning.** Every written file starts with `schema_version` (`CONFIG_SCHEMA_VERSION` in `app/config_migrations.py`); files predating it are version 1. `load_*()` runs the raw dict through `migrate_personas` / `migrate_chatrooms` / `migrate_settings` **before Pydantic sees it** — that ordering is load-bearing, since once a model has parsed or dropped a legacy key the information needed to migrate it is gone. Migrations return `(raw, notes)` and the notes are logged, so an upgrade is visible. A file from a *newer* schema loads with a warning rather than failing. To add a migration: bump the version, add a step to the relevant chain, and cover it in `tests/test_config_migrations.py` with a real old-format file.
+
+Migrations translate rather than drop wherever intent can be preserved — a persona's old absolute `typical_length` becomes the equivalent relative `length_bias` (its offset from the old `normal`), so a laconic persona stays laconic instead of being silently flattened to the default.
 
 ## Architecture
 

@@ -62,8 +62,18 @@ def isolated_app_state(tmp_path, monkeypatch):
 
 @pytest.fixture
 def tmp_project_root(tmp_path) -> Path:
-    """The tmp directory standing in for the project root (YAML files)."""
+    """The tmp directory standing in for the project root."""
     return tmp_path
+
+
+@pytest.fixture
+def tmp_config_dir(tmp_path) -> Path:
+    """Where the app writes live config — tmp_path/config, not the root.
+
+    The repo-root copies are shipped starting points and are never written
+    to; see app/config.py for why they stay tracked.
+    """
+    return tmp_path / "config"
 
 
 @pytest.fixture

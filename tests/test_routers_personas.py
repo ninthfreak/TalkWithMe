@@ -34,7 +34,7 @@ class TestCreatePersona:
         payload.update(overrides)
         return payload
 
-    def test_create_appends_persona_and_persists_to_yaml(self, client, tmp_project_root):
+    def test_create_appends_persona_and_persists_to_yaml(self, client, tmp_config_dir, tmp_project_root):
         resp = client.post("/api/personas", json=self._payload())
         assert resp.status_code == 201
         assert resp.json()["name"] == "Data"
@@ -42,8 +42,10 @@ class TestCreatePersona:
         # In-memory list now includes it...
         names = [p["name"] for p in client.get("/api/personas").json()]
         assert names == ["Alex", "Luna", "Data"]
-        # ...and it landed in personas.yaml (which the fixture redirects to tmp).
-        assert (tmp_project_root / "personas.yaml").exists()
+        # ...and it landed in config/personas.yaml, never the tracked
+        # repo-root copy (writing there is what broke `git pull`).
+        assert (tmp_config_dir / "personas.yaml").exists()
+        assert not (tmp_project_root / "personas.yaml").exists()
 
     def test_create_strips_whitespace_in_name(self, client):
         resp = client.post("/api/personas", json=self._payload(name="  Worf  "))
