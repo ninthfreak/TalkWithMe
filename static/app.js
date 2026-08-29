@@ -111,6 +111,7 @@ function setupEventListeners() {
     // Echo is an action, not a mode — one click, one echoed line, and the
     // room is left exactly as it was.
     echoBtn.addEventListener("click", () => sendMessage({ echo: true }));
+    suggestBtn.addEventListener("click", suggestMessage);
     inputEl.addEventListener("keydown", (e) => {
         // Enter sends; Shift+Enter for newline
         if (e.key === "Enter" && !e.shiftKey) {

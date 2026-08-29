@@ -1018,3 +1018,117 @@ class TestReplyCountIsReached:
             _chat(client, who_answers="P0", chat_room="Big")
 
         assert "can reply" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Suggested player message
+# ---------------------------------------------------------------------------
+
+class TestSuggestReply:
+    """Drafting the player's own next message.
+
+    The deliberate inverse of the reply guard's job: here the LLM is asked
+    to write as the player, because the player asked it to and the result
+    lands in their input box to edit.
+    """
+
+    def _stub(self, monkeypatch, result="Aye, that'll be tuppence."):
+        seen = []
+
+        async def fake(messages, max_tokens=64, temperature=None):
+            seen.append({"messages": messages, "max_tokens": max_tokens,
+                         "temperature": temperature})
+            return result
+
+        monkeypatch.setattr(chat_router, "chat_completion", fake)
+        return seen
+
+    def _suggest(self, client, room="TNG"):
+        resp = client.post("/api/chat/suggest", json={"chat_room": room})
+        assert resp.status_code == 200, resp.text
+        return resp.json()["text"]
+
+    def test_returns_a_draft(self, client, monkeypatch):
+        self._stub(monkeypatch)
+        assert self._suggest(client) == "Aye, that'll be tuppence."
+
+    def test_the_players_own_messages_are_the_voice_sample(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        session.add_user_message_no_persist("aye, what'll it be then")
+        session.add_assistant_message_no_persist("A stout.", "Alex")
+        session.add_user_message_no_persist("comin right up")
+
+        self._suggest(client)
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "Match their voice" in prompt
+        assert "- aye, what'll it be then" in prompt
+        assert "- comin right up" in prompt
+        # A persona's line is context, not a voice sample.
+        assert "- A stout." not in prompt
+
+    def test_the_conversation_is_included_for_context(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        session.add_user_message_no_persist("what's the news?")
+        session.add_assistant_message_no_persist("Rain, mostly.", "Alex")
+
+        self._suggest(client)
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "[Alex]: Rain, mostly." in prompt
+
+    def test_the_character_profile_is_written_in_the_first_person(self, client, monkeypatch):
+        # Not the persona-facing block, which ends "never write their lines
+        # for them" — the exact opposite of what is being asked here.
+        _profiled_room(monkeypatch, name="Kira", description="A retired thief.",
+                       appearance="A patched green coat.")
+        seen = self._stub(monkeypatch)
+
+        self._suggest(client, room="Tavern")
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "You are Kira. A retired thief." in prompt
+        assert "You look like this: A patched green coat." in prompt
+        assert "Never write their lines for them" not in prompt
+
+    def test_it_writes_as_the_named_character(self, client, monkeypatch):
+        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        seen = self._stub(monkeypatch)
+
+        self._suggest(client, room="Tavern")
+
+        assert "next message for Kira" in seen[0]["messages"][0]["content"]
+
+    def test_prose_uses_the_configured_temperature_not_the_routers(self, client, monkeypatch):
+        # chat_completion defaults to 0.1, which is right for picking a name
+        # and wrong for writing a line.
+        seen = self._stub(monkeypatch)
+        self._suggest(client)
+        assert seen[0]["temperature"] == 0.8
+        assert seen[0]["max_tokens"] == 256
+
+    def test_a_name_prefix_is_stripped_from_the_draft(self, client, monkeypatch):
+        self._stub(monkeypatch, result="User: aye, right you are")
+        assert self._suggest(client) == "aye, right you are"
+
+    def test_a_draft_that_runs_into_a_persona_is_cut(self, client, monkeypatch):
+        self._stub(monkeypatch, result="Right you are.\n[Luna]: And I would add...")
+        assert self._suggest(client) == "Right you are."
+
+    def test_works_with_no_history_at_all(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        assert self._suggest(client) == "Aye, that'll be tuppence."
+        assert "Match their voice" not in seen[0]["messages"][0]["content"]
+
+    def test_an_llm_failure_is_reported_not_swallowed(self, client, monkeypatch):
+        self._stub(monkeypatch, result="")
+        resp = client.post("/api/chat/suggest", json={"chat_room": "TNG"})
+        assert resp.status_code == 503
+        assert "did not return a suggestion" in resp.json()["detail"]
+
+    def test_nothing_is_sent_or_persisted(self, client, monkeypatch):
+        self._stub(monkeypatch)
+        self._suggest(client)
+        assert session.history == []
+        from app.persistence import load_history
+        assert load_history("TNG") == []

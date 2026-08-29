@@ -62,6 +62,7 @@ const messagesEl = document.getElementById("messages");
 const inputEl = document.getElementById("message-input");
 const sendBtn = document.getElementById("btn-send");
 const echoBtn = document.getElementById("btn-echo");
+const suggestBtn = document.getElementById("btn-suggest");
 const micBtn = document.getElementById("btn-mic");
 const newChatBtn = document.getElementById("btn-new-chat");
 const ttsToggleBtn = document.getElementById("btn-tts-toggle");

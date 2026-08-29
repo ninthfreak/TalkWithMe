@@ -36,6 +36,16 @@ class ChatRequest(BaseModel):
     )
 
 
+class SuggestReplyRequest(BaseModel):
+    """Ask the LLM to draft the player's next message."""
+    chat_room: str = Field(default="default", description="Room to draft for")
+
+
+class SuggestReplyResponse(BaseModel):
+    """A drafted message for the player to review, edit and send."""
+    text: str
+
+
 class SessionPersonasRequest(BaseModel):
     """Update which personas are active in the current session."""
     active_personas: List[str] = Field(

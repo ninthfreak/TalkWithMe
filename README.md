@@ -509,6 +509,16 @@ them by name. Never write their lines for them.
 The profile lives in `config/chatrooms.yaml`, which is gitignored — it stays on your machine.
 The "All Personas" room cannot carry a profile, since it has no entry of its own.
 
+## Writing your own lines with help
+
+The pencil button beside the send arrow drafts **your** next message and puts it in the
+input box. It reads your own recent messages as a guide to voice, vocabulary and length,
+plus your character profile and the conversation so far, so the draft sounds like you
+rather than like an assistant.
+
+It goes into the input box, never straight into the chat — edit it, send it, echo it, or
+clear it. Nothing is sent or saved until you press send.
+
 ## Echo — making a persona say a line
 
 The speech-bubble button beside the send arrow sends your message to be **echoed back

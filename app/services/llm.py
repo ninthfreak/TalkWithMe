@@ -118,8 +118,16 @@ async def stream_chat(
     yield {"type": "finish", "reason": finish_reason}
 
 
-async def chat_completion(messages: List[Dict[str, str]], max_tokens: int = 64) -> str:
-    """Non-streaming LLM call. Used for the persona router.
+async def chat_completion(
+    messages: List[Dict[str, str]],
+    max_tokens: int = 64,
+    temperature: Optional[float] = None,
+) -> str:
+    """Non-streaming LLM call. Used for the persona router and suggestions.
+
+    *temperature* defaults to 0.1, which is what the router wants — it is
+    picking a name, not writing. Callers producing prose (the suggested
+    player message) should pass the configured sampling temperature.
 
     Returns the full response text, or empty string on failure.
     """
@@ -130,7 +138,7 @@ async def chat_completion(messages: List[Dict[str, str]], max_tokens: int = 64) 
         "model": settings.llm.model,
         "messages": messages,
         "max_tokens": max_tokens,
-        "temperature": 0.1,  # Low temperature for deterministic routing
+        "temperature": 0.1 if temperature is None else temperature,
         "stream": False,
     }
 
