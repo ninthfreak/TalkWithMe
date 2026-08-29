@@ -287,6 +287,8 @@ For lowest lag time, consider OmniVoice as the TTS server. It is considerably fa
 
 By default, only one AI persona in the current chat room will answer your prompt. You can make it feel more like a group chat by turning up the `max_persona_replies` option in `settings.yaml` (or by visiting the settings dialog). You can choose any number between 1 and 6. The given number of AI personas will answer your prompt (or reply to the persona who responded before them). Your personas may argue amongst themselves, depending on their respective system prompts!
 
+**A room can only field as many repliers as it has personas.** The setting is global, so a room with four personas assigned answers at most four times however high you set it — check the persona list in the left panel if you are getting fewer replies than you asked for. The startup log says so explicitly when it happens.
+
 If replies come out too long, set a [typical response length](#response-length) rather than lowering `max_tokens`.
 
 ## MCP tools (optional)

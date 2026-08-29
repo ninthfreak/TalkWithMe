@@ -41,6 +41,11 @@ PROFILE_REQUIRED_MESSAGE = "This room needs your character profile before you ca
 
 # Shown when every persona's reply was cut for writing as somebody else, so
 # the turn produced nothing. Silence here looks identical to a hang.
+# Extra attempts allowed per turn to replace replies the guard cut. Without
+# slack, a room whose size equals max_persona_replies could never reach the
+# requested count once a single reply was cut.
+MAX_CUT_RETRIES = 3
+
 NO_USABLE_REPLY_MESSAGE = (
     "No one managed a reply in their own voice — they kept answering as each other. "
     "Try sending again."
@@ -316,7 +321,17 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
         return
 
     settings = get_settings()
-    max_replies = min(settings.general.max_persona_replies, len(eligible))
+    requested_replies = settings.general.max_persona_replies
+    max_replies = min(requested_replies, len(eligible))
+    if max_replies < requested_replies:
+        # The commonest reason "max persona replies" appears not to work:
+        # the setting is global but the room is smaller than it. Say so,
+        # rather than leaving the user to guess why 6 produced 4.
+        logger.info(
+            "Room '%s' has %d persona(s), so at most %d can reply "
+            "(max_persona_replies is %d)",
+            req.chat_room, len(eligible), max_replies, requested_replies,
+        )
 
     # Pick the first persona using the configured strategy
     first_persona_name = await _pick_persona(req.who_answers, req.message, req.chat_room)
@@ -335,28 +350,36 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     if echo_enabled:
         max_replies = 1
 
-    # Two lists, not one: a persona whose reply the guard cuts to nothing
-    # has been *tried* but has not *replied*, and must not use up one of the
-    # requested reply slots. Conflating them is why a cut reply could leave
-    # the user with fewer answers than they asked for — or none at all.
-    attempted_personas: list[str] = []
+    # A cut reply costs an attempt but not a slot. Tracking attempts per
+    # persona (rather than a flat "already tried" list) lets a persona whose
+    # reply was cut be re-rolled once everyone untried has had a go — which
+    # matters most when max_replies equals the room size, where a single cut
+    # would otherwise make the requested count unreachable. A persona that
+    # actually replied is never asked again in the same turn.
     replied_personas: list[str] = []
+    attempts: dict[str, int] = {}
+    attempt_budget = max_replies + MAX_CUT_RETRIES
 
-    while len(replied_personas) < max_replies:
-        if not attempted_personas:
+    while len(replied_personas) < max_replies and sum(attempts.values()) < attempt_budget:
+        if not attempts:
             persona_name = first_persona_name
         else:
-            remaining = [n for n in eligible if n not in attempted_personas]
-            if not remaining:
+            candidates = [n for n in eligible if n not in replied_personas]
+            if not candidates:
                 break
-            persona_name = random.choice(remaining)
+            # Untried personas first; only re-roll a cut one when nobody
+            # fresh is left.
+            fewest = min(attempts.get(n, 0) for n in candidates)
+            persona_name = random.choice(
+                [n for n in candidates if attempts.get(n, 0) == fewest]
+            )
 
         persona = next((p for p in config.personas if p.name == persona_name), None)
         if not persona:
             yield f'data: {json.dumps({"type": "error", "message": f"Persona {persona_name} not found"})}\n\n'
             return
 
-        attempted_personas.append(persona_name)
+        attempts[persona_name] = attempts.get(persona_name, 0) + 1
 
         # Generate the assistant message ID BEFORE emitting "start". The
         # frontend stamps it onto every TTS item enqueued during this
@@ -484,7 +507,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
         # which reads as the app having hung.
         logger.warning(
             "No persona produced a usable reply in room '%s' (tried %s)",
-            req.chat_room, ", ".join(attempted_personas) or "nobody",
+            req.chat_room, ", ".join(attempts) or "nobody",
         )
         yield f'data: {json.dumps({"type": "error", "message": NO_USABLE_REPLY_MESSAGE})}\n\n'
 
