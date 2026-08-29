@@ -223,8 +223,8 @@ Selecting the "Chat rooms" control in the top right brings up the chat room edit
 Here, you can:
 
 - **Create** a new chat room (names must be unique)
-- **Edit** a room's settings — typical response length and whether the room requires
-  your character. This is the place to change how an existing room
+- **Edit** a room's settings — typical response length, echo chamber, and whether the
+  room requires your character. This is the place to change how an existing room
   behaves, and new room options will appear here as they are added.
 - **Delete** a chat room (and its chat history)
 
@@ -238,6 +238,7 @@ chat_rooms:
   - Troi
   - Data
   - Picard
+  echo_chamber: false
 - name: Language_learning
   persona_names:
   - English expert
@@ -246,6 +247,7 @@ chat_rooms:
 - name: chit-chat
   persona_names:
   - kstew
+  echo_chamber: true
 ```
 
 Personas can be added/removed to a chat room via the main chat interface's left panel:
@@ -450,8 +452,8 @@ name has that prefix removed. And if a reply *does* hit the token ceiling, the n
 persona is handed it trimmed to its last complete sentence, so there is no dangling
 thought inviting them to finish it.
 
-None of this is configurable; it applies to every reply, except an echoed message,
-where nothing is generated in the first place.
+None of this is configurable; it applies to every room except echo chamber rooms, where
+nothing is generated in the first place.
 
 ## How much the personas remember
 
@@ -522,22 +524,14 @@ else is in the room, so the draft sounds like you rather than like an assistant.
 
 Without a character set for the room it still works, going on your past messages alone.
 
-It goes into the input box, never straight into the chat — edit it, send it, echo it, or
-clear it. Nothing is sent or saved until you press send.
+It goes into the input box, never straight into the chat — edit it, send it, or clear
+it. Nothing is sent or saved until you press send.
 
-## Echo — making a persona say a line
+## Echo chamber
 
-The speech-bubble button beside the send arrow sends your message to be **echoed back
-verbatim** in a persona's voice instead of answered. With a TTS server configured, that
-is how you make a specific persona speak a specific line of dialogue.
-
-It applies to that one message only. The next thing you send is answered normally and the
-room is left exactly as it was — echoing is something you *do*, not a mode you leave a
-room in. Use the "Who should answer?" chooser to pick which persona speaks it.
-
-(This was previously an "echo chamber" checkbox stored on the room, which meant a room
-kept echoing until you remembered to switch it back off. Existing rooms are migrated
-automatically and the stored setting simply disappears.)
+Enabling the "echo chamber" option in a chat room will cause the responding persona to simply echo back
+whatever you type or speak, verbatim. This is useful with TTS servers, if you want to hear a persona
+speak a specific line of dialogue. This option is disabled by default.
 
 ## Detailed setup guide
 

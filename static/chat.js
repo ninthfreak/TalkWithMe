@@ -62,7 +62,7 @@ function getWhoAnswers() {
    Send message
    ========================================================================== */
 
-async function sendMessage({ echo = false } = {}) {
+async function sendMessage() {
     const text = inputEl.value.trim();
     if (!text || isStreaming) return;
 
@@ -133,9 +133,6 @@ async function sendMessage({ echo = false } = {}) {
                 who_answers: who,
                 chat_room: currentChatRoom,
                 message_id: pendingUserMessageId,
-                // Per message, never a room setting: echoing is an act
-                // ("say this line"), not a state to leave a room in.
-                echo,
             }),
         });
 

@@ -29,8 +29,12 @@ logger = logging.getLogger(__name__)
 # 2 = personas use length_bias (relative) instead of typical_length
 #     (absolute); rooms gained typical_length / player_profile; the length
 #     scale was recalibrated for chat.
-# 3 = echo_chamber is no longer a room setting; echo is a per-message flag
-#     on the chat request.
+# 3 = no structural change. A version 3 briefly removed the room-level
+#     echo_chamber flag; that was reverted, so nothing is rewritten. The
+#     number is *not* rolled back to 2, because files stamped 3 by the
+#     short-lived version would otherwise warn "newer than this app
+#     understands" on every load. Rooms that were migrated while it was in
+#     place lost their echo_chamber flag and default to off.
 CONFIG_SCHEMA_VERSION = 3
 
 Notes = List[str]
@@ -136,26 +140,6 @@ def _personas_v1_to_v2(raw: dict) -> Tuple[dict, Notes]:
 _PERSONA_STEPS: Dict[int, Step] = {1: _personas_v1_to_v2}
 
 
-def _chatrooms_v2_to_v3(raw: dict) -> Tuple[dict, Notes]:
-    """Drop the stored echo_chamber flag.
-
-    Echoing is an act, not a state: the reason to use it is "make this
-    persona say this exact line", which happens once. Storing it on the
-    room left the room permanently in echo mode until someone remembered
-    to turn it off. It is now a flag on the chat request, so there is
-    nothing to carry over.
-    """
-    notes: Notes = []
-    for room in raw.get("chat_rooms") or []:
-        if isinstance(room, dict) and "echo_chamber" in room:
-            was = room.pop("echo_chamber")
-            notes.append(
-                f"{room.get('name', '<unknown>')}: dropped 'echo_chamber: {was}' "
-                "— echo is now chosen per message, with the Echo button by the input box"
-            )
-    return raw, notes
-
-
 def migrate_personas(raw: dict) -> Tuple[dict, Notes]:
     """Bring a raw personas.yaml dict up to the current schema."""
     return _apply(raw, _PERSONA_STEPS)
@@ -164,13 +148,15 @@ def migrate_personas(raw: dict) -> Tuple[dict, Notes]:
 # ---------------------------------------------------------------------------
 # Chat rooms and settings
 # ---------------------------------------------------------------------------
-
-_CHATROOM_STEPS: Dict[int, Step] = {2: _chatrooms_v2_to_v3}
-
+#
+# Both gained only new keys, and every new key has a default, so there is
+# nothing to rewrite — the version stamp is the whole migration. They still
+# go through _apply so the stamp is added and a future step has somewhere
+# to live.
 
 def migrate_chatrooms(raw: dict) -> Tuple[dict, Notes]:
     """Bring a raw chatrooms.yaml dict up to the current schema."""
-    return _apply(raw, _CHATROOM_STEPS)
+    return _apply(raw, {})
 
 
 def migrate_settings(raw: dict) -> Tuple[dict, Notes]:
