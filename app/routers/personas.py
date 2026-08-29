@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, Response
 
 from app.config import (
-    ChatRoom,
     ChatRoomsConfig,
     get_chatrooms,
     get_personas,
@@ -34,7 +33,10 @@ def _cascade_persona_rename(old_name: str, new_name: str) -> None:
     updated = []
     for room in config.chat_rooms:
         new_names = [new_name if p == old_name else p for p in room.persona_names]
-        updated.append(ChatRoom(name=room.name, persona_names=new_names))
+        # model_copy, not a fresh ChatRoom: rebuilding field-by-field drops
+        # every room setting the call site forgets to list (echo_chamber was
+        # being reset to False by every rename and delete).
+        updated.append(room.model_copy(update={"persona_names": new_names}))
     save_chatrooms(ChatRoomsConfig(chat_rooms=updated))
     logger.info("Cascaded persona rename '%s' -> '%s' to chat rooms", old_name, new_name)
 
@@ -51,7 +53,7 @@ def _cascade_persona_delete(persona_name: str) -> None:
     updated = []
     for room in config.chat_rooms:
         new_names = [p for p in room.persona_names if p != persona_name]
-        updated.append(ChatRoom(name=room.name, persona_names=new_names))
+        updated.append(room.model_copy(update={"persona_names": new_names}))
     save_chatrooms(ChatRoomsConfig(chat_rooms=updated))
     logger.info("Cascaded persona delete '%s' from chat rooms", persona_name)
 
@@ -78,6 +80,7 @@ def _to_detail(p: Persona) -> PersonaDetailResponse:
         reference_audio_transcript=p.reference_audio_transcript,
         reference_audio_language=p.reference_audio_language,
         allow_tool_calls=p.allow_tool_calls,
+        typical_length=p.typical_length,
         tts_capable=p.tts_capable,
     )
 
@@ -114,6 +117,7 @@ def create_persona(req: PersonaCreateRequest):
         reference_audio_transcript=req.reference_audio_transcript or None,
         reference_audio_language=req.reference_audio_language,
         allow_tool_calls=req.allow_tool_calls,
+        typical_length=req.typical_length,
     )
     save_personas(PersonasConfig(personas=config.personas + [new_persona]))
     return _to_detail(new_persona)
@@ -161,6 +165,7 @@ def update_persona(name: str, req: PersonaUpdateRequest):
         reference_audio_transcript=req.reference_audio_transcript or None,
         reference_audio_language=req.reference_audio_language,
         allow_tool_calls=req.allow_tool_calls,
+        typical_length=req.typical_length,
     )
     new_list = [updated_persona if p.name == name else p for p in config.personas]
     save_personas(PersonasConfig(personas=new_list))
@@ -208,6 +213,7 @@ def clone_persona(name: str):
         reference_audio_transcript=source.reference_audio_transcript,
         reference_audio_language=source.reference_audio_language,
         allow_tool_calls=source.allow_tool_calls,
+        typical_length=source.typical_length,
     )
     save_personas(PersonasConfig(personas=config.personas + [clone]))
     return _to_detail(clone)

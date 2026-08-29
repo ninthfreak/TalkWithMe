@@ -159,3 +159,74 @@ class TestGetHistoryDicts:
         json.dumps(dicts)  # must be JSON-serializable
         assert dicts[0]["role"] == "user"
         assert dicts[1]["persona"] == "Alex"
+
+
+# ---------------------------------------------------------------------------
+# Room preamble and truncation
+# ---------------------------------------------------------------------------
+
+class TestRoomPreamble:
+    def test_preamble_is_appended_to_the_system_message(self):
+        session = SessionManager()
+        messages = session.build_llm_messages(
+            system_prompt="You are Alex.",
+            responding_persona="Alex",
+            room_preamble="You are in a room.",
+        )
+        assert messages[0] == {
+            "role": "system",
+            "content": "You are Alex.\n\nYou are in a room.",
+        }
+
+    def test_system_message_is_unchanged_without_a_preamble(self):
+        session = SessionManager()
+        messages = session.build_llm_messages(
+            system_prompt="You are Alex.", responding_persona="Alex"
+        )
+        assert messages[0] == {"role": "system", "content": "You are Alex."}
+
+
+class TestTruncatedRendering:
+    def _history_for(self, content, truncated):
+        session = SessionManager()
+        session.add_assistant_message_no_persist(content, "Luna")
+        session._history[-1].truncated = truncated
+        return session.build_llm_messages(
+            system_prompt="p", responding_persona="Alex"
+        )[1]["content"]
+
+    def test_truncated_reply_is_trimmed_to_its_last_full_sentence(self):
+        # A dangling fragment is a completion cue — this is exactly how one
+        # persona ends up finishing another's sentence in the wrong voice.
+        assert self._history_for("One. Two. Three and it stops", True) == (
+            "[Luna]: One. Two."
+        )
+
+    def test_truncated_reply_with_no_sentence_end_is_labelled(self):
+        assert self._history_for("It just stops", True) == (
+            "[Luna]: It just stops (message was cut off)"
+        )
+
+    def test_untruncated_reply_is_relayed_verbatim(self):
+        assert self._history_for("One. Two. Three and it stops", False) == (
+            "[Luna]: One. Two. Three and it stops"
+        )
+
+    def test_the_speakers_own_truncated_message_is_not_trimmed(self):
+        # Trimming only protects *other* personas from a completion cue; a
+        # persona seeing its own message needs it intact.
+        session = SessionManager()
+        session.add_assistant_message_no_persist("One. Two. Three and it stops", "Alex")
+        session._history[-1].truncated = True
+        messages = session.build_llm_messages(
+            system_prompt="p", responding_persona="Alex"
+        )
+        assert messages[1] == {
+            "role": "assistant",
+            "content": "One. Two. Three and it stops",
+        }
+
+    def test_truncated_flag_is_not_exposed_in_the_session_shape(self):
+        session = SessionManager()
+        session.add_assistant_message_no_persist("hi", "Alex")
+        assert "truncated" not in session.get_history_dicts()[0]

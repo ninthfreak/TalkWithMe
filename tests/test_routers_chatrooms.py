@@ -34,7 +34,12 @@ class TestCreateChatroom:
     def test_create_empty_room(self, client):
         resp = client.post("/api/chatrooms", json={"name": "Enterprise"})
         assert resp.status_code == 201
-        assert resp.json() == {"name": "Enterprise", "persona_names": [], "echo_chamber": False}
+        assert resp.json() == {
+            "name": "Enterprise",
+            "persona_names": [],
+            "echo_chamber": False,
+            "typical_length": "normal",
+        }
         assert [r["name"] for r in client.get("/api/chatrooms").json()] == ["TNG", "Enterprise"]
 
     def test_create_reserved_default_rejected(self, client):
@@ -185,3 +190,53 @@ class TestEchoChamber:
     def test_echo_chamber_unknown_room_404(self, client):
         resp = client.put("/api/chatrooms/NoSuchRoom/echo-chamber", json={"echo_chamber": True})
         assert resp.status_code == 404
+
+
+class TestSetTypicalLength:
+    def test_sets_and_persists_the_tier(self, client):
+        resp = client.put(
+            "/api/chatrooms/TNG/typical-length", json={"typical_length": "terse"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["typical_length"] == "terse"
+
+        assert client.get("/api/chatrooms/TNG").json()["typical_length"] == "terse"
+
+    def test_other_room_fields_survive_the_update(self, client):
+        client.put("/api/chatrooms/TNG/echo-chamber", json={"echo_chamber": True})
+        client.put(
+            "/api/chatrooms/TNG/typical-length", json={"typical_length": "brief"}
+        )
+
+        body = client.get("/api/chatrooms/TNG").json()
+        assert body["echo_chamber"] is True
+        assert body["persona_names"] == ["Alex", "Luna"]
+
+    def test_default_room_cannot_be_modified(self, client):
+        resp = client.put(
+            "/api/chatrooms/default/typical-length", json={"typical_length": "terse"}
+        )
+        assert resp.status_code == 400
+
+    def test_default_room_reports_the_global_tier(self, client, monkeypatch):
+        import app.config as app_config
+        from app.config import TypicalLength
+        from tests.factories import make_settings
+
+        settings = make_settings()
+        settings.general.typical_length = TypicalLength.BRIEF
+        monkeypatch.setattr(app_config, "_settings_cache", settings)
+
+        assert client.get("/api/chatrooms/default").json()["typical_length"] == "brief"
+
+    def test_unknown_room_is_404(self, client):
+        resp = client.put(
+            "/api/chatrooms/Nope/typical-length", json={"typical_length": "terse"}
+        )
+        assert resp.status_code == 404
+
+    def test_invalid_tier_is_rejected(self, client):
+        resp = client.put(
+            "/api/chatrooms/TNG/typical-length", json={"typical_length": "medium-ish"}
+        )
+        assert resp.status_code == 422

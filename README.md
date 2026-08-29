@@ -62,6 +62,19 @@ Most settings can be changed in the UI. Behind the scenes, configuration is stor
 - `chatrooms.yaml` stores configured chat rooms (if any)
 - `personas.yaml` stores all personas
 
+These three files hold your own rooms, personas, and server addresses, so they are
+**gitignored** and never committed. Tracked alongside them are `settings.yaml.example`,
+`personas.yaml.example`, and `chatrooms.yaml.example` — copy one to the matching name to
+start from it:
+
+```bash
+cp settings.yaml.example settings.yaml
+```
+
+None of the three is required. With no config files present the app starts on built-in
+defaults with an empty persona list, and writes each file the first time you save from
+the UI.
+
 ### Server settings
 
 The UI offers a "Settings" control in the top right, which brings up the server settings dialog:
@@ -249,6 +262,8 @@ For lowest lag time, consider OmniVoice as the TTS server. It is considerably fa
 
 By default, only one AI persona in the current chat room will answer your prompt. You can make it feel more like a group chat by turning up the `max_persona_replies` option in `settings.yaml` (or by visiting the settings dialog). You can choose any number between 1 and 4. The given number of AI personas will answer your prompt (or reply to the persona who responded before them). Your personas may argue amongst themselves, depending on their respective system prompts!
 
+If replies come out too long, set a [typical response length](#response-length) rather than lowering `max_tokens`.
+
 ## MCP tools (optional)
 
 If you want your personas to be able to *do* things — fetch a web page, query a database, check the weather — you can connect one or more [MCP (Model Context Protocol)](https://modelcontextprotocol.io) servers. When a persona with tools enabled replies, TalkWithMe runs an agentic loop: the LLM may request tool calls, TalkWithMe executes them against the configured MCP servers, feeds the results back to the LLM, and repeats until the LLM produces a final text answer.
@@ -308,6 +323,80 @@ In streaming mode, there will be one replay icon per sentence in the response. C
 will play the respective sentence:
 
 ![Chat replay streaming](screenshots/chat_audio_replay_streaming.png)
+
+## Response length
+
+Personas answer at whatever length the model feels like, which is usually too long. The
+obvious fix — turning `max_tokens` down — is a trap, and it causes a second problem:
+
+`max_tokens` is a hard cut, not a style. The model still *tries* to write a long answer
+and simply gets chopped off mid-sentence. That unfinished sentence goes into the chat
+history, and the next persona to speak sees it as something to finish — so it carries on
+in the *first* persona's voice instead of its own. Truncation is what makes personas run
+into each other.
+
+So length is set by telling the persona how long to be, not by cutting it off. Pick a
+**typical response length**:
+
+| Tier | Roughly | Prompted as |
+|------|---------|-------------|
+| Terse | ~25 words | one or two short sentences |
+| Brief | ~60 words | two to four sentences |
+| Normal (default) | ~120 words | a short paragraph |
+| Detailed | ~250 words | a few paragraphs |
+| Unrestricted | — | no guidance at all |
+
+It is a *target*, not a limit. A persona is explicitly told it may go longer when the
+question genuinely needs it, so a terse persona can still give you a real answer when you
+ask a real question.
+
+Set it in three places, most specific first:
+
+- **Per persona** (persona editor) — optional. "Use room default" means inherit.
+- **Per chat room** (chat rooms editor) — the room's house style.
+- **Globally** (settings dialog, "Chat Behaviour") — used by the `default` room and by
+  any room that has not set its own.
+
+```yaml
+# chatrooms.yaml
+chat_rooms:
+  - name: debate-club
+    persona_names: [Alex, Luna]
+    typical_length: brief
+
+# personas.yaml — omit the key, or set it to null, to follow the room
+personas:
+  - name: Alex
+    typical_length: terse
+```
+
+### If you already lowered Max Tokens
+
+Put it back up (1024 is the default) and pick a tier instead. `max_tokens` is now only a
+ceiling: TalkWithMe derives a per-reply cap from the tier that sits roughly four times
+above the target, so it acts as a runaway guard and never as the thing shaping your
+replies. Leaving `max_tokens` low will keep cutting personas off mid-sentence.
+
+## Keeping personas in their own voice
+
+Two things personas do in a group chat that they should not:
+
+- **Continue someone else's message**, especially one that stopped mid-sentence.
+- **Invent a character** who is not in the room, and start writing their dialogue.
+
+TalkWithMe now tells each persona who is actually in the room, that lines from other
+people arrive prefixed with their name, and that it must never write for anyone else,
+invent anyone, or finish anyone else's sentence.
+
+Because models do not always listen, that instruction is backed up mechanically. If a
+reply starts producing another speaker's turn, it is cut at that point — you see the
+persona's own words and nothing else. A persona that prefixes its own reply with its own
+name has that prefix removed. And if a reply *does* hit the token ceiling, the next
+persona is handed it trimmed to its last complete sentence, so there is no dangling
+thought inviting them to finish it.
+
+None of this is configurable; it applies to every room except echo chamber rooms, where
+nothing is generated in the first place.
 
 ## Echo chamber
 

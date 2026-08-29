@@ -61,6 +61,11 @@ def _run(coro):
     return _run_until_complete(coro)
 
 
+def _tokens(events):
+    """Token strings from a stream_chat/stream_chat_with_tools event list."""
+    return [e["token"] for e in events if e["type"] == "token"]
+
+
 # ---------------------------------------------------------------------------
 # stream_chat — SSE parsing
 # ---------------------------------------------------------------------------
@@ -81,9 +86,12 @@ class TestStreamChat:
         ]
         patch_llm_client(monkeypatch, FakeLLMClient(lines))
 
-        tokens = _collect(llm.stream_chat([{"role": "user", "content": "hi"}]))
+        events = _collect(llm.stream_chat([{"role": "user", "content": "hi"}]))
 
-        assert tokens == ["Hel", "lo", " world"]
+        assert _tokens(events) == ["Hel", "lo", " world"]
+        # Exactly one finish event, last, carrying the backend's reason.
+        assert events[-1] == {"type": "finish", "reason": None}
+        assert sum(e["type"] == "finish" for e in events) == 1
 
     def test_stream_chat_sends_configured_payload(self, monkeypatch):
         client = FakeLLMClient([token_line("x"), "data: [DONE]"])
@@ -285,7 +293,7 @@ class TestStreamChatWithTools:
             )
         )
 
-        assert [e["type"] for e in events] == ["tool_call", "token", "token"]
+        assert [e["type"] for e in events] == ["tool_call", "token", "token", "finish"]
 
         tool_event = events[0]
         assert tool_event["tool_name"] == "get_time"
@@ -451,5 +459,6 @@ class TestStreamChatWithTools:
         # The final round's tool call was dropped, not executed.
         tool_events = [e for e in events if e["type"] == "tool_call"]
         assert len(tool_events) == 1
-        assert events[-1]["type"] == "tool_call"
+        assert events[-1]["type"] == "finish"
+        assert events[-2]["type"] == "tool_call"
         assert tool_events[0]["failed"] is False

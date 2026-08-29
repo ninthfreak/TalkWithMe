@@ -9,15 +9,26 @@ import json
 import logging
 import random
 import uuid
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from app.config import get_chatrooms, get_personas, get_settings
+from app.config import (
+    TYPICAL_LENGTH_SPECS,
+    ChatRoom,
+    Persona,
+    TypicalLength,
+    derive_max_tokens,
+    get_chatrooms,
+    get_personas,
+    get_settings,
+    resolve_typical_length,
+)
 from app.models import ChatRequest
 from app.session import session
 from app.services.llm import chat_completion, stream_chat, stream_chat_with_tools
+from app.services.reply_guard import ReplyGuard, stop_sequences
 from app.services.tool_registry import get_all_tools
 
 logger = logging.getLogger(__name__)
@@ -52,6 +63,78 @@ def _resolve_room_personas(chat_room: str) -> list[str]:
 
     # Unknown room — fall back to all personas rather than blocking the chat
     return all_names
+
+
+def _find_room(chat_room: str) -> Optional[ChatRoom]:
+    """The configured room, or None for "default" / an unknown name.
+
+    None means "no room-level config" — the implicit "default" room has no
+    chatrooms.yaml entry, so it falls back to the global settings.
+    """
+    if chat_room.lower() == "default":
+        return None
+    return next(
+        (r for r in get_chatrooms().chat_rooms if r.name.lower() == chat_room.lower()),
+        None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Room preamble — who is here, and the rules of the room
+# ---------------------------------------------------------------------------
+
+def _build_room_preamble(
+    persona: Persona,
+    chat_room: str,
+    eligible: list[str],
+    length: TypicalLength,
+) -> str:
+    """The app-generated block appended to a persona's system prompt.
+
+    Two things depend on it. The roster is what makes "never invent a
+    character" enforceable — you cannot forbid inventing people without
+    saying who exists. The rules name the two observed failure modes
+    explicitly, including continuing a cut-off message, because a truncated
+    line in the history reads to a model as a prompt to complete.
+
+    The length line is the *only* thing shaping reply length. The derived
+    token cap is a runaway guard, not a style control — that distinction is
+    the whole point of the tier.
+    """
+    by_name = {p.name: p for p in get_personas().personas}
+    others = [by_name[n] for n in eligible if n in by_name and n != persona.name]
+    if others:
+        roster = ", ".join(
+            f"{p.name} ({p.description})" if p.description else p.name for p in others
+        )
+        who = f"The only people here are: {roster}, and the user. There is nobody else."
+    else:
+        who = "You are the only one here, besides the user. There is nobody else."
+
+    lines = [
+        f'You are {persona.name}, in a group chat called "{chat_room}".',
+        who,
+        "",
+        'Lines from other people appear as "[Name]: text". '
+        "Lines with no prefix are from the user.",
+        "",
+        f"- Write only as {persona.name}. Never write a line, a reply, or a name "
+        "prefix for anyone else.",
+        "- Never invent a new character or speak as one.",
+        "- Never continue, complete, or rewrite someone else's message, even if it "
+        "looks cut off. Respond to it as it stands.",
+        "- Do not begin your reply with your own name.",
+    ]
+
+    spec = TYPICAL_LENGTH_SPECS[length]
+    if spec.words:
+        lines.append(
+            f"- Aim for about {spec.phrasing} (~{spec.words} words). Go longer only "
+            "when the question genuinely needs it. Always finish your sentence — "
+            "never stop mid-thought."
+        )
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -162,12 +245,9 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     # Add user message to history (persisted automatically)
     session.add_user_message(req.message, user_message_id)
 
-    # Check if echo chamber is enabled for this room (case-insensitive lookup)
-    chatrooms_config = get_chatrooms()
-    room = next(
-        (r for r in chatrooms_config.chat_rooms if r.name.lower() == req.chat_room.lower()),
-        None,
-    )
+    # Room-level config: None for "default" (no chatrooms.yaml entry), in
+    # which case every room setting falls back to the global values.
+    room = _find_room(req.chat_room)
     echo_enabled = room.echo_chamber if room else False
 
     # Echo chamber overrides max_replies — only one persona echoes the user.
@@ -205,40 +285,93 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
         # with the correct message from the first token onward.
         yield f'data: {json.dumps({"type": "start", "persona": persona_name, "user_message_id": user_message_id, "message_id": assistant_message_id})}\n\n'
 
+        truncated = False
+
         if echo_enabled:
             # Echo chamber: bypass the LLM entirely and return the user's message verbatim.
+            # No preamble, no length tier, no guard — nothing was generated.
             full_text = req.message
             yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": full_text})}\n\n'
         else:
-            # Normal path: stream LLM response (history already includes prior personas' replies)
+            # Length is shaped by the preamble; the derived cap only guards
+            # against a runaway, and can never exceed settings.llm.max_tokens.
+            length = resolve_typical_length(persona, room, settings.general.typical_length)
+            max_tokens = derive_max_tokens(length, settings.llm.max_tokens)
+
             messages = session.build_llm_messages(
                 system_prompt=persona.system_prompt,
                 responding_persona=persona_name,
                 max_turns_for_context=settings.general.max_turns_for_context,
+                room_preamble=_build_room_preamble(
+                    persona, req.chat_room, eligible, length
+                ),
             )
+
+            # Layer 1: stop before the backend generates another persona's
+            # turn at all. Only catches names that exist — the guard below
+            # is what catches invented ones.
+            stop = stop_sequences(persona_name, eligible)
+            guard = ReplyGuard(persona_name, eligible)
+
+            stream = (
+                # Agentic path: the LLM may invoke MCP tools mid-reply. The
+                # loop runs regardless of show_tool_calls; that flag only
+                # controls whether tool_call SSE events are emitted.
+                stream_chat_with_tools(
+                    messages, get_all_tools(), max_tokens=max_tokens, stop=stop
+                )
+                if persona.allow_tool_calls
+                else stream_chat(messages, max_tokens=max_tokens, stop=stop)
+            )
+
             full_text = ""
             try:
-                if persona.allow_tool_calls:
-                    # Agentic path: the LLM may invoke MCP tools mid-reply.
-                    # The loop runs regardless of show_tool_calls; that flag
-                    # only controls whether tool_call SSE events are emitted.
-                    async for event in stream_chat_with_tools(messages, get_all_tools()):
+                try:
+                    async for event in stream:
                         if event["type"] == "token":
-                            full_text += event["token"]
-                            yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": event["token"]})}\n\n'
+                            # The guard may hold text back briefly at line
+                            # starts while it decides whether a speaker
+                            # prefix is forming. Only emit what it releases.
+                            safe = guard.feed(event["token"])
+                            if safe:
+                                full_text += safe
+                                yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": safe})}\n\n'
+                            if guard.stopped:
+                                logger.info(
+                                    "Cut %s's reply at speaker prefix %r",
+                                    persona_name, guard.cut_at,
+                                )
+                                break
                         elif event["type"] == "tool_call" and settings.general.show_tool_calls:
                             yield f'data: {json.dumps({"type": "tool_call", "persona": persona_name, "tool_name": event["tool_name"], "arguments": event["arguments"], "result": event["result"], "failed": event["failed"]})}\n\n'
-                else:
-                    async for token in stream_chat(messages):
-                        full_text += token
-                        yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": token})}\n\n'
+                        elif event["type"] == "finish":
+                            # A reply cut off at max_tokens ends mid-sentence.
+                            # Marking it keeps the next persona from being
+                            # handed a dangling thought to complete.
+                            truncated = event.get("reason") == "length"
+                finally:
+                    # Break leaves the generator suspended; closing it here
+                    # releases the upstream HTTP stream promptly.
+                    await stream.aclose()
+
+                tail = guard.flush()
+                if tail:
+                    full_text += tail
+                    yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": tail})}\n\n'
             except Exception as exc:
                 logger.error("Streaming error: %s", exc)
+                # Release anything the guard was still holding, so text the
+                # model did produce is not swallowed by the failure.
+                held = guard.flush()
+                if held:
+                    yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": held})}\n\n'
                 yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
                 return
 
         # Persist — subsequent personas will see this in history
-        session.add_assistant_message(full_text, persona_name, assistant_message_id)
+        session.add_assistant_message(
+            full_text, persona_name, assistant_message_id, truncated=truncated
+        )
 
         yield f'data: {json.dumps({"type": "done", "persona": persona_name, "text": full_text, "message_id": assistant_message_id})}\n\n'
 

@@ -2,10 +2,19 @@ app/__pycache__/
 app/services/__pycache__/
 app/routers/__pycache__/
 tests/__pycache__/
-personas.yaml.*
 future*.md
 chatrooms/
+
+# Local config: your rooms, personas and server URLs stay on your machine.
+# Templates are tracked as *.yaml.example; the app also runs fine with none
+# of these present (it falls back to defaults and an empty persona list).
+settings.yaml
+personas.yaml
+chatrooms.yaml
+# ...and any backup/variant copies alongside them.
+personas.yaml.*
 chatrooms.yaml.*
 settings.yaml.*
+!*.yaml.example
 testsetup.sh
 restore.sh

@@ -1,0 +1,32 @@
+# Copy to settings.yaml and edit. settings.yaml is gitignored.
+llm:
+  base_url: http://localhost:8080
+  model: default
+  # A hard ceiling only. To make replies shorter use general.typical_length
+  # below — lowering this cuts personas off mid-sentence, which is what makes
+  # the next persona finish their thought in the wrong voice.
+  max_tokens: 1024
+  temperature: 0.8
+tts:
+  enabled: false
+  base_url: http://localhost:8181
+  num_steps: 14
+  guidance_scale: 1.5
+  seed: null
+  timeout: 120.0
+  streaming: true
+stt:
+  enabled: false
+  base_url: http://localhost:5000
+  timeout: 30.0
+general:
+  persona_name_mentions: true
+  max_persona_replies: 1
+  max_turns_for_context: 6
+  show_tool_calls: true
+  # terse | brief | normal | detailed | unrestricted
+  # Used by the "default" room and any room that has not set its own.
+  typical_length: normal
+mcp:
+  servers: []
+  max_tool_iterations: 8

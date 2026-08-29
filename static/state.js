@@ -95,6 +95,8 @@ const pfAvatarImage = document.getElementById("pf-avatar-image");
 const pfReferenceAudio = document.getElementById("pf-reference-audio");
 const pfReferenceAudioTx = document.getElementById("pf-reference-audio-transcript");
 const pfAllowToolCalls = document.getElementById("pf-allow-tool-calls");
+const pfTypicalLength = document.getElementById("pf-typical-length");
+const gsfTypicalLength = document.getElementById("gsf-typical-length");
 
 // Persona editor editing state
 let peEditingName = null;
