@@ -135,6 +135,7 @@ class SessionManager:
         responding_persona: str,
         max_turns_for_context: Optional[int] = None,
         room_preamble: Optional[str] = None,
+        user_label: str = "User",
     ) -> List[Dict[str, str]]:
         """Build the messages list for an LLM call.
 
@@ -143,10 +144,18 @@ class SessionManager:
           rules of the room — built by the chat router, which owns the chat
           room config; this module deliberately imports none of it).
         - Conversation history, reformatted so:
-            * User messages keep role "user".
-            * This persona's messages keep role "assistant".
-            * Other personas' messages become "user" with prefix "[Name]: <text>".
+            * The human's messages become "user" with prefix "[user_label]: ".
+            * This persona's messages keep role "assistant", untagged.
+            * Other personas' messages become "user" with prefix "[Name]: ".
         - Optionally limited to the last *max_turns_for_context* history entries.
+
+        **Every voice but this persona's own is tagged.** The human used to
+        be the one untagged speaker in the transcript, which made "untagged
+        text in the user role" the model's only example of how the human
+        writes — so a persona answering third or fourth, having never seen
+        an assistant turn in the conversation, would produce a line in the
+        user's voice as a perfectly consistent continuation. Tagging the
+        human too leaves exactly one untagged voice: this persona's own.
         """
         system_content = system_prompt
         if room_preamble:
@@ -162,7 +171,9 @@ class SessionManager:
 
         for msg in history_slice:
             if msg.role == "user":
-                messages.append({"role": "user", "content": msg.content})
+                messages.append(
+                    {"role": "user", "content": f"[{user_label}]: {msg.content}"}
+                )
             elif msg.role == "assistant":
                 if msg.persona == responding_persona:
                     messages.append({"role": "assistant", "content": msg.content})

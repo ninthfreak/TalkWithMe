@@ -317,10 +317,13 @@ class TestMultiPersonaReplies:
 
         assert len(seen_contexts) == 2
         # The first reply only saw the user's message...
-        assert seen_contexts[0] == [("user", "hello there")]
+        assert seen_contexts[0] == [("user", "[User]: hello there")]
         # ...the second also saw Alex's answer, reformatted as a prefixed
         # "user" turn (another persona's words must not look like its own).
-        assert seen_contexts[1] == [("user", "hello there"), ("user", "[Alex]: hi")]
+        assert seen_contexts[1] == [
+            ("user", "[User]: hello there"),
+            ("user", "[Alex]: hi"),
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -587,11 +590,13 @@ class TestTypicalLength:
         # a runaway guard, not a style control.
         assert calls[0]["max_tokens"] == 256
 
-    def test_stop_sequences_cover_the_other_personas(self, client, monkeypatch):
+    def test_stop_sequences_cover_the_other_personas_and_the_human(self, client, monkeypatch):
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="TNG")
 
-        assert calls[0]["stop"] == ["\nLuna:", "\n[Luna]:"]
+        # The human is a speaker too: a persona answering *as the user* is
+        # the same failure as answering as another persona.
+        assert calls[0]["stop"] == ["\nLuna:", "\n[Luna]:", "\nUser:", "\n[User]:"]
 
 
 class TestReplyGuardIntegration:
@@ -712,8 +717,9 @@ class TestPlayerProfileInPrompt:
         _chat(client, who_answers="Alex", chat_room="Tavern")
 
         system = _system_prompt(calls[0])
-        assert "Lines with no prefix are from Kira." in system
+        assert "Kira's included" in system
         assert "and Kira. There is nobody else." in system
+        assert "You are not Kira. Never speak or write as Kira" in system
         assert "the user" not in system
 
     def test_appearance_is_optional(self, client, monkeypatch):
@@ -732,7 +738,8 @@ class TestPlayerProfileInPrompt:
 
         system = _system_prompt(calls[0])
         assert "You are talking with" not in system
-        assert "Lines with no prefix are from the user." in system
+        assert "the user's included" in system
+        assert "You are not the user. Never speak or write as the user" in system
 
     def test_default_room_has_no_profile(self, client, monkeypatch):
         # "default" has no chatrooms.yaml entry to carry one.
@@ -788,3 +795,98 @@ class TestPlayerProfileGate:
         events = _chat(client, who_answers="Alex", chat_room="Tavern")
 
         assert sse_events_by_type(events, "done")
+
+
+# ---------------------------------------------------------------------------
+# Personas must always be themselves
+# ---------------------------------------------------------------------------
+
+class TestNeverSpeakAsTheUser:
+    """One question, several replies, and one of them answers *as the user*.
+
+    Reported in a six-persona room: persona 2 replied as the human, persona
+    3 replied as itself, persona 4 replied as the human to persona 3. The
+    cause was structural — the human was the only untagged voice in the
+    transcript, so "untagged text in the user role" was the sole example a
+    late responder had of what a turn looks like.
+    """
+
+    def test_every_other_voice_is_tagged_for_a_late_responder(self, client, monkeypatch):
+        _patch_general(monkeypatch, max_persona_replies=2)
+        seen = []
+
+        async def capturing(messages, max_tokens=None, stop=None):
+            seen.append([m["content"] for m in messages if m["role"] != "system"])
+            yield {"type": "token", "token": "ok"}
+            yield {"type": "finish", "reason": "stop"}
+
+        monkeypatch.setattr(chat_router, "stream_chat", capturing)
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        # Nothing the second responder sees is untagged: the only untagged
+        # voice in its payload would be its own assistant turns, and it has
+        # none yet.
+        assert all(c.startswith("[") for c in seen[1])
+
+    def test_the_human_is_named_in_the_stop_sequences(self, client, monkeypatch):
+        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        assert "\nKira:" in calls[0]["stop"]
+        assert "\n[Kira]:" in calls[0]["stop"]
+
+    def test_a_reply_opening_as_the_user_is_cut(self, client, monkeypatch):
+        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        _stub_stream(monkeypatch, ["My view.\n", "[Kira]: ", "and here is what I say back"])
+
+        events = _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        assert sse_events_by_type(events, "done")[0]["text"] == "My view.\n"
+
+    def test_an_unprofiled_room_still_guards_the_generic_user(self, client, monkeypatch):
+        _stub_stream(monkeypatch, ["Sure.\n", "User: what about tomorrow?"])
+
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert sse_events_by_type(events, "done")[0]["text"] == "Sure.\n"
+
+    def test_a_reply_that_is_only_the_users_voice_is_dropped_entirely(
+        self, client, monkeypatch
+    ):
+        # Nothing of the persona's own survives the cut, so there is no turn
+        # to record: an empty bubble and an empty "[Alex]: " line in history
+        # would both be worse than nothing.
+        _stub_stream(monkeypatch, ["User: so what should we do?"])
+
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert sse_events_by_type(events, "done") == []
+        assert [m for m in session.history if m.role == "assistant"] == []
+        assert [e["type"] for e in events][-1] == "complete"
+
+    def test_a_dropped_reply_does_not_block_the_next_persona(self, client, monkeypatch):
+        _patch_general(monkeypatch, max_persona_replies=2)
+        calls = {"n": 0}
+
+        async def alternating(messages, max_tokens=None, stop=None):
+            calls["n"] += 1
+            token = "User: hmm" if calls["n"] == 1 else "A real answer."
+            yield {"type": "token", "token": token}
+            yield {"type": "finish", "reason": "stop"}
+
+        monkeypatch.setattr(chat_router, "stream_chat", alternating)
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        dones = sse_events_by_type(events, "done")
+        assert [d["text"] for d in dones] == ["A real answer."]
+
+    def test_the_turn_is_stated_at_the_end_of_the_preamble(self, client, monkeypatch):
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        # A late responder has no assistant turn in context to anchor its
+        # own voice, so the system message says whose turn it is outright.
+        assert _system_prompt(calls[0]).rstrip().endswith(
+            "It is Alex's turn. Reply as Alex, and no one else."
+        )

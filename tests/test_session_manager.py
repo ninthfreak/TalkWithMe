@@ -75,15 +75,18 @@ class TestBuildLLMMessages:
         messages = manager.build_llm_messages("You are Alex.", "Alex")
 
         assert messages[0] == {"role": "system", "content": "You are Alex."}
-        assert messages[1] == {"role": "user", "content": "what do you think?"}
+        # The human is tagged too. Leaving them the one untagged voice is
+        # what taught personas to answer *as* the user.
+        assert messages[1] == {"role": "user", "content": "[User]: what do you think?"}
         # Another persona's line becomes a user message, prefixed with the name.
         assert messages[2] == {
             "role": "user",
             "content": "[Luna]: I think, therefore I speak.",
         }
-        # The responding persona keeps the assistant role.
+        # The responding persona keeps the assistant role, and is the only
+        # untagged voice in the payload.
         assert messages[3] == {"role": "assistant", "content": "I agree with Luna."}
-        assert messages[4] == {"role": "user", "content": "thanks"}
+        assert messages[4] == {"role": "user", "content": "[User]: thanks"}
 
     def test_build_llm_messages_max_turns_keeps_only_last_entries(self, manager):
         for i in range(10):
@@ -95,8 +98,8 @@ class TestBuildLLMMessages:
 
         # 1 system + last 4 turns
         assert len(messages) == 5
-        assert messages[1]["content"] == "turn 6"
-        assert messages[-1]["content"] == "turn 9"
+        assert messages[1]["content"] == "[User]: turn 6"
+        assert messages[-1]["content"] == "[User]: turn 9"
 
     def test_build_llm_messages_no_max_turns_keeps_everything(self, manager):
         for i in range(10):
@@ -230,3 +233,40 @@ class TestTruncatedRendering:
         session = SessionManager()
         session.add_assistant_message_no_persist("hi", "Alex")
         assert "truncated" not in session.get_history_dicts()[0]
+
+
+class TestUserLabel:
+    """The human is a tagged speaker like everyone else."""
+
+    def test_player_name_is_used_when_given(self, manager):
+        manager.add_user_message_no_persist("hello")
+        messages = manager.build_llm_messages("sys", "Alex", user_label="Kira")
+        assert messages[1] == {"role": "user", "content": "[Kira]: hello"}
+
+    def test_the_responding_persona_is_the_only_untagged_voice(self, manager):
+        manager.add_user_message_no_persist("q")
+        manager.add_assistant_message_no_persist("a1", "Alex")
+        manager.add_assistant_message_no_persist("a2", "Luna")
+
+        messages = manager.build_llm_messages("sys", "Alex", user_label="Kira")
+
+        untagged = [
+            m for m in messages[1:] if not m["content"].startswith("[")
+        ]
+        assert untagged == [{"role": "assistant", "content": "a1"}]
+
+    def test_a_late_responder_still_sees_tagged_voices_only(self, manager):
+        # The reported failure: the third persona to speak has no assistant
+        # turn of its own in context, so an untagged human line was the only
+        # model it had for "what a turn looks like".
+        manager.add_user_message_no_persist("what do you all think?")
+        manager.add_assistant_message_no_persist("North.", "Alex")
+        manager.add_assistant_message_no_persist("Mistake.", "Sig")
+
+        messages = manager.build_llm_messages("sys", "Luna", user_label="Kira")
+
+        assert [m["content"] for m in messages[1:]] == [
+            "[Kira]: what do you all think?",
+            "[Alex]: North.",
+            "[Sig]: Mistake.",
+        ]
