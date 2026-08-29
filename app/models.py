@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import LengthBias, PlayerProfile, TypicalLength
 
@@ -26,6 +26,24 @@ class ChatRequest(BaseModel):
         default=None,
         description="Frontend-generated UUID for this message (for audio association)",
     )
+    echo: bool = Field(
+        default=False,
+        description=(
+            "Echo this message back verbatim in a persona's voice instead of "
+            "answering it. A property of this one message, not a mode the room "
+            "is left in."
+        ),
+    )
+
+
+class SuggestReplyRequest(BaseModel):
+    """Ask the LLM to draft the player's next message."""
+    chat_room: str = Field(default="default", description="Room to draft for")
+
+
+class SuggestReplyResponse(BaseModel):
+    """A drafted message for the player to review, edit and send."""
+    text: str
 
 
 class SessionPersonasRequest(BaseModel):
@@ -290,7 +308,6 @@ class ChatRoomResponse(BaseModel):
     """A chat room returned to the frontend."""
     name: str
     persona_names: List[str] = Field(default_factory=list)
-    echo_chamber: bool = False
     typical_length: TypicalLength = TypicalLength.NORMAL
     require_player_profile: bool = False
     player_profile: PlayerProfile = Field(default_factory=PlayerProfile)
@@ -306,23 +323,34 @@ class AssignPersonasRequest(BaseModel):
     persona_names: List[str] = Field(..., min_length=1)
 
 
-class EchoChamberRequest(BaseModel):
-    """Toggle echo chamber mode for a chat room."""
-    echo_chamber: bool
-
-
-class TypicalLengthRequest(BaseModel):
-    """Set a chat room's typical response length tier."""
-    typical_length: TypicalLength
-
-
 class PlayerProfileRequest(BaseModel):
-    """Set the human user's character profile for a chat room."""
+    """The human user's character profile for a chat room."""
     name: str = Field(default="", max_length=40)
     description: str = Field(default="", max_length=2000)
     appearance: str = Field(default="", max_length=1000)
 
 
-class RequirePlayerProfileRequest(BaseModel):
-    """Toggle whether a chat room demands a player profile before chatting."""
-    require_player_profile: bool
+class ChatRoomUpdateRequest(BaseModel):
+    """Partial update of a chat room's settings.
+
+    Every field is optional and omitted fields keep their current value —
+    the same contract `GeneralSettingsRequest` uses. This is deliberately
+    one endpoint rather than one per attribute: a new room attribute means
+    adding a field here and a control in the room editor, not another
+    route, another request model and another frontend fetch. The four
+    single-purpose endpoints this replaces (echo-chamber, typical-length,
+    player-profile, require-player-profile) were already drifting apart.
+
+    Membership is not here: personas have their own endpoints because
+    assigning one validates against the persona list and can 422, which is
+    a different operation from setting a flag.
+
+    Unknown fields are rejected rather than ignored. On a partial-update
+    endpoint a mistyped key would otherwise be indistinguishable from a
+    successful save — the room comes back unchanged and nothing complains.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    typical_length: Optional[TypicalLength] = None
+    require_player_profile: Optional[bool] = None
+    player_profile: Optional[PlayerProfileRequest] = None

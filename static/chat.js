@@ -62,7 +62,7 @@ function getWhoAnswers() {
    Send message
    ========================================================================== */
 
-async function sendMessage() {
+async function sendMessage({ echo = false } = {}) {
     const text = inputEl.value.trim();
     if (!text || isStreaming) return;
 
@@ -133,6 +133,9 @@ async function sendMessage() {
                 who_answers: who,
                 chat_room: currentChatRoom,
                 message_id: pendingUserMessageId,
+                // Per message, never a room setting: echoing is an act
+                // ("say this line"), not a state to leave a room in.
+                echo,
             }),
         });
 
@@ -173,6 +176,50 @@ async function sendMessage() {
         isStreaming = false;
         sendBtn.disabled = false;
         pendingUserMessageId = null;
+        inputEl.focus();
+    }
+}
+
+/* ==========================================================================
+   Suggested message
+
+   Drafts into the input box rather than sending. It is a writing aid, so
+   the last word stays with the player: they can edit it, send it, echo it,
+   or clear it.
+   ========================================================================== */
+
+async function suggestMessage() {
+    if (isStreaming || suggestBtn.disabled) return;
+
+    const previous = inputEl.value;
+    suggestBtn.disabled = true;
+    inputEl.disabled = true;
+    inputEl.placeholder = "Drafting\u2026";
+
+    try {
+        const resp = await fetch("/api/chat/suggest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_room: currentChatRoom }),
+        });
+        if (!resp.ok) {
+            const body = await resp.json().catch(() => ({}));
+            appendErrorBubble(body.detail || `Could not draft a message (HTTP ${resp.status}).`);
+            return;
+        }
+        const { text } = await resp.json();
+        inputEl.value = text;
+    } catch (err) {
+        console.error("Suggest error:", err);
+        appendErrorBubble("Could not draft a message. Is the LLM server running?");
+        inputEl.value = previous;
+    } finally {
+        suggestBtn.disabled = false;
+        inputEl.disabled = false;
+        inputEl.placeholder = "Type your message...";
+        // Match the auto-resize the input does as you type.
+        inputEl.style.height = "auto";
+        inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + "px";
         inputEl.focus();
     }
 }

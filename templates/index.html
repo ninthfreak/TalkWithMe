@@ -41,13 +41,6 @@
                     </select>
                 </div>
 
-                <div id="echo-chamber-wrapper">
-                    <label class="checkbox-option">
-                        <input type="checkbox" id="echo-chamber-toggle">
-                        <span>Echo chamber</span>
-                    </label>
-                </div>
-
                 <div id="player-profile-wrapper">
                     <label class="checkbox-option">
                         <input type="checkbox" id="require-profile-toggle">
@@ -91,6 +84,8 @@
                         rows="1"
                     ></textarea>
 <button id="btn-mic" type="button" aria-label="Record voice message" title="Record voice message" class="icon-btn">&#127908;</button>
+                    <button id="btn-suggest" type="button" class="icon-btn" aria-label="Draft a message for me" title="Draft a message in my voice, to review before sending">&#9997;</button>
+                    <button id="btn-echo" type="button" class="icon-btn" aria-label="Speak this line" title="Have a persona say this line verbatim, instead of answering it">&#128483;</button>
                     <button id="btn-send" title="Send message">&#9654;</button>
                 </div>
             </main>
@@ -264,8 +259,62 @@
     </div>
 
     <!-- Settings Modal -->
+    <div id="room-edit-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="re-title">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2 id="re-title">Edit room</h2>
+                <button id="re-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
+            </div>
+            <div id="re-error" class="pe-form-error hidden"></div>
+            <form id="re-form" novalidate>
+                <div class="settings-body">
+                    <fieldset class="settings-section">
+                        <legend>Conversation</legend>
+                        <div class="form-row">
+                            <label for="re-typical-length">Typical Response Length</label>
+                            <select id="re-typical-length">
+                                <option value="terse">Terse &mdash; a few words</option>
+                                <option value="brief">Brief &mdash; one short sentence</option>
+                                <option value="normal">Normal &mdash; a sentence or two</option>
+                                <option value="detailed">Detailed &mdash; two or three sentences</option>
+                                <option value="verbose">Verbose &mdash; a short paragraph</option>
+                                <option value="unrestricted">Unrestricted &mdash; no guidance</option>
+                            </select>
+                            <span class="field-hint">Personas sit relative to this, set per persona in the persona editor.</span>
+                        </div>
+                    </fieldset>
+                    <fieldset class="settings-section">
+                        <legend>Your character</legend>
+                        <div class="form-row">
+                            <label class="settings-checkbox-label">
+                                <input id="re-require-profile" type="checkbox">
+                                <span>Require my character</span>
+                            </label>
+                            <span class="field-hint">Refuse messages until your character has a name and a description.</span>
+                        </div>
+                        <div class="form-row">
+                            <span id="re-profile-summary" class="field-hint"></span>
+                            <button id="re-btn-edit-profile" type="button" class="btn-secondary">Edit my character&hellip;</button>
+                        </div>
+                    </fieldset>
+                    <fieldset class="settings-section">
+                        <legend>Personas</legend>
+                        <div class="form-row">
+                            <span id="re-personas" class="field-hint"></span>
+                            <span class="field-hint">Add and remove personas from the left panel while the room is selected.</span>
+                        </div>
+                    </fieldset>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="re-btn-cancel" class="btn-secondary">Cancel</button>
+                    <button type="submit" id="re-btn-save" class="btn-accent">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div id="player-profile-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pp-profile-title">
-        <div class="modal">
+        <div class="modal-box">
             <div class="modal-header">
                 <h2 id="pp-profile-title">Your character</h2>
                 <button id="pp-profile-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
@@ -439,8 +488,9 @@
                             <span class="field-hint">Display a chip when a persona invokes an MCP tool</span>
                         </div>
                         <div class="form-row">
-                            <label for="gsf-max-turns-for-context">Max Turns for Context <span class="field-hint">(1–50)</span></label>
+                            <label for="gsf-max-turns-for-context">Exchanges of Context <span class="field-hint">(1–50)</span></label>
                             <input id="gsf-max-turns-for-context" type="number" min="1" max="50" required>
+                            <span class="field-hint">One exchange is your message plus every reply it drew, so this holds steady however many personas answer.</span>
                         </div>
                         <div class="form-row">
                             <label for="gsf-typical-length">Typical Response Length</label>

@@ -75,7 +75,7 @@ def make_personas() -> PersonasConfig:
 def make_chatrooms() -> ChatRoomsConfig:
     """One stock chat room containing both personas."""
     return ChatRoomsConfig(
-        chat_rooms=[ChatRoom(name="TNG", persona_names=["Alex", "Luna"], echo_chamber=False)]
+        chat_rooms=[ChatRoom(name="TNG", persona_names=["Alex", "Luna"])]
     )
 
 

@@ -330,25 +330,49 @@ class TestMultiPersonaReplies:
 # Echo chamber
 # ---------------------------------------------------------------------------
 
-class TestEchoChamber:
-    def test_echoes_user_message_verbatim_without_llm(self, client, monkeypatch):
-        _patch_chatrooms(monkeypatch,
-                         [ChatRoom(name="Echo", persona_names=["Alex"], echo_chamber=True)])
-        _patch_general(monkeypatch, max_persona_replies=4)  # must be overridden to 1
+class TestEcho:
+    """Echo is a property of one message, not a mode a room sits in."""
 
+    def _no_llm(self, monkeypatch):
         def fail(*a, **kw):
-            raise AssertionError("echo chamber must bypass the LLM entirely")
-
+            raise AssertionError("an echoed message must bypass the LLM entirely")
         monkeypatch.setattr(chat_router, "stream_chat", fail)
 
-        events = _chat(client, who_answers="Alex", chat_room="Echo")
+    def test_echoes_the_message_verbatim_without_the_llm(self, client, monkeypatch):
+        _patch_general(monkeypatch, max_persona_replies=4)  # must be overridden to 1
+        self._no_llm(monkeypatch)
 
-        tokens = sse_events_by_type(events, "token")
-        assert [t["token"] for t in tokens] == ["hello there"]
-        done = sse_events_by_type(events, "done")[0]
-        assert done["text"] == "hello there"
-        # Exactly one persona responds, even though max_persona_replies is 4.
+        events = _chat(client, who_answers="Alex", chat_room="TNG", echo=True)
+
+        assert [t["token"] for t in sse_events_by_type(events, "token")] == ["hello there"]
+        assert sse_events_by_type(events, "done")[0]["text"] == "hello there"
+        # Exactly one persona echoes, however many replies are configured —
+        # identical echoes from several personas would just be noise.
         assert [e["persona"] for e in sse_events_by_type(events, "start")] == ["Alex"]
+
+    def test_the_next_message_is_answered_normally(self, client, monkeypatch):
+        # The point of moving this off the room: echoing once must not leave
+        # the room echoing.
+        self._no_llm(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG", echo=True)
+
+        _stub_stream(monkeypatch, ["A real answer."])
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert sse_events_by_type(events, "done")[0]["text"] == "A real answer."
+
+    def test_not_echoing_is_the_default(self, client, monkeypatch):
+        _stub_stream(monkeypatch, ["A real answer."])
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+        assert sse_events_by_type(events, "done")[0]["text"] == "A real answer."
+
+    def test_an_echo_is_persisted_like_any_other_reply(self, client, monkeypatch):
+        self._no_llm(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG", echo=True)
+
+        assert [(m.role, m.content) for m in session.history] == [
+            ("user", "hello there"), ("assistant", "hello there"),
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -493,13 +517,9 @@ class TestRoomPreamble:
 
         assert "You are the only one here, besides the user." in _system_prompt(calls[0])
 
-    def test_echo_chamber_room_gets_no_preamble_or_llm_call(self, client, monkeypatch):
-        _patch_chatrooms(
-            monkeypatch,
-            [ChatRoom(name="Echo", persona_names=["Alex"], echo_chamber=True)],
-        )
+    def test_an_echoed_message_gets_no_preamble_or_llm_call(self, client, monkeypatch):
         calls = _capture(monkeypatch)
-        events = _chat(client, who_answers="Alex", chat_room="Echo")
+        events = _chat(client, who_answers="Alex", chat_room="TNG", echo=True)
 
         assert calls == []  # the LLM is bypassed entirely
         assert sse_events_by_type(events, "done")[0]["text"] == "hello there"
@@ -998,3 +1018,157 @@ class TestReplyCountIsReached:
             _chat(client, who_answers="P0", chat_room="Big")
 
         assert "can reply" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Suggested player message
+# ---------------------------------------------------------------------------
+
+class TestSuggestReply:
+    """Drafting the player's own next message.
+
+    The deliberate inverse of the reply guard's job: here the LLM is asked
+    to write as the player, because the player asked it to and the result
+    lands in their input box to edit.
+    """
+
+    def _stub(self, monkeypatch, result="Aye, that'll be tuppence."):
+        seen = []
+
+        async def fake(messages, max_tokens=64, temperature=None):
+            seen.append({"messages": messages, "max_tokens": max_tokens,
+                         "temperature": temperature})
+            return result
+
+        monkeypatch.setattr(chat_router, "chat_completion", fake)
+        return seen
+
+    def _suggest(self, client, room="TNG"):
+        resp = client.post("/api/chat/suggest", json={"chat_room": room})
+        assert resp.status_code == 200, resp.text
+        return resp.json()["text"]
+
+    def test_returns_a_draft(self, client, monkeypatch):
+        self._stub(monkeypatch)
+        assert self._suggest(client) == "Aye, that'll be tuppence."
+
+    def test_the_players_own_messages_are_the_voice_sample(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        session.add_user_message_no_persist("aye, what'll it be then")
+        session.add_assistant_message_no_persist("A stout.", "Alex")
+        session.add_user_message_no_persist("comin right up")
+
+        self._suggest(client)
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "How you write" in prompt
+        assert "- aye, what'll it be then" in prompt
+        assert "- comin right up" in prompt
+        # A persona's line is context, not a voice sample.
+        assert "- A stout." not in prompt
+
+    def test_the_conversation_is_included_for_context(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        session.add_user_message_no_persist("what's the news?")
+        session.add_assistant_message_no_persist("Rain, mostly.", "Alex")
+
+        self._suggest(client)
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "[Alex]: Rain, mostly." in prompt
+
+    def test_the_character_description_is_a_section_of_its_own(self, client, monkeypatch):
+        # It carries *what* to say, so it gets the same structural weight as
+        # the voice sample rather than a passing mention.
+        _profiled_room(monkeypatch, name="Kira", description="A retired thief.",
+                       appearance="A patched green coat.")
+        seen = self._stub(monkeypatch)
+
+        self._suggest(client, room="Tavern")
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "Who you are:\nA retired thief." in prompt
+        assert "What you look like:\nA patched green coat." in prompt
+
+    def test_the_description_carries_an_instruction_to_act_on_it(self, client, monkeypatch):
+        # Without this the description was decoration: the draft sounded
+        # right and behaved like nobody in particular.
+        _profiled_room(monkeypatch, name="Kira", description="A retired thief.")
+        seen = self._stub(monkeypatch)
+
+        self._suggest(client, room="Tavern")
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "Stay in character" in prompt
+        assert "should follow from who you are" in prompt
+
+    def test_no_stay_in_character_line_without_a_description(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        self._suggest(client)
+        assert "Stay in character" not in seen[0]["messages"][0]["content"]
+
+    def test_the_persona_facing_profile_block_is_not_reused(self, client, monkeypatch):
+        # _player_lines() ends "never write their lines for them" — the exact
+        # opposite of what is being asked here.
+        _profiled_room(monkeypatch, name="Kira", description="A thief.",
+                       appearance="A green coat.")
+        seen = self._stub(monkeypatch)
+
+        self._suggest(client, room="Tavern")
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "Never write their lines for them" not in prompt
+        assert "You are talking with" not in prompt
+
+    def test_it_writes_in_the_second_person_as_the_character(self, client, monkeypatch):
+        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        seen = self._stub(monkeypatch)
+
+        self._suggest(client, room="Tavern")
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert prompt.startswith('You are Kira, in a group chat called "Tavern".')
+        # No third-person framing left over — the model is the character,
+        # not a writer working on their behalf.
+        assert "next message for Kira" not in prompt
+
+    def test_an_unnamed_player_is_described_rather_than_called_user(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        self._suggest(client)
+        prompt = seen[0]["messages"][0]["content"]
+        assert "You are the human in a group chat" in prompt
+        assert 'shown in the transcript as "User"' in prompt
+
+    def test_prose_uses_the_configured_temperature_not_the_routers(self, client, monkeypatch):
+        # chat_completion defaults to 0.1, which is right for picking a name
+        # and wrong for writing a line.
+        seen = self._stub(monkeypatch)
+        self._suggest(client)
+        assert seen[0]["temperature"] == 0.8
+        assert seen[0]["max_tokens"] == 256
+
+    def test_a_name_prefix_is_stripped_from_the_draft(self, client, monkeypatch):
+        self._stub(monkeypatch, result="User: aye, right you are")
+        assert self._suggest(client) == "aye, right you are"
+
+    def test_a_draft_that_runs_into_a_persona_is_cut(self, client, monkeypatch):
+        self._stub(monkeypatch, result="Right you are.\n[Luna]: And I would add...")
+        assert self._suggest(client) == "Right you are."
+
+    def test_works_with_no_history_at_all(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        assert self._suggest(client) == "Aye, that'll be tuppence."
+        assert "Match their voice" not in seen[0]["messages"][0]["content"]
+
+    def test_an_llm_failure_is_reported_not_swallowed(self, client, monkeypatch):
+        self._stub(monkeypatch, result="")
+        resp = client.post("/api/chat/suggest", json={"chat_room": "TNG"})
+        assert resp.status_code == 503
+        assert "did not return a suggestion" in resp.json()["detail"]
+
+    def test_nothing_is_sent_or_persisted(self, client, monkeypatch):
+        self._stub(monkeypatch)
+        self._suggest(client)
+        assert session.history == []
+        from app.persistence import load_history
+        assert load_history("TNG") == []

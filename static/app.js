@@ -105,7 +105,13 @@ async function checkSTTHealth() {
    ========================================================================== */
 
 function setupEventListeners() {
-    sendBtn.addEventListener("click", sendMessage);
+    // Wrapped rather than passed directly: sendMessage takes an options
+    // object, and a click handler would hand it the Event.
+    sendBtn.addEventListener("click", () => sendMessage());
+    // Echo is an action, not a mode — one click, one echoed line, and the
+    // room is left exactly as it was.
+    echoBtn.addEventListener("click", () => sendMessage({ echo: true }));
+    suggestBtn.addEventListener("click", suggestMessage);
     inputEl.addEventListener("keydown", (e) => {
         // Enter sends; Shift+Enter for newline
         if (e.key === "Enter" && !e.shiftKey) {

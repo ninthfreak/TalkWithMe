@@ -24,10 +24,7 @@ from app.models import (
     AssignPersonasRequest,
     ChatRoomCreateRequest,
     ChatRoomResponse,
-    EchoChamberRequest,
-    PlayerProfileRequest,
-    RequirePlayerProfileRequest,
-    TypicalLengthRequest,
+    ChatRoomUpdateRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,7 +37,6 @@ def _to_response(room: ChatRoom) -> ChatRoomResponse:
     return ChatRoomResponse(
         name=room.name,
         persona_names=list(room.persona_names),
-        echo_chamber=room.echo_chamber,
         typical_length=room.typical_length,
         require_player_profile=room.require_player_profile,
         player_profile=room.player_profile,
@@ -95,7 +91,6 @@ def list_all_chatrooms():
         ChatRoomResponse(
             name=DEFAULT_ROOM,
             persona_names=all_persona_names,
-            echo_chamber=False,
             typical_length=get_settings().general.typical_length,
         )
     ]
@@ -165,7 +160,6 @@ def get_chatroom(name: str):
         return ChatRoomResponse(
             name=DEFAULT_ROOM,
             persona_names=all_persona_names,
-            echo_chamber=False,
             typical_length=get_settings().general.typical_length,
         )
 
@@ -232,43 +226,28 @@ def remove_persona_from_room(name: str, persona_name: str):
     return _to_response(updated_room)
 
 
-@router.put("/{name}/echo-chamber", response_model=ChatRoomResponse)
-def set_echo_chamber(name: str, req: EchoChamberRequest):
-    """Set the echo chamber flag for a chat room. Cannot modify the 'default' room."""
-    room = _editable_room_or_400(name)
-    return _save_room_update(room, {"echo_chamber": req.echo_chamber})
+@router.put("/{name}", response_model=ChatRoomResponse)
+def update_chatroom(name: str, req: ChatRoomUpdateRequest):
+    """Update a chat room's settings. Cannot modify the 'default' room.
 
-
-@router.put("/{name}/typical-length", response_model=ChatRoomResponse)
-def set_typical_length(name: str, req: TypicalLengthRequest):
-    """Set a room's typical response length. Cannot modify the 'default' room.
-
-    "default" has no chatrooms.yaml entry to store an override in, so it
-    always reports the global general.typical_length instead.
+    A partial update: omitted fields keep their current value, so the room
+    editor can send only what changed and a future attribute needs no new
+    endpoint. "default" has no chatrooms.yaml entry to store settings in.
     """
     room = _editable_room_or_400(name)
-    return _save_room_update(room, {"typical_length": req.typical_length})
 
+    update = req.model_dump(exclude_none=True)
+    if "player_profile" in update:
+        # Nested model arrives as a plain dict; whitespace-only fields are
+        # the same as empty, so a profile is never "complete" by accident.
+        update["player_profile"] = PlayerProfile(
+            **{k: v.strip() for k, v in update["player_profile"].items()}
+        )
 
-@router.put("/{name}/player-profile", response_model=ChatRoomResponse)
-def set_player_profile(name: str, req: PlayerProfileRequest):
-    """Set the human user's character profile for a room.
+    if not update:
+        # Nothing to change — report the room as it stands rather than
+        # rewriting chatrooms.yaml for no reason.
+        return _to_response(room)
 
-    Per room on purpose: the player can be a different character in each
-    room, the same way personas differ between rooms. "default" has no
-    chatrooms.yaml entry to store one in.
-    """
-    room = _editable_room_or_400(name)
-    profile = PlayerProfile(
-        name=req.name.strip(),
-        description=req.description.strip(),
-        appearance=req.appearance.strip(),
-    )
-    return _save_room_update(room, {"player_profile": profile})
-
-
-@router.put("/{name}/require-player-profile", response_model=ChatRoomResponse)
-def set_require_player_profile(name: str, req: RequirePlayerProfileRequest):
-    """Set whether a room refuses messages until its profile is filled in."""
-    room = _editable_room_or_400(name)
-    return _save_room_update(room, {"require_player_profile": req.require_player_profile})
+    logger.info("Updating chat room '%s': %s", room.name, ", ".join(sorted(update)))
+    return _save_room_update(room, update)

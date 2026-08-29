@@ -223,6 +223,9 @@ Selecting the "Chat rooms" control in the top right brings up the chat room edit
 Here, you can:
 
 - **Create** a new chat room (names must be unique)
+- **Edit** a room's settings — typical response length and whether the room requires
+  your character. This is the place to change how an existing room
+  behaves, and new room options will appear here as they are added.
 - **Delete** a chat room (and its chat history)
 
 The `chatrooms.yaml` file persists these settings:
@@ -235,7 +238,6 @@ chat_rooms:
   - Troi
   - Data
   - Picard
-  echo_chamber: false
 - name: Language_learning
   persona_names:
   - English expert
@@ -244,7 +246,6 @@ chat_rooms:
 - name: chit-chat
   persona_names:
   - kstew
-  echo_chamber: true
 ```
 
 Personas can be added/removed to a chat room via the main chat interface's left panel:
@@ -449,8 +450,24 @@ name has that prefix removed. And if a reply *does* hit the token ceiling, the n
 persona is handed it trimmed to its last complete sentence, so there is no dangling
 thought inviting them to finish it.
 
-None of this is configurable; it applies to every room except echo chamber rooms, where
-nothing is generated in the first place.
+None of this is configurable; it applies to every reply, except an echoed message,
+where nothing is generated in the first place.
+
+## How much the personas remember
+
+Personas are sent the last few **exchanges** of the conversation, set by *Exchanges of
+Context* in the settings dialog (default 6).
+
+An exchange is one message from you plus every reply it drew. That distinction matters as
+soon as more than one persona answers: if the window counted individual messages instead,
+a six-persona room would burn a whole setting of 6 on a single question and its answers,
+and anything before it would be gone. Asking a room to guess something and then revealing
+the answer would leave the personas reacting to the reveal without ever having seen the
+question — reading it as a remark from nowhere.
+
+Counting exchanges keeps a question and the answers it drew together, and the window no
+longer shrinks as you add personas to a room. Raise the number if you want them to
+remember further back; the cost is a longer prompt on every reply.
 
 ## Playing a character yourself
 
@@ -492,11 +509,35 @@ them by name. Never write their lines for them.
 The profile lives in `config/chatrooms.yaml`, which is gitignored — it stays on your machine.
 The "All Personas" room cannot carry a profile, since it has no entry of its own.
 
-## Echo chamber
+## Writing your own lines with help
 
-Enabling the "echo chamber" option in a chat room will cause the responding persona to simply echo back
-whatever you type or speak, verbatim. This is useful with TTS servers, if you want to hear a persona
-speak a specific line of dialogue. This option is disabled by default.
+The pencil button beside the send arrow drafts **your** next message and puts it in the
+input box.
+
+It draws on two things, for two different reasons. Your **character description** decides
+what you would say — your manner, what you care about, how someone like you would react to
+what was just said. Your **own recent messages** decide how you would say it: vocabulary,
+sentence shape, how much you usually write. It also sees the conversation so far and who
+else is in the room, so the draft sounds like you rather than like an assistant.
+
+Without a character set for the room it still works, going on your past messages alone.
+
+It goes into the input box, never straight into the chat — edit it, send it, echo it, or
+clear it. Nothing is sent or saved until you press send.
+
+## Echo — making a persona say a line
+
+The speech-bubble button beside the send arrow sends your message to be **echoed back
+verbatim** in a persona's voice instead of answered. With a TTS server configured, that
+is how you make a specific persona speak a specific line of dialogue.
+
+It applies to that one message only. The next thing you send is answered normally and the
+room is left exactly as it was — echoing is something you *do*, not a mode you leave a
+room in. Use the "Who should answer?" chooser to pick which persona speaks it.
+
+(This was previously an "echo chamber" checkbox stored on the room, which meant a room
+kept echoing until you remembered to switch it back off. Existing rooms are migrated
+automatically and the stored setting simply disappears.)
 
 ## Detailed setup guide
 

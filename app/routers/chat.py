@@ -11,7 +11,7 @@ import random
 import uuid
 from typing import AsyncIterator, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.config import (
@@ -26,8 +26,8 @@ from app.config import (
     get_settings,
     resolve_typical_length,
 )
-from app.models import ChatRequest
-from app.session import session
+from app.models import ChatRequest, SuggestReplyRequest, SuggestReplyResponse
+from app.session import recent_exchanges, session
 from app.services.llm import chat_completion, stream_chat, stream_chat_with_tools
 from app.services.reply_guard import ReplyGuard, stop_sequences
 from app.services.tool_registry import get_all_tools
@@ -227,9 +227,10 @@ def _build_router_prompt(user_message: str, chat_room: str) -> list[dict]:
         f"- {p.name}: {p.router_hints}" for p in active_personas
     )
 
-    # Include last N conversation turns for context
+    # Same windowing as the reply prompt: whole exchanges, so the router
+    # never sees answers whose question has been cut away.
     max_context = get_settings().general.max_turns_for_context
-    recent = session.history[-max_context:]
+    recent = recent_exchanges(session.history, max_context)
     context_lines = []
     for msg in recent:
         if msg.role == "user":
@@ -342,12 +343,13 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     # Add user message to history (persisted automatically)
     session.add_user_message(req.message, user_message_id)
 
-    echo_enabled = room.echo_chamber if room else False
     user_label = _user_label(room)
 
-    # Echo chamber overrides max_replies — only one persona echoes the user.
-    # Multiple identical echoes from different personas would be pointless noise.
-    if echo_enabled:
+    # Echo is a property of this message, not a mode the room is left in:
+    # the use for it is "make a persona say this exact line", which is a
+    # one-off act. Only one persona echoes — several identical echoes would
+    # be noise — so it overrides max_replies for this turn alone.
+    if req.echo:
         max_replies = 1
 
     # A cut reply costs an attempt but not a slot. Tracking attempts per
@@ -395,8 +397,8 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
 
         truncated = False
 
-        if echo_enabled:
-            # Echo chamber: bypass the LLM entirely and return the user's message verbatim.
+        if req.echo:
+            # Echo: bypass the LLM entirely and return the message verbatim.
             # No preamble, no length tier, no guard — nothing was generated.
             full_text = req.message
             yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": full_text})}\n\n'
@@ -526,3 +528,145 @@ async def chat(req: ChatRequest):
             "X-Accel-Buffering": "no",  # Disable nginx buffering
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Suggested player message
+# ---------------------------------------------------------------------------
+#
+# The inverse of everything the reply guard enforces: here the LLM *is*
+# asked to write as the player. That is fine because the player asked for
+# it and the result lands in the input box for them to edit — it is a
+# drafting aid, not an auto-reply. Nothing is sent or persisted until they
+# press send.
+
+# How many of the player's own past messages to show as a voice sample.
+_VOICE_SAMPLE_MESSAGES = 8
+
+
+def _player_voice_sample(user_label: str) -> list[str]:
+    """The player's own recent messages, oldest first.
+
+    This is the "how they write" half of the prompt: vocabulary, sentence
+    shape, how much they say. Their own words carry that better than any
+    description of them could.
+    """
+    said = [m.content for m in session.history if m.role == "user"]
+    return said[-_VOICE_SAMPLE_MESSAGES:]
+
+
+def _build_suggestion_prompt(chat_room: str) -> list[dict]:
+    """Ask the LLM for the player's next message, in the player's voice.
+
+    Two different jobs, kept apart on purpose:
+
+    * the **character description** decides *what* to say — the manner,
+      what this character cares about, how they would react;
+    * the **voice sample** (their own past messages) decides *how* to say
+      it — vocabulary, sentence shape, how much they usually write.
+
+    An earlier version mentioned the description in a single line while
+    giving the sample a labelled section and an explicit "match this"
+    instruction, so drafts came back sounding right and behaving like
+    nobody in particular. Both now get a section and an instruction.
+
+    Written in the second person throughout: the model is the character,
+    not a writer working on their behalf.
+    """
+    room = _find_room(chat_room)
+    user_label = _user_label(room)
+    eligible = _resolve_room_personas(chat_room)
+    settings = get_settings()
+    length = resolve_typical_length(None, room, settings.general.typical_length)
+    profile = room.player_profile if room is not None else None
+
+    named = bool(profile and profile.name.strip())
+    if named:
+        lines = [f'You are {user_label}, in a group chat called "{chat_room}".']
+    else:
+        lines = [
+            f'You are the human in a group chat called "{chat_room}", shown in '
+            f'the transcript as "{user_label}".'
+        ]
+
+    # Deliberately NOT _player_lines(): that block is addressed to personas
+    # talking *to* the player and ends "never write their lines for them",
+    # which is the exact opposite of this task.
+    if profile and profile.description.strip():
+        lines += ["", "Who you are:", profile.description.strip()]
+    if profile and profile.appearance.strip():
+        lines += ["", "What you look like:", profile.appearance.strip()]
+
+    if profile and (profile.description.strip() or profile.appearance.strip()):
+        lines += [
+            "",
+            "Stay in character. What you say should follow from who you are — "
+            "your manner, what you care about, and how someone like you would "
+            "react to what was just said.",
+        ]
+
+    if eligible:
+        lines += ["", f"The others here are: {', '.join(eligible)}."]
+
+    sample = _player_voice_sample(user_label)
+    if sample:
+        lines += [
+            "",
+            "How you write — match this voice, vocabulary and typical length "
+            "(these are your own earlier messages):",
+        ]
+        lines += [f"- {s}" for s in sample]
+
+    recent = recent_exchanges(session.history, settings.general.max_turns_for_context)
+    if recent:
+        lines += ["", "The conversation so far:"]
+        for msg in recent:
+            speaker = user_label if msg.role == "user" else msg.persona
+            lines.append(f"[{speaker}]: {msg.content}")
+
+    spec = TYPICAL_LENGTH_SPECS[length]
+    length_line = (
+        f" Aim for about {spec.phrasing} (~{spec.words} words)." if spec.words else ""
+    )
+    lines += [
+        "",
+        "Write your next message. Output only the message itself — no name "
+        "prefix, no quotation marks, no narration, and no explanation of what "
+        f"you wrote.{length_line}",
+    ]
+
+    return [
+        {"role": "system", "content": "\n".join(lines)},
+        {"role": "user", "content": "Write your next message."},
+    ]
+
+
+@router.post("/suggest", response_model=SuggestReplyResponse)
+async def suggest_reply(req: SuggestReplyRequest):
+    """Draft the player's next message for them to review and edit."""
+    room = _find_room(req.chat_room)
+    settings = get_settings()
+    length = resolve_typical_length(None, room, settings.general.typical_length)
+
+    text = await chat_completion(
+        _build_suggestion_prompt(req.chat_room),
+        max_tokens=derive_max_tokens(length, settings.llm.max_tokens),
+        # Prose, not routing: use the configured sampling temperature so a
+        # suggestion does not come out flat and repetitive.
+        temperature=settings.llm.temperature,
+    )
+
+    if not text.strip():
+        raise HTTPException(
+            status_code=503,
+            detail="The LLM did not return a suggestion. Is the server running?",
+        )
+
+    # The same guard the personas get, pointed the other way: strip a
+    # "[Tony]: " prefix the model added, and cut it off if it carries on
+    # into a persona's reply.
+    user_label = _user_label(room)
+    guard = ReplyGuard(user_label, _resolve_room_personas(req.chat_room))
+    cleaned = (guard.feed(text) + guard.flush()).strip()
+
+    return SuggestReplyResponse(text=cleaned or text.strip())

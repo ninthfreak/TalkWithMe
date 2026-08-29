@@ -100,7 +100,7 @@ async function submitGenSettings(e) {
     const maxReplies = checkRange(gsfMaxPersonaReplies, "Max Persona Replies");
     if (maxReplies === null) return;
 
-    const maxTurns = checkRange(gsfMaxTurnsForContext, "Max Turns for Context");
+    const maxTurns = checkRange(gsfMaxTurnsForContext, "Exchanges of Context");
     if (maxTurns === null) return;
 
     // Fetch current full settings so we can patch only the general section

@@ -246,10 +246,7 @@ class TestCascadePreservesRoomSettings:
     """
 
     def _configure_room(self, client):
-        client.put("/api/chatrooms/TNG/echo-chamber", json={"echo_chamber": True})
-        client.put(
-            "/api/chatrooms/TNG/typical-length", json={"typical_length": "terse"}
-        )
+        client.put("/api/chatrooms/TNG", json={"typical_length": "terse"})
 
     def test_rename_preserves_room_settings(self, client):
         self._configure_room(client)
@@ -259,7 +256,6 @@ class TestCascadePreservesRoomSettings:
 
         body = client.get("/api/chatrooms/TNG").json()
         assert body["persona_names"] == ["Alexander", "Luna"]
-        assert body["echo_chamber"] is True
         assert body["typical_length"] == "terse"
 
     def test_delete_preserves_room_settings(self, client):
@@ -268,5 +264,4 @@ class TestCascadePreservesRoomSettings:
 
         body = client.get("/api/chatrooms/TNG").json()
         assert body["persona_names"] == ["Luna"]
-        assert body["echo_chamber"] is True
         assert body["typical_length"] == "terse"

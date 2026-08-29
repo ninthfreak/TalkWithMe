@@ -145,9 +145,6 @@ def test_labels_point_at_elements_that_exist():
 # drifts silently: the UI keeps offering a value the API now rejects, or
 # quietly hides one it accepts. Both fail only when a user clicks.
 
-CHATROOMS_JS = STATIC_DIR / "chatrooms.js"
-
-
 def _select_options(html: str, select_id: str) -> set[str]:
     block = re.search(
         rf'<select id="{re.escape(select_id)}">(.*?)</select>', html, re.DOTALL
@@ -156,19 +153,12 @@ def _select_options(html: str, select_id: str) -> set[str]:
     return set(re.findall(r'<option value="([^"]*)"', block.group(1)))
 
 
-def test_room_length_selects_offer_every_tier():
+@pytest.mark.parametrize("select_id", ["gsf-typical-length", "re-typical-length"])
+def test_room_length_selects_offer_every_tier(select_id):
     from app.config import TypicalLength
 
-    expected = {t.value for t in TypicalLength}
     html = INDEX_HTML.read_text(encoding="utf-8")
-
-    assert _select_options(html, "gsf-typical-length") == expected
-
-    # The per-room select in the chat room editor is built in JS.
-    js = CHATROOMS_JS.read_text(encoding="utf-8")
-    listed = re.search(r"const TYPICAL_LENGTH_OPTIONS = \[(.*?)\];", js, re.DOTALL)
-    assert listed, "TYPICAL_LENGTH_OPTIONS not found in chatrooms.js"
-    assert set(re.findall(r'\["([^"]+)"', listed.group(1))) == expected
+    assert _select_options(html, select_id) == {t.value for t in TypicalLength}
 
 
 def test_persona_length_bias_select_offers_every_bias():
@@ -242,3 +232,32 @@ def test_general_settings_js_does_not_hardcode_bounds():
     js = (STATIC_DIR / "gen-settings.js").read_text(encoding="utf-8")
     stale = re.findall(r"must be between \d+ and \d+", js)
     assert not stale, f"gen-settings.js hardcodes a range: {stale}"
+
+
+# ---------------------------------------------------------------------------
+# Modal dialogs must use a class that exists
+# ---------------------------------------------------------------------------
+#
+# Two dialogs shipped using `class="modal"`, which no stylesheet defines,
+# so they rendered transparent on top of whatever was behind them. The
+# markup was valid and every behavioural test passed; only opening them in
+# a browser showed it.
+
+def test_modal_overlays_use_a_styled_box():
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    css = (STATIC_DIR / "style.css").read_text(encoding="utf-8")
+
+    box_classes = {
+        c for c in re.findall(r'<div class="(modal[^"]*)"', html)
+        if not c.startswith("modal-overlay") and c != "modal-header"
+    }
+    assert box_classes, "no modal boxes found in index.html"
+
+    for cls in sorted(box_classes):
+        for token in cls.split():
+            # (?![\w-]) rather than \b: a hyphen is a word boundary, so
+            # "^\.modal\b" matches ".modal-overlay" and the check passes
+            # for a class nothing actually defines.
+            assert re.search(rf"^\.{re.escape(token)}(?![\w-])", css, re.MULTILINE), (
+                f'index.html uses class "{token}" which style.css does not define'
+            )
