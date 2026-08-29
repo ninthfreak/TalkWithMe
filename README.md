@@ -440,7 +440,9 @@ behalf.
 Because models do not always listen, that instruction is backed up mechanically. If a
 reply starts producing another speaker's turn — another persona's *or yours* — it is cut
 at that point, and you see the persona's own words and nothing else. If nothing of its
-own survives the cut, the reply is dropped rather than shown as an empty bubble. A persona that prefixes its own reply with its own
+own survives the cut, the reply is dropped and the next persona is asked instead, so a
+cut reply does not cost you one of your requested answers. In the rare case where nobody
+manages a reply in their own voice, the chat says so rather than sitting there empty. A persona that prefixes its own reply with its own
 name has that prefix removed. And if a reply *does* hit the token ceiling, the next
 persona is handed it trimmed to its last complete sentence, so there is no dangling
 thought inviting them to finish it.
@@ -462,6 +464,10 @@ Personas") and fill in:
 - **What you look like** — optional. This is the "picture", and it is deliberately
   *text*: the personas are the audience for it and they read descriptions, so write
   "short, scarred hands, a patched green coat and a limp" rather than uploading a photo.
+
+Once your character has a name, your own messages are labelled with it, the same way
+persona messages are labelled — still on the right-hand side, so it stays obvious which
+are yours.
 
 Each room has its own profile, so you can be a different character in each one. Ticking
 **Require my character** makes the room refuse messages until the profile has a name and

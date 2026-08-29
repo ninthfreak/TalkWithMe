@@ -865,8 +865,10 @@ class TestNeverSpeakAsTheUser:
         assert [m for m in session.history if m.role == "assistant"] == []
         assert [e["type"] for e in events][-1] == "complete"
 
-    def test_a_dropped_reply_does_not_block_the_next_persona(self, client, monkeypatch):
-        _patch_general(monkeypatch, max_persona_replies=2)
+    def test_a_dropped_reply_does_not_use_up_a_reply_slot(self, client, monkeypatch):
+        # One reply was asked for, the first persona was cut, so the next
+        # persona is tried rather than the turn ending empty-handed.
+        _patch_general(monkeypatch, max_persona_replies=1)
         calls = {"n": 0}
 
         async def alternating(messages, max_tokens=None, stop=None):
@@ -878,8 +880,34 @@ class TestNeverSpeakAsTheUser:
         monkeypatch.setattr(chat_router, "stream_chat", alternating)
         events = _chat(client, who_answers="Alex", chat_room="TNG")
 
-        dones = sse_events_by_type(events, "done")
-        assert [d["text"] for d in dones] == ["A real answer."]
+        assert [d["text"] for d in sse_events_by_type(events, "done")] == ["A real answer."]
+
+    def test_a_persona_is_never_tried_twice_in_one_turn(self, client, monkeypatch):
+        _patch_general(monkeypatch, max_persona_replies=2)
+        _stub_stream(monkeypatch, ["User: nope"])   # every persona gets cut
+
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        starts = [e["persona"] for e in sse_events_by_type(events, "start")]
+        assert sorted(starts) == ["Alex", "Luna"]   # the room's two, once each
+
+    def test_everyone_cut_reports_it_instead_of_going_silent(self, client, monkeypatch):
+        # A turn that ends with a start event and nothing after it is
+        # indistinguishable from the app hanging.
+        _stub_stream(monkeypatch, ["User: nope"])
+
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert sse_events_by_type(events, "done") == []
+        errors = sse_events_by_type(events, "error")
+        assert len(errors) == 1
+        assert "in their own voice" in errors[0]["message"]
+        assert [e["type"] for e in events][-1] == "complete"
+
+    def test_a_normal_turn_reports_no_error(self, client, monkeypatch):
+        _stub_stream(monkeypatch, ["A real answer."])
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+        assert sse_events_by_type(events, "error") == []
 
     def test_the_turn_is_stated_at_the_end_of_the_preamble(self, client, monkeypatch):
         calls = _capture(monkeypatch)

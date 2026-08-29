@@ -1392,3 +1392,9 @@ html, body {
     border-color: var(--accent);
     color: var(--accent);
 }
+
+/* The human's own name label, matching the persona name labels but on the
+   right, since user rows sit on that side. */
+.message-row.user .bubble-name {
+    text-align: right;
+}
