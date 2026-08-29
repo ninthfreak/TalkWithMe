@@ -223,6 +223,9 @@ Selecting the "Chat rooms" control in the top right brings up the chat room edit
 Here, you can:
 
 - **Create** a new chat room (names must be unique)
+- **Edit** a room's settings — typical response length, echo chamber, and whether the
+  room requires your character. This is the place to change how an existing room
+  behaves, and new room options will appear here as they are added.
 - **Delete** a chat room (and its chat history)
 
 The `chatrooms.yaml` file persists these settings:

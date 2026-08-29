@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import LengthBias, PlayerProfile, TypicalLength
 
@@ -311,18 +311,35 @@ class EchoChamberRequest(BaseModel):
     echo_chamber: bool
 
 
-class TypicalLengthRequest(BaseModel):
-    """Set a chat room's typical response length tier."""
-    typical_length: TypicalLength
-
-
 class PlayerProfileRequest(BaseModel):
-    """Set the human user's character profile for a chat room."""
+    """The human user's character profile for a chat room."""
     name: str = Field(default="", max_length=40)
     description: str = Field(default="", max_length=2000)
     appearance: str = Field(default="", max_length=1000)
 
 
-class RequirePlayerProfileRequest(BaseModel):
-    """Toggle whether a chat room demands a player profile before chatting."""
-    require_player_profile: bool
+class ChatRoomUpdateRequest(BaseModel):
+    """Partial update of a chat room's settings.
+
+    Every field is optional and omitted fields keep their current value —
+    the same contract `GeneralSettingsRequest` uses. This is deliberately
+    one endpoint rather than one per attribute: a new room attribute means
+    adding a field here and a control in the room editor, not another
+    route, another request model and another frontend fetch. The four
+    single-purpose endpoints this replaces (echo-chamber, typical-length,
+    player-profile, require-player-profile) were already drifting apart.
+
+    Membership is not here: personas have their own endpoints because
+    assigning one validates against the persona list and can 422, which is
+    a different operation from setting a flag.
+
+    Unknown fields are rejected rather than ignored. On a partial-update
+    endpoint a mistyped key would otherwise be indistinguishable from a
+    successful save — the room comes back unchanged and nothing complains.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    typical_length: Optional[TypicalLength] = None
+    echo_chamber: Optional[bool] = None
+    require_player_profile: Optional[bool] = None
+    player_profile: Optional[PlayerProfileRequest] = None

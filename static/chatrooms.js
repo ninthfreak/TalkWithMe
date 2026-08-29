@@ -142,6 +142,7 @@ function setupChatRoomEventListeners() {
     btnAddPersona.addEventListener("click", openPersonaPicker);
 
     setupPlayerProfileEventListeners();
+    setupRoomEditorEventListeners();
 
     // Chat rooms editor button in topbar
     document.getElementById("btn-chat-rooms").addEventListener("click", openChatRoomsEditor);
@@ -214,17 +215,7 @@ async function updateEchoChamber(roomName, enabled) {
         return;
     }
     try {
-        const resp = await fetch(`/api/chatrooms/${encodeURIComponent(roomName)}/echo-chamber`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ echo_chamber: enabled }),
-        });
-        if (!resp.ok) {
-            console.error("Failed to update echo chamber:", resp.status);
-            // Revert UI on failure
-            echoChamberToggle.checked = !enabled;
-            return;
-        }
+        await saveRoomSettings(roomName, { echo_chamber: enabled });
         // Reload from server to sync all state (persona lists, echo flag, etc.)
         await loadChatRooms();
     } catch (err) {
@@ -307,7 +298,11 @@ function renderChatRoomList() {
         countEl.className = "cr-list-item-count";
         countEl.textContent = `${room.persona_names.length} persona${room.persona_names.length !== 1 ? 's' : ''}`;
 
-        const lengthEl = createTypicalLengthSelect(room);
+        const editBtn = document.createElement("button");
+        editBtn.className = "cr-list-item-edit";
+        editBtn.textContent = "Edit";
+        editBtn.title = `Edit "${room.name}" settings`;
+        editBtn.addEventListener("click", () => openRoomEditor(room.name));
 
         const deleteBtn = document.createElement("button");
         deleteBtn.className = "cr-list-item-delete";
@@ -317,61 +312,35 @@ function renderChatRoomList() {
 
         item.appendChild(nameEl);
         item.appendChild(countEl);
-        item.appendChild(lengthEl);
+        item.appendChild(editBtn);
         item.appendChild(deleteBtn);
         crListEl.appendChild(item);
     }
 }
 
-/* Typical response length is what shapes reply length, via an instruction
-   in the persona's prompt. It is deliberately not a token count: clamping
-   max_tokens down to shorten replies is what cut personas off mid-sentence
-   and made the next one continue the unfinished thought. */
-const TYPICAL_LENGTH_OPTIONS = [
-    ["terse", "Terse — a few words"],
-    ["brief", "Brief — one sentence"],
-    ["normal", "Normal — a sentence or two"],
-    ["detailed", "Detailed — two or three"],
-    ["verbose", "Verbose — a paragraph"],
-    ["unrestricted", "Unrestricted"],
-];
-
-function createTypicalLengthSelect(room) {
-    const select = document.createElement("select");
-    select.className = "cr-list-item-length";
-    select.title = `Typical response length for "${room.name}"`;
-    for (const [value, label] of TYPICAL_LENGTH_OPTIONS) {
-        const opt = document.createElement("option");
-        opt.value = value;
-        opt.textContent = label;
-        select.appendChild(opt);
-    }
-    select.value = room.typical_length || "normal";
-    select.addEventListener("change", () => updateTypicalLength(room, select));
-    return select;
+/**
+ * Save a partial room update. Every room-settings control goes through
+ * here, so there is one request shape and one place to refresh cached
+ * state — and a future room attribute needs a control and a field, not
+ * another fetch helper.
+ *
+ * Returns the updated room; throws on failure for the caller to report.
+ */
+async function saveRoomSettings(roomName, patch) {
+    const resp = await fetch(`/api/chatrooms/${encodeURIComponent(roomName)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const updated = await resp.json();
+    // Keep the cached list in step so reopening any editor shows the saved
+    // values rather than stale ones.
+    const cached = allChatRooms.find(r => r.name.toLowerCase() === roomName.toLowerCase());
+    if (cached) Object.assign(cached, updated);
+    return updated;
 }
 
-async function updateTypicalLength(room, select) {
-    const previous = room.typical_length || "normal";
-    if (select.value === previous) return;
-    try {
-        const resp = await fetch(
-            `/api/chatrooms/${encodeURIComponent(room.name)}/typical-length`,
-            {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ typical_length: select.value }),
-            }
-        );
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        // Keep the cached room in sync so reopening the editor shows the
-        // saved value rather than a stale one.
-        room.typical_length = select.value;
-    } catch (err) {
-        console.error("Failed to update typical length:", err);
-        select.value = previous;
-    }
-}
 
 function showNewRoomForm() {
     crNewForm.classList.remove("hidden");
@@ -592,9 +561,7 @@ async function addSelectedPersonasToRoom() {
    ========================================================================== */
 
 function currentRoomInfo() {
-    return allChatRooms.find(
-        r => r.name.toLowerCase() === currentChatRoom.toLowerCase()
-    );
+    return roomByName(currentChatRoom);
 }
 
 function emptyProfile() {
@@ -643,9 +610,19 @@ function applyPlayerProfileControls(isActiveRoom) {
     playerProfileWrapper.classList.toggle("hidden", !isActiveRoom);
 }
 
-function openPlayerProfile() {
-    const room = currentRoomInfo();
+// Which room the open profile dialog is editing. Not always the selected
+// room: the room editor can open it for any room.
+let profileRoomName = null;
+
+function roomByName(name) {
+    return allChatRooms.find(
+        r => r.name.toLowerCase() === String(name).toLowerCase());
+}
+
+function openPlayerProfile(roomName) {
+    const room = roomName ? roomByName(roomName) : currentRoomInfo();
     if (!room) return;
+    profileRoomName = room.name;
     const profile = room.player_profile || emptyProfile();
     ppfName.value = profile.name || "";
     ppfDescription.value = profile.description || "";
@@ -673,7 +650,7 @@ function hidePlayerProfileError() {
 
 async function savePlayerProfile(e) {
     if (e) e.preventDefault();
-    const room = currentRoomInfo();
+    const room = profileRoomName ? roomByName(profileRoomName) : currentRoomInfo();
     if (!room) return;
 
     const payload = {
@@ -690,18 +667,10 @@ async function savePlayerProfile(e) {
     }
 
     try {
-        const resp = await fetch(
-            `/api/chatrooms/${encodeURIComponent(room.name)}/player-profile`,
-            {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            }
-        );
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        room.player_profile = await resp.json().then(r => r.player_profile);
+        await saveRoomSettings(room.name, { player_profile: payload });
         closePlayerProfile();
         applyPlayerProfileControls(currentChatRoom !== "default");
+        refreshRoomEditProfileSummary();
     } catch (err) {
         console.error("Failed to save player profile:", err);
         showPlayerProfileError("Could not save. Is the server running?");
@@ -712,16 +681,7 @@ async function updateRequirePlayerProfile(enabled) {
     const room = currentRoomInfo();
     if (!room || room.require_player_profile === enabled) return;
     try {
-        const resp = await fetch(
-            `/api/chatrooms/${encodeURIComponent(room.name)}/require-player-profile`,
-            {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ require_player_profile: enabled }),
-            }
-        );
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        room.require_player_profile = enabled;
+        await saveRoomSettings(room.name, { require_player_profile: enabled });
         applyPlayerProfileControls(true);
         // Turning the requirement on with nothing filled in should say so
         // now, rather than at the moment the next message is refused.
@@ -741,5 +701,101 @@ function setupPlayerProfileEventListeners() {
     document.getElementById("pp-profile-btn-cancel").addEventListener("click", closePlayerProfile);
     playerProfileOverlay.addEventListener("click", (e) => {
         if (e.target === playerProfileOverlay) closePlayerProfile();
+    });
+}
+
+/* ==========================================================================
+   Room editor — every room attribute in one dialog
+
+   Deliberately the canonical place to configure a room. The left-panel
+   toggles are shortcuts for the room you are already in; both write through
+   saveRoomSettings() and read from the same cached list, so they cannot
+   drift apart.
+   ========================================================================== */
+
+let editingRoomName = null;
+
+function openRoomEditor(roomName) {
+    const room = allChatRooms.find(r => r.name.toLowerCase() === roomName.toLowerCase());
+    if (!room) return;
+    editingRoomName = room.name;
+
+    document.getElementById("re-title").textContent = `Edit “${room.name}”`;
+    reTypicalLength.value = room.typical_length || "normal";
+    reEchoChamber.checked = !!room.echo_chamber;
+    reRequireProfile.checked = !!room.require_player_profile;
+    document.getElementById("re-personas").textContent =
+        room.persona_names.length
+            ? `${room.persona_names.length} assigned: ${room.persona_names.join(", ")}`
+            : "No personas assigned yet.";
+    refreshRoomEditProfileSummary();
+    hideRoomEditError();
+    roomEditOverlay.classList.remove("hidden");
+}
+
+function refreshRoomEditProfileSummary() {
+    const el = document.getElementById("re-profile-summary");
+    if (!el || !editingRoomName) return;
+    const room = allChatRooms.find(
+        r => r.name.toLowerCase() === editingRoomName.toLowerCase());
+    const profile = (room && room.player_profile) || emptyProfile();
+    el.textContent = profile.name.trim()
+        ? `Currently: ${profile.name.trim()}`
+        : "No character set for this room.";
+}
+
+function closeRoomEditor() {
+    roomEditOverlay.classList.add("hidden");
+    editingRoomName = null;
+}
+
+function showRoomEditError(msg) {
+    const el = document.getElementById("re-error");
+    el.textContent = msg;
+    el.classList.remove("hidden");
+}
+
+function hideRoomEditError() {
+    document.getElementById("re-error").classList.add("hidden");
+}
+
+async function submitRoomEditor(e) {
+    if (e) e.preventDefault();
+    if (!editingRoomName) return;
+
+    // Send the whole form. The endpoint is a partial update, so adding a
+    // future attribute here needs no change on either side beyond the
+    // control and the field.
+    const patch = {
+        typical_length: reTypicalLength.value,
+        echo_chamber: reEchoChamber.checked,
+        require_player_profile: reRequireProfile.checked,
+    };
+
+    try {
+        await saveRoomSettings(editingRoomName, patch);
+    } catch (err) {
+        console.error("Failed to save room settings:", err);
+        return showRoomEditError("Could not save. Is the server running?");
+    }
+
+    closeRoomEditor();
+    // The edited room may be the one on screen: refresh the left panel and
+    // the room list so the new settings take effect immediately.
+    await loadChatRooms();
+    renderChatRoomList();
+}
+
+function setupRoomEditorEventListeners() {
+    document.getElementById("re-form").addEventListener("submit", submitRoomEditor);
+    document.getElementById("re-btn-close").addEventListener("click", closeRoomEditor);
+    document.getElementById("re-btn-cancel").addEventListener("click", closeRoomEditor);
+    document.getElementById("re-btn-edit-profile").addEventListener("click", () => {
+        // The profile has its own editor; reuse it rather than duplicating
+        // three fields in a second dialog.
+        openPlayerProfile(editingRoomName);
+    });
+    roomEditOverlay.addEventListener("click", (e) => {
+        if (e.target === roomEditOverlay) closeRoomEditor();
     });
 }
