@@ -422,18 +422,25 @@ replies. Leaving `max_tokens` low will keep cutting personas off mid-sentence.
 
 ## Keeping personas in their own voice
 
-Two things personas do in a group chat that they should not:
+Three things personas do in a group chat that they should not:
 
 - **Continue someone else's message**, especially one that stopped mid-sentence.
 - **Invent a character** who is not in the room, and start writing their dialogue.
+- **Reply as you** — answering their own question in your voice, or replying to another
+  persona on your behalf. This gets more likely the more personas answer at once.
 
-TalkWithMe now tells each persona who is actually in the room, that lines from other
-people arrive prefixed with their name, and that it must never write for anyone else,
-invent anyone, or finish anyone else's sentence.
+TalkWithMe now tells each persona who is actually in the room, that every message in the
+transcript is tagged with who said it — **yours included** — and that its own reply is
+the one untagged voice. Tagging your messages matters more than it sounds: when you were
+the only untagged speaker, "untagged text" was the only example a persona had of what a
+turn looks like, and the third or fourth persona to answer would copy it and write as
+you. Each persona is also told, by name, that it is not you and must never answer on your
+behalf.
 
 Because models do not always listen, that instruction is backed up mechanically. If a
-reply starts producing another speaker's turn, it is cut at that point — you see the
-persona's own words and nothing else. A persona that prefixes its own reply with its own
+reply starts producing another speaker's turn — another persona's *or yours* — it is cut
+at that point, and you see the persona's own words and nothing else. If nothing of its
+own survives the cut, the reply is dropped rather than shown as an empty bubble. A persona that prefixes its own reply with its own
 name has that prefix removed. And if a reply *does* hit the token ceiling, the next
 persona is handed it trimmed to its last complete sentence, so there is no dangling
 thought inviting them to finish it.

@@ -71,19 +71,37 @@ function showGenSettingsError(msg) {
    Form submission
    ========================================================================== */
 
+/**
+ * Validate a number input against its own min/max attributes.
+ *
+ * Reading the bounds off the element rather than hardcoding them keeps
+ * this in step with the HTML and, through it, with the API. Duplicating
+ * the numbers here is how raising Max Persona Replies to 6 got silently
+ * rejected at 4 by this function long after everything else allowed it.
+ *
+ * Returns the parsed value, or null after showing an error.
+ */
+function checkRange(el, label) {
+    const value = parseInt(el.value, 10);
+    const min = parseInt(el.min, 10);
+    const max = parseInt(el.max, 10);
+    if (isNaN(value) || value < min || value > max) {
+        showGenSettingsError(`${label} must be between ${min} and ${max}.`);
+        return null;
+    }
+    return value;
+}
+
+
 async function submitGenSettings(e) {
     e.preventDefault();
     genSettingsError.classList.add("hidden");
 
-    const maxReplies = parseInt(gsfMaxPersonaReplies.value, 10);
-    if (isNaN(maxReplies) || maxReplies < 1 || maxReplies > 4) {
-        return showGenSettingsError("Max Persona Replies must be between 1 and 4.");
-    }
+    const maxReplies = checkRange(gsfMaxPersonaReplies, "Max Persona Replies");
+    if (maxReplies === null) return;
 
-    const maxTurns = parseInt(gsfMaxTurnsForContext.value, 10);
-    if (isNaN(maxTurns) || maxTurns < 1 || maxTurns > 50) {
-        return showGenSettingsError("Max Turns for Context must be between 1 and 50.");
-    }
+    const maxTurns = checkRange(gsfMaxTurnsForContext, "Max Turns for Context");
+    if (maxTurns === null) return;
 
     // Fetch current full settings so we can patch only the general section
     let current;

@@ -88,6 +88,20 @@ def _find_room(chat_room: str) -> Optional[ChatRoom]:
 # Room preamble — who is here, and the rules of the room
 # ---------------------------------------------------------------------------
 
+def _user_label(room: Optional[ChatRoom]) -> str:
+    """What the human is called in the transcript and the prompt.
+
+    The player's character name when the room has one, else a neutral
+    "User". Every consumer takes it from here: the preamble, the "[Name]: "
+    tags in history, the stop strings, and the reply guard. If they
+    disagreed, a persona could be told not to speak as "Kira" while the
+    transcript tagged them "User".
+    """
+    if room is not None and room.player_profile.name.strip():
+        return room.player_profile.name.strip()
+    return "User"
+
+
 def _player_lines(player: PlayerProfile, speaker: str) -> list[str]:
     """The block describing who the human is, for the persona to react to."""
     if not (player.description.strip() or player.appearance.strip()):
@@ -144,8 +158,13 @@ def _build_room_preamble(
         f'You are {persona.name}, in a group chat called "{chat_room}".',
         who,
         "",
-        'Lines from other people appear as "[Name]: text". '
-        f"Lines with no prefix are from {speaker}.",
+        # Every voice in the transcript is tagged, including the human's.
+        # Leaving the human untagged made "untagged text" the model's only
+        # example of how they write, and personas answering third or fourth
+        # copied it.
+        'Every message you can see is tagged with who said it, as "[Name]: text" — '
+        f"{speaker}'s included. Your own reply is the one untagged voice: write "
+        f"only what {persona.name} says, with no tag.",
     ]
 
     if player is not None:
@@ -155,6 +174,9 @@ def _build_room_preamble(
         "",
         f"- Write only as {persona.name}. Never write a line, a reply, or a name "
         "prefix for anyone else.",
+        f"- You are not {speaker}. Never speak or write as {speaker}, never answer "
+        f"on their behalf, and never write {speaker}'s next message — not even to "
+        "move the conversation along.",
         "- Never invent a new character or speak as one.",
         "- Never continue, complete, or rewrite someone else's message, even if it "
         "looks cut off. Respond to it as it stands.",
@@ -168,6 +190,11 @@ def _build_room_preamble(
             f"(~{spec.words} words). Go longer only when the thought genuinely "
             "needs it. Stop at a natural end — never break off mid-word."
         )
+
+    # Stated last so it is the final thing before the transcript. A persona
+    # replying third or fourth has seen no assistant turn in this
+    # conversation at all, so it has no in-context anchor for its own voice.
+    lines += ["", f"It is {persona.name}'s turn. Reply as {persona.name}, and no one else."]
 
     return "\n".join(lines)
 
@@ -294,6 +321,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     session.add_user_message(req.message, user_message_id)
 
     echo_enabled = room.echo_chamber if room else False
+    user_label = _user_label(room)
 
     # Echo chamber overrides max_replies — only one persona echoes the user.
     # Multiple identical echoes from different personas would be pointless noise.
@@ -351,13 +379,16 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
                     persona, req.chat_room, eligible, length,
                     player=room.player_profile if room else None,
                 ),
+                user_label=user_label,
             )
 
             # Layer 1: stop before the backend generates another persona's
             # turn at all. Only catches names that exist — the guard below
-            # is what catches invented ones.
-            stop = stop_sequences(persona_name, eligible)
-            guard = ReplyGuard(persona_name, eligible)
+            # is what catches invented ones. The human counts as a speaker
+            # here: a persona answering *as the user* is the same failure.
+            other_voices = eligible + [user_label]
+            stop = stop_sequences(persona_name, other_voices)
+            guard = ReplyGuard(persona_name, other_voices)
 
             stream = (
                 # Agentic path: the LLM may invoke MCP tools mid-reply. The
@@ -413,6 +444,18 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
                     yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": held})}\n\n'
                 yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
                 return
+
+        if not full_text.strip():
+            # The guard cut the whole reply — the persona opened by writing
+            # as someone else and produced nothing of its own. Persisting an
+            # empty turn would show a blank bubble and feed the next persona
+            # a meaningless "[Name]: " line. Skip it; the frontend reuses the
+            # untouched row for whoever speaks next.
+            logger.info(
+                "%s produced no reply of its own (cut at %r); skipping",
+                persona_name, guard.cut_at,
+            )
+            continue
 
         # Persist — subsequent personas will see this in history
         session.add_assistant_message(

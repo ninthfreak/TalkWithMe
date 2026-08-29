@@ -14,6 +14,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 from fastapi.routing import APIRoute
 
 from app.main import app
@@ -174,3 +176,69 @@ def test_persona_length_bias_select_offers_every_bias():
 
     html = INDEX_HTML.read_text(encoding="utf-8")
     assert _select_options(html, "pf-length-bias") == {b.value for b in LengthBias}
+
+
+# ---------------------------------------------------------------------------
+# Numeric input bounds must match what the API actually accepts
+# ---------------------------------------------------------------------------
+#
+# A settings field's range lives in three places: the Pydantic constraint,
+# the input's min/max, and (until it was made to read the element) the JS
+# validator. Raising Max Persona Replies from 4 to 6 updated the first two
+# and the label, but a hardcoded `> 4` in gen-settings.js kept rejecting 5
+# and 6 with a stale message — the UI advertised a range it refused to
+# accept. This pins the remaining pair together.
+
+# input id -> (model, field). Only fields with a bound worth checking.
+_BOUNDED_INPUTS = {
+    "gsf-max-persona-replies": ("GeneralSettingsRequest", "max_persona_replies"),
+    "gsf-max-turns-for-context": ("GeneralSettingsRequest", "max_turns_for_context"),
+    "sf-llm-temperature": ("LLMSettingsRequest", "temperature"),
+    "sf-llm-max-tokens": ("LLMSettingsRequest", "max_tokens"),
+    "sf-tts-num-steps": ("TTSSettingsRequest", "num_steps"),
+    "sf-tts-guidance-scale": ("TTSSettingsRequest", "guidance_scale"),
+    "sf-tts-timeout": ("TTSSettingsRequest", "timeout"),
+    "sf-stt-timeout": ("STTSettingsRequest", "timeout"),
+}
+
+
+def _model_bounds(model_name: str, field_name: str):
+    """(ge, le) declared on a Pydantic field, either as None."""
+    from app import models
+
+    field = getattr(models, model_name).model_fields[field_name]
+    ge = le = None
+    for meta in field.metadata:
+        ge = getattr(meta, "ge", None) if ge is None else ge
+        le = getattr(meta, "le", None) if le is None else le
+    return ge, le
+
+
+def _input_attrs(html: str, input_id: str):
+    tag = re.search(rf'<input id="{re.escape(input_id)}"[^>]*>', html)
+    assert tag, f"no <input id={input_id}> in index.html"
+    def attr(name):
+        m = re.search(rf'{name}="([^"]+)"', tag.group(0))
+        return float(m.group(1)) if m else None
+    return attr("min"), attr("max")
+
+
+@pytest.mark.parametrize("input_id", sorted(_BOUNDED_INPUTS))
+def test_number_input_bounds_match_the_api(input_id):
+    model_name, field_name = _BOUNDED_INPUTS[input_id]
+    ge, le = _model_bounds(model_name, field_name)
+    html_min, html_max = _input_attrs(INDEX_HTML.read_text(encoding="utf-8"), input_id)
+
+    assert html_min == (float(ge) if ge is not None else None), (
+        f"#{input_id} min={html_min} but {model_name}.{field_name} requires ge={ge}"
+    )
+    assert html_max == (float(le) if le is not None else None), (
+        f"#{input_id} max={html_max} but {model_name}.{field_name} requires le={le}"
+    )
+
+
+def test_general_settings_js_does_not_hardcode_bounds():
+    """The validator must read min/max off the element, not repeat them."""
+    js = (STATIC_DIR / "gen-settings.js").read_text(encoding="utf-8")
+    stale = re.findall(r"must be between \d+ and \d+", js)
+    assert not stale, f"gen-settings.js hardcodes a range: {stale}"
