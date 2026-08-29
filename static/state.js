@@ -61,6 +61,7 @@ const THEME_STORAGE_KEY = "talkwithme_theme";
 const messagesEl = document.getElementById("messages");
 const inputEl = document.getElementById("message-input");
 const sendBtn = document.getElementById("btn-send");
+const echoBtn = document.getElementById("btn-echo");
 const micBtn = document.getElementById("btn-mic");
 const newChatBtn = document.getElementById("btn-new-chat");
 const ttsToggleBtn = document.getElementById("btn-tts-toggle");
@@ -70,7 +71,6 @@ const themeSelectEl = document.getElementById("theme-select");
 
 // Chat room selector (used by chatrooms.js)
 const chatRoomDropdown = document.getElementById("chat-room-dropdown");
-const echoChamberToggle = document.getElementById("echo-chamber-toggle");
 const btnAddPersona = document.getElementById("btn-add-persona");
 
 // Persona Editor (used by persona.js)
@@ -104,7 +104,6 @@ const btnPlayerProfile = document.getElementById("btn-player-profile");
 const playerProfileWrapper = document.getElementById("player-profile-wrapper");
 const roomEditOverlay = document.getElementById("room-edit-overlay");
 const reTypicalLength = document.getElementById("re-typical-length");
-const reEchoChamber = document.getElementById("re-echo-chamber");
 const reRequireProfile = document.getElementById("re-require-profile");
 const playerProfileOverlay = document.getElementById("player-profile-overlay");
 const ppfName = document.getElementById("ppf-name");

@@ -1,4 +1,4 @@
-"""API tests for app/routers/chatrooms.py — room CRUD, persona assignment, echo chamber.
+"""API tests for app/routers/chatrooms.py — room CRUD, persona assignment, settings.
 
 The fixture config has one room ("TNG" with Alex+Luna) and two personas.
 The implicit "default" room is not in chatrooms.yaml.
@@ -37,7 +37,6 @@ class TestCreateChatroom:
         assert resp.json() == {
             "name": "Enterprise",
             "persona_names": [],
-            "echo_chamber": False,
             "typical_length": "normal",
             "require_player_profile": False,
             "player_profile": {"name": "", "description": "", "appearance": ""},
@@ -169,31 +168,6 @@ class TestRemovePersonaFromRoom:
         assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
-# Echo chamber
-# ---------------------------------------------------------------------------
-
-class TestEchoChamber:
-    def test_enable_echo_chamber(self, client):
-        resp = client.put("/api/chatrooms/TNG", json={"echo_chamber": True})
-        assert resp.status_code == 200
-        assert resp.json()["echo_chamber"] is True
-
-    def test_disable_echo_chamber_preserves_personas(self, client):
-        client.put("/api/chatrooms/TNG", json={"echo_chamber": True})
-        resp = client.put("/api/chatrooms/TNG", json={"echo_chamber": False})
-        assert resp.json()["echo_chamber"] is False
-        assert resp.json()["persona_names"] == ["Alex", "Luna"]
-
-    def test_echo_chamber_default_room_rejected(self, client):
-        resp = client.put("/api/chatrooms/default", json={"echo_chamber": True})
-        assert resp.status_code == 400
-
-    def test_echo_chamber_unknown_room_404(self, client):
-        resp = client.put("/api/chatrooms/NoSuchRoom", json={"echo_chamber": True})
-        assert resp.status_code == 404
-
-
 class TestSetTypicalLength:
     def test_sets_and_persists_the_tier(self, client):
         resp = client.put("/api/chatrooms/TNG", json={"typical_length": "terse"})
@@ -203,11 +177,13 @@ class TestSetTypicalLength:
         assert client.get("/api/chatrooms/TNG").json()["typical_length"] == "terse"
 
     def test_other_room_fields_survive_the_update(self, client):
-        client.put("/api/chatrooms/TNG", json={"echo_chamber": True})
+        client.put("/api/chatrooms/TNG",
+                   json={"player_profile": {"name": "Kira", "description": "A thief."}})
         client.put("/api/chatrooms/TNG", json={"typical_length": "brief"})
 
         body = client.get("/api/chatrooms/TNG").json()
-        assert body["echo_chamber"] is True
+        assert body["typical_length"] == "brief"
+        assert body["player_profile"]["name"] == "Kira"
         assert body["persona_names"] == ["Alex", "Luna"]
 
     def test_default_room_cannot_be_modified(self, client):
@@ -265,14 +241,13 @@ class TestPlayerProfile:
         assert resp.json()["player_profile"]["name"] == ""
 
     def test_other_room_settings_survive(self, client):
-        client.put("/api/chatrooms/TNG", json={"echo_chamber": True})
         client.put("/api/chatrooms/TNG", json={"typical_length": "terse"})
         client.put("/api/chatrooms/TNG",
                    json={"player_profile": {"name": "Kira", "description": "A thief."}})
 
         body = client.get("/api/chatrooms/TNG").json()
-        assert body["echo_chamber"] is True
         assert body["typical_length"] == "terse"
+        assert body["player_profile"]["name"] == "Kira"
         assert body["persona_names"] == ["Alex", "Luna"]
 
     def test_over_long_fields_are_rejected(self, client):

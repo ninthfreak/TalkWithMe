@@ -330,25 +330,49 @@ class TestMultiPersonaReplies:
 # Echo chamber
 # ---------------------------------------------------------------------------
 
-class TestEchoChamber:
-    def test_echoes_user_message_verbatim_without_llm(self, client, monkeypatch):
-        _patch_chatrooms(monkeypatch,
-                         [ChatRoom(name="Echo", persona_names=["Alex"], echo_chamber=True)])
-        _patch_general(monkeypatch, max_persona_replies=4)  # must be overridden to 1
+class TestEcho:
+    """Echo is a property of one message, not a mode a room sits in."""
 
+    def _no_llm(self, monkeypatch):
         def fail(*a, **kw):
-            raise AssertionError("echo chamber must bypass the LLM entirely")
-
+            raise AssertionError("an echoed message must bypass the LLM entirely")
         monkeypatch.setattr(chat_router, "stream_chat", fail)
 
-        events = _chat(client, who_answers="Alex", chat_room="Echo")
+    def test_echoes_the_message_verbatim_without_the_llm(self, client, monkeypatch):
+        _patch_general(monkeypatch, max_persona_replies=4)  # must be overridden to 1
+        self._no_llm(monkeypatch)
 
-        tokens = sse_events_by_type(events, "token")
-        assert [t["token"] for t in tokens] == ["hello there"]
-        done = sse_events_by_type(events, "done")[0]
-        assert done["text"] == "hello there"
-        # Exactly one persona responds, even though max_persona_replies is 4.
+        events = _chat(client, who_answers="Alex", chat_room="TNG", echo=True)
+
+        assert [t["token"] for t in sse_events_by_type(events, "token")] == ["hello there"]
+        assert sse_events_by_type(events, "done")[0]["text"] == "hello there"
+        # Exactly one persona echoes, however many replies are configured —
+        # identical echoes from several personas would just be noise.
         assert [e["persona"] for e in sse_events_by_type(events, "start")] == ["Alex"]
+
+    def test_the_next_message_is_answered_normally(self, client, monkeypatch):
+        # The point of moving this off the room: echoing once must not leave
+        # the room echoing.
+        self._no_llm(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG", echo=True)
+
+        _stub_stream(monkeypatch, ["A real answer."])
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert sse_events_by_type(events, "done")[0]["text"] == "A real answer."
+
+    def test_not_echoing_is_the_default(self, client, monkeypatch):
+        _stub_stream(monkeypatch, ["A real answer."])
+        events = _chat(client, who_answers="Alex", chat_room="TNG")
+        assert sse_events_by_type(events, "done")[0]["text"] == "A real answer."
+
+    def test_an_echo_is_persisted_like_any_other_reply(self, client, monkeypatch):
+        self._no_llm(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG", echo=True)
+
+        assert [(m.role, m.content) for m in session.history] == [
+            ("user", "hello there"), ("assistant", "hello there"),
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -493,13 +517,9 @@ class TestRoomPreamble:
 
         assert "You are the only one here, besides the user." in _system_prompt(calls[0])
 
-    def test_echo_chamber_room_gets_no_preamble_or_llm_call(self, client, monkeypatch):
-        _patch_chatrooms(
-            monkeypatch,
-            [ChatRoom(name="Echo", persona_names=["Alex"], echo_chamber=True)],
-        )
+    def test_an_echoed_message_gets_no_preamble_or_llm_call(self, client, monkeypatch):
         calls = _capture(monkeypatch)
-        events = _chat(client, who_answers="Alex", chat_room="Echo")
+        events = _chat(client, who_answers="Alex", chat_room="TNG", echo=True)
 
         assert calls == []  # the LLM is bypassed entirely
         assert sse_events_by_type(events, "done")[0]["text"] == "hello there"

@@ -41,13 +41,6 @@
                     </select>
                 </div>
 
-                <div id="echo-chamber-wrapper">
-                    <label class="checkbox-option">
-                        <input type="checkbox" id="echo-chamber-toggle">
-                        <span>Echo chamber</span>
-                    </label>
-                </div>
-
                 <div id="player-profile-wrapper">
                     <label class="checkbox-option">
                         <input type="checkbox" id="require-profile-toggle">
@@ -91,6 +84,7 @@
                         rows="1"
                     ></textarea>
 <button id="btn-mic" type="button" aria-label="Record voice message" title="Record voice message" class="icon-btn">&#127908;</button>
+                    <button id="btn-echo" type="button" class="icon-btn" aria-label="Speak this line" title="Have a persona say this line verbatim, instead of answering it">&#128483;</button>
                     <button id="btn-send" title="Send message">&#9654;</button>
                 </div>
             </main>
@@ -286,13 +280,6 @@
                                 <option value="unrestricted">Unrestricted &mdash; no guidance</option>
                             </select>
                             <span class="field-hint">Personas sit relative to this, set per persona in the persona editor.</span>
-                        </div>
-                        <div class="form-row">
-                            <label class="settings-checkbox-label">
-                                <input id="re-echo-chamber" type="checkbox">
-                                <span>Echo chamber</span>
-                            </label>
-                            <span class="field-hint">Personas repeat your message back verbatim instead of answering.</span>
                         </div>
                     </fieldset>
                     <fieldset class="settings-section">

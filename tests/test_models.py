@@ -8,7 +8,6 @@ from app.models import (
     AudioUploadRequest,
     ChatRequest,
     ChatRoomCreateRequest,
-    EchoChamberRequest,
     GeneralSettingsRequest,
     PersonaCreateRequest,
     SessionPersonasRequest,
@@ -119,9 +118,6 @@ class TestChatRoomModels:
     def test_assign_personas_request_requires_at_least_one(self):
         with pytest.raises(ValidationError):
             AssignPersonasRequest(persona_names=[])
-
-    def test_echo_chamber_request_holds_flag(self):
-        assert EchoChamberRequest(echo_chamber=True).echo_chamber is True
 
 
 class TestAudioUploadRequest:
