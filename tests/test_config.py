@@ -15,6 +15,7 @@ from app.config import (
     MCPServerConfig,
     Persona,
     PersonasConfig,
+    PlayerProfile,
     STTConfig,
     TTSConfig,
     TypicalLength,
@@ -69,12 +70,12 @@ class TestSTTConfigIsActive:
 # ---------------------------------------------------------------------------
 
 class TestGeneralConfigBounds:
-    @pytest.mark.parametrize("value", [0, 5, -1])
+    @pytest.mark.parametrize("value", [0, 7, -1])
     def test_general_config_max_persona_replies_out_of_range_rejected(self, value):
         with pytest.raises(ValidationError):
             GeneralConfig(max_persona_replies=value)
 
-    @pytest.mark.parametrize("value", [1, 4])
+    @pytest.mark.parametrize("value", [1, 4, 6])
     def test_general_config_max_persona_replies_in_range_accepted(self, value):
         assert GeneralConfig(max_persona_replies=value).max_persona_replies == value
 
@@ -364,3 +365,44 @@ class TestTypicalLengthPersistence:
             PersonasConfig(personas=[Persona(name="Alex", system_prompt="hi")]), target
         )
         assert load_personas(target).personas[0].typical_length is None
+
+
+class TestPlayerProfile:
+    def test_room_defaults_to_no_profile_and_no_requirement(self):
+        room = ChatRoom(name="R")
+        assert room.require_player_profile is False
+        assert room.player_profile.is_complete is False
+
+    @pytest.mark.parametrize("fields, complete", [
+        ({"name": "Kira", "description": "A thief."}, True),
+        ({"name": "Kira"}, False),                      # nothing said about them
+        ({"description": "A thief."}, False),           # nothing to call them
+        ({"name": "  ", "description": "A thief."}, False),
+        ({"name": "Kira", "description": "A thief.", "appearance": ""}, True),
+    ])
+    def test_is_complete_needs_a_name_and_a_description(self, fields, complete):
+        # Appearance stays optional: a character can be described without
+        # being pictured.
+        assert PlayerProfile(**fields).is_complete is complete
+
+    def test_absent_keys_load_as_an_empty_profile(self, tmp_path):
+        target = tmp_path / "chatrooms.yaml"
+        target.write_text("chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n")
+        room = load_chatrooms(target).chat_rooms[0]
+        assert room.require_player_profile is False
+        assert room.player_profile.name == ""
+
+    def test_profile_round_trips_through_yaml(self, tmp_path):
+        target = tmp_path / "chatrooms.yaml"
+        save_chatrooms(ChatRoomsConfig(chat_rooms=[ChatRoom(
+            name="TNG",
+            require_player_profile=True,
+            player_profile=PlayerProfile(
+                name="Kira", description="A thief.", appearance="Green coat."
+            ),
+        )]), target)
+
+        room = load_chatrooms(target).chat_rooms[0]
+        assert room.require_player_profile is True
+        assert room.player_profile.name == "Kira"
+        assert room.player_profile.appearance == "Green coat."

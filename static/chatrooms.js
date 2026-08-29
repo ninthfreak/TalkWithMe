@@ -100,6 +100,8 @@ function applyChatRoomFilter() {
     const echoEnabled = roomInfo ? roomInfo.echo_chamber : false;
     echoChamberToggle.checked = echoEnabled;
     echoChamberToggle.disabled = !isActiveRoom;
+
+    applyPlayerProfileControls(isActiveRoom);
 }
 
 /**
@@ -138,6 +140,8 @@ function setupChatRoomEventListeners() {
 
     // "Add persona" button in sidebar
     btnAddPersona.addEventListener("click", openPersonaPicker);
+
+    setupPlayerProfileEventListeners();
 
     // Chat rooms editor button in topbar
     document.getElementById("btn-chat-rooms").addEventListener("click", openChatRoomsEditor);
@@ -575,4 +579,154 @@ async function addSelectedPersonasToRoom() {
     } catch (err) {
         console.error("Add personas to room error:", err);
     }
+}
+
+/* ==========================================================================
+   Player profile — the human's own character in this room
+
+   Per room rather than global: you may be a different character in each
+   room, the same way the personas differ between rooms. The "default" room
+   has no config entry, so it supports neither the profile nor the
+   requirement (its controls are hidden).
+   ========================================================================== */
+
+function currentRoomInfo() {
+    return allChatRooms.find(
+        r => r.name.toLowerCase() === currentChatRoom.toLowerCase()
+    );
+}
+
+function emptyProfile() {
+    return { name: "", description: "", appearance: "" };
+}
+
+function profileIsComplete(profile) {
+    // Must match PlayerProfile.is_complete on the server: appearance stays
+    // optional, so a character can be described without being pictured.
+    return !!(profile && profile.name.trim() && profile.description.trim());
+}
+
+/** True when the current room demands a profile it does not yet have. */
+function profileRequiredButMissing() {
+    const room = currentRoomInfo();
+    if (!room || !room.require_player_profile) return false;
+    return !profileIsComplete(room.player_profile);
+}
+
+/** Reflect the current room's profile state in the left panel. */
+function applyPlayerProfileControls(isActiveRoom) {
+    const room = currentRoomInfo();
+    const profile = (room && room.player_profile) || emptyProfile();
+
+    requireProfileToggle.checked = room ? !!room.require_player_profile : false;
+    requireProfileToggle.disabled = !isActiveRoom;
+    btnPlayerProfile.disabled = !isActiveRoom;
+
+    // Showing the character's name doubles as confirmation it was saved.
+    btnPlayerProfile.textContent = profile.name.trim()
+        ? `Your character: ${profile.name.trim()}`
+        : "Your character…";
+    btnPlayerProfile.classList.toggle("profile-missing", profileRequiredButMissing());
+    playerProfileWrapper.classList.toggle("hidden", !isActiveRoom);
+}
+
+function openPlayerProfile() {
+    const room = currentRoomInfo();
+    if (!room) return;
+    const profile = room.player_profile || emptyProfile();
+    ppfName.value = profile.name || "";
+    ppfDescription.value = profile.description || "";
+    ppfAppearance.value = profile.appearance || "";
+    document.getElementById("pp-profile-room").textContent =
+        `This character is used in "${room.name}" only.`;
+    hidePlayerProfileError();
+    playerProfileOverlay.classList.remove("hidden");
+    ppfName.focus();
+}
+
+function closePlayerProfile() {
+    playerProfileOverlay.classList.add("hidden");
+}
+
+function showPlayerProfileError(msg) {
+    const el = document.getElementById("pp-profile-error");
+    el.textContent = msg;
+    el.classList.remove("hidden");
+}
+
+function hidePlayerProfileError() {
+    document.getElementById("pp-profile-error").classList.add("hidden");
+}
+
+async function savePlayerProfile(e) {
+    if (e) e.preventDefault();
+    const room = currentRoomInfo();
+    if (!room) return;
+
+    const payload = {
+        name: ppfName.value.trim(),
+        description: ppfDescription.value.trim(),
+        appearance: ppfAppearance.value.trim(),
+    };
+    // Allow clearing the profile outright, but not saving a half-filled one
+    // that would leave a "required" room permanently blocked.
+    const clearing = !payload.name && !payload.description && !payload.appearance;
+    if (!clearing && !profileIsComplete(payload)) {
+        showPlayerProfileError("Give your character a name and a description.");
+        return;
+    }
+
+    try {
+        const resp = await fetch(
+            `/api/chatrooms/${encodeURIComponent(room.name)}/player-profile`,
+            {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        room.player_profile = await resp.json().then(r => r.player_profile);
+        closePlayerProfile();
+        applyPlayerProfileControls(currentChatRoom !== "default");
+    } catch (err) {
+        console.error("Failed to save player profile:", err);
+        showPlayerProfileError("Could not save. Is the server running?");
+    }
+}
+
+async function updateRequirePlayerProfile(enabled) {
+    const room = currentRoomInfo();
+    if (!room || room.require_player_profile === enabled) return;
+    try {
+        const resp = await fetch(
+            `/api/chatrooms/${encodeURIComponent(room.name)}/require-player-profile`,
+            {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ require_player_profile: enabled }),
+            }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        room.require_player_profile = enabled;
+        applyPlayerProfileControls(true);
+        // Turning the requirement on with nothing filled in should say so
+        // now, rather than at the moment the next message is refused.
+        if (profileRequiredButMissing()) openPlayerProfile();
+    } catch (err) {
+        console.error("Failed to update profile requirement:", err);
+        requireProfileToggle.checked = room.require_player_profile;
+    }
+}
+
+function setupPlayerProfileEventListeners() {
+    btnPlayerProfile.addEventListener("click", openPlayerProfile);
+    requireProfileToggle.addEventListener("change", () =>
+        updateRequirePlayerProfile(requireProfileToggle.checked));
+    document.getElementById("pp-profile-form").addEventListener("submit", savePlayerProfile);
+    document.getElementById("pp-profile-btn-close").addEventListener("click", closePlayerProfile);
+    document.getElementById("pp-profile-btn-cancel").addEventListener("click", closePlayerProfile);
+    playerProfileOverlay.addEventListener("click", (e) => {
+        if (e.target === playerProfileOverlay) closePlayerProfile();
+    });
 }

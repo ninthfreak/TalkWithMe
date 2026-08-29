@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from app.config import (
     ChatRoom,
     ChatRoomsConfig,
+    PlayerProfile,
     get_chatrooms,
     get_personas,
     get_settings,
@@ -24,6 +25,8 @@ from app.models import (
     ChatRoomCreateRequest,
     ChatRoomResponse,
     EchoChamberRequest,
+    PlayerProfileRequest,
+    RequirePlayerProfileRequest,
     TypicalLengthRequest,
 )
 
@@ -39,7 +42,40 @@ def _to_response(room: ChatRoom) -> ChatRoomResponse:
         persona_names=list(room.persona_names),
         echo_chamber=room.echo_chamber,
         typical_length=room.typical_length,
+        require_player_profile=room.require_player_profile,
+        player_profile=room.player_profile,
     )
+
+
+def _editable_room_or_400(name: str) -> ChatRoom:
+    """Look up a room for mutation, rejecting "default" and unknown names."""
+    if name.lower() == DEFAULT_ROOM:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The '{DEFAULT_ROOM}' chat room cannot be modified.",
+        )
+    room = next(
+        (r for r in get_chatrooms().chat_rooms if r.name.lower() == name.lower()), None
+    )
+    if not room:
+        raise HTTPException(status_code=404, detail=f"Chat room '{name}' not found.")
+    return room
+
+
+def _save_room_update(room: ChatRoom, update: dict) -> ChatRoomResponse:
+    """Apply *update* to *room*, persist, and return the response model.
+
+    model_copy rather than a fresh ChatRoom: rebuilding field-by-field is
+    how room settings used to get silently dropped.
+    """
+    updated_room = room.model_copy(update=update)
+    config = get_chatrooms()
+    updated_rooms = [
+        updated_room if r.name.lower() == room.name.lower() else r
+        for r in config.chat_rooms
+    ]
+    save_chatrooms(ChatRoomsConfig(chat_rooms=updated_rooms))
+    return _to_response(updated_room)
 
 
 @router.get("", response_model=List[ChatRoomResponse])
@@ -199,19 +235,8 @@ def remove_persona_from_room(name: str, persona_name: str):
 @router.put("/{name}/echo-chamber", response_model=ChatRoomResponse)
 def set_echo_chamber(name: str, req: EchoChamberRequest):
     """Set the echo chamber flag for a chat room. Cannot modify the 'default' room."""
-    if name.lower() == DEFAULT_ROOM:
-        raise HTTPException(
-            status_code=400,
-            detail=f"The '{DEFAULT_ROOM}' chat room cannot be modified.",
-        )
-    config = get_chatrooms()
-    room = next((r for r in config.chat_rooms if r.name.lower() == name.lower()), None)
-    if not room:
-        raise HTTPException(status_code=404, detail=f"Chat room '{name}' not found.")
-    updated_room = room.model_copy(update={"echo_chamber": req.echo_chamber})
-    updated_rooms = [updated_room if r.name.lower() == room.name.lower() else r for r in config.chat_rooms]
-    save_chatrooms(ChatRoomsConfig(chat_rooms=updated_rooms))
-    return _to_response(updated_room)
+    room = _editable_room_or_400(name)
+    return _save_room_update(room, {"echo_chamber": req.echo_chamber})
 
 
 @router.put("/{name}/typical-length", response_model=ChatRoomResponse)
@@ -221,16 +246,29 @@ def set_typical_length(name: str, req: TypicalLengthRequest):
     "default" has no chatrooms.yaml entry to store an override in, so it
     always reports the global general.typical_length instead.
     """
-    if name.lower() == DEFAULT_ROOM:
-        raise HTTPException(
-            status_code=400,
-            detail=f"The '{DEFAULT_ROOM}' chat room cannot be modified.",
-        )
-    config = get_chatrooms()
-    room = next((r for r in config.chat_rooms if r.name.lower() == name.lower()), None)
-    if not room:
-        raise HTTPException(status_code=404, detail=f"Chat room '{name}' not found.")
-    updated_room = room.model_copy(update={"typical_length": req.typical_length})
-    updated_rooms = [updated_room if r.name.lower() == room.name.lower() else r for r in config.chat_rooms]
-    save_chatrooms(ChatRoomsConfig(chat_rooms=updated_rooms))
-    return _to_response(updated_room)
+    room = _editable_room_or_400(name)
+    return _save_room_update(room, {"typical_length": req.typical_length})
+
+
+@router.put("/{name}/player-profile", response_model=ChatRoomResponse)
+def set_player_profile(name: str, req: PlayerProfileRequest):
+    """Set the human user's character profile for a room.
+
+    Per room on purpose: the player can be a different character in each
+    room, the same way personas differ between rooms. "default" has no
+    chatrooms.yaml entry to store one in.
+    """
+    room = _editable_room_or_400(name)
+    profile = PlayerProfile(
+        name=req.name.strip(),
+        description=req.description.strip(),
+        appearance=req.appearance.strip(),
+    )
+    return _save_room_update(room, {"player_profile": profile})
+
+
+@router.put("/{name}/require-player-profile", response_model=ChatRoomResponse)
+def set_require_player_profile(name: str, req: RequirePlayerProfileRequest):
+    """Set whether a room refuses messages until its profile is filled in."""
+    room = _editable_room_or_400(name)
+    return _save_room_update(room, {"require_player_profile": req.require_player_profile})

@@ -98,6 +98,15 @@ const pfAllowToolCalls = document.getElementById("pf-allow-tool-calls");
 const pfTypicalLength = document.getElementById("pf-typical-length");
 const gsfTypicalLength = document.getElementById("gsf-typical-length");
 
+// Player profile (the human's character in the current room)
+const requireProfileToggle = document.getElementById("require-profile-toggle");
+const btnPlayerProfile = document.getElementById("btn-player-profile");
+const playerProfileWrapper = document.getElementById("player-profile-wrapper");
+const playerProfileOverlay = document.getElementById("player-profile-overlay");
+const ppfName = document.getElementById("ppf-name");
+const ppfDescription = document.getElementById("ppf-description");
+const ppfAppearance = document.getElementById("ppf-appearance");
+
 // Persona editor editing state
 let peEditingName = null;
 

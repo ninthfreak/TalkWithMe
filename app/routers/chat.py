@@ -18,6 +18,7 @@ from app.config import (
     TYPICAL_LENGTH_SPECS,
     ChatRoom,
     Persona,
+    PlayerProfile,
     TypicalLength,
     derive_max_tokens,
     get_chatrooms,
@@ -33,6 +34,10 @@ from app.services.tool_registry import get_all_tools
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+# Shown when a room demands a player profile it does not have yet. The
+# frontend matches on this to pop the profile editor open.
+PROFILE_REQUIRED_MESSAGE = "This room needs your character profile before you can chat."
 
 
 # ---------------------------------------------------------------------------
@@ -83,40 +88,70 @@ def _find_room(chat_room: str) -> Optional[ChatRoom]:
 # Room preamble — who is here, and the rules of the room
 # ---------------------------------------------------------------------------
 
+def _player_lines(player: PlayerProfile, speaker: str) -> list[str]:
+    """The block describing who the human is, for the persona to react to."""
+    if not (player.description.strip() or player.appearance.strip()):
+        return []
+
+    lines = ["", f"You are talking with {speaker}."]
+    if player.description.strip():
+        lines.append(f"Who they are: {player.description.strip()}")
+    if player.appearance.strip():
+        # The "picture", as text — see PlayerProfile.appearance.
+        lines.append(f"What they look like: {player.appearance.strip()}")
+    lines.append(
+        f"Treat {speaker} as that character: react to who they are and how they "
+        "look, and address them by name. Never write their lines for them."
+    )
+    return lines
+
+
 def _build_room_preamble(
     persona: Persona,
     chat_room: str,
     eligible: list[str],
     length: TypicalLength,
+    player: Optional[PlayerProfile] = None,
 ) -> str:
     """The app-generated block appended to a persona's system prompt.
 
-    Two things depend on it. The roster is what makes "never invent a
+    Three things depend on it. The roster is what makes "never invent a
     character" enforceable — you cannot forbid inventing people without
     saying who exists. The rules name the two observed failure modes
     explicitly, including continuing a cut-off message, because a truncated
-    line in the history reads to a model as a prompt to complete.
+    line in the history reads to a model as a prompt to complete. And the
+    player block is how a persona knows who it is talking to.
 
     The length line is the *only* thing shaping reply length. The derived
     token cap is a runaway guard, not a style control — that distinction is
     the whole point of the tier.
     """
+    # A named player character is a better thing to address than "the user",
+    # and it is what the personas are told to call them.
+    speaker = player.name.strip() if player and player.name.strip() else "the user"
+
     by_name = {p.name: p for p in get_personas().personas}
     others = [by_name[n] for n in eligible if n in by_name and n != persona.name]
     if others:
         roster = ", ".join(
             f"{p.name} ({p.description})" if p.description else p.name for p in others
         )
-        who = f"The only people here are: {roster}, and the user. There is nobody else."
+        who = f"The only people here are: {roster}, and {speaker}. There is nobody else."
     else:
-        who = "You are the only one here, besides the user. There is nobody else."
+        who = f"You are the only one here, besides {speaker}. There is nobody else."
 
     lines = [
         f'You are {persona.name}, in a group chat called "{chat_room}".',
         who,
         "",
         'Lines from other people appear as "[Name]: text". '
-        "Lines with no prefix are from the user.",
+        f"Lines with no prefix are from {speaker}.",
+    ]
+
+    if player is not None:
+        lines.extend(_player_lines(player, speaker))
+
+    lines += [
         "",
         f"- Write only as {persona.name}. Never write a line, a reply, or a name "
         "prefix for anyone else.",
@@ -233,6 +268,19 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
         yield f'data: {json.dumps({"type": "complete"})}\n\n'
         return
 
+    # Room-level config: None for "default" (no chatrooms.yaml entry), in
+    # which case every room setting falls back to the global values.
+    room = _find_room(req.chat_room)
+
+    # A room that requires a player profile refuses messages until it has
+    # one. Checked here, not only in the frontend, for the same reason
+    # persona eligibility is: the server is the authority. Bail before the
+    # user message is recorded, so nothing half-happens.
+    if room is not None and room.require_player_profile and not room.player_profile.is_complete:
+        yield f'data: {json.dumps({"type": "error", "message": PROFILE_REQUIRED_MESSAGE})}\n\n'
+        yield f'data: {json.dumps({"type": "complete"})}\n\n'
+        return
+
     settings = get_settings()
     max_replies = min(settings.general.max_persona_replies, len(eligible))
 
@@ -245,9 +293,6 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     # Add user message to history (persisted automatically)
     session.add_user_message(req.message, user_message_id)
 
-    # Room-level config: None for "default" (no chatrooms.yaml entry), in
-    # which case every room setting falls back to the global values.
-    room = _find_room(req.chat_room)
     echo_enabled = room.echo_chamber if room else False
 
     # Echo chamber overrides max_replies — only one persona echoes the user.
@@ -303,7 +348,8 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
                 responding_persona=persona_name,
                 max_turns_for_context=settings.general.max_turns_for_context,
                 room_preamble=_build_room_preamble(
-                    persona, req.chat_room, eligible, length
+                    persona, req.chat_room, eligible, length,
+                    player=room.player_profile if room else None,
                 ),
             )
 

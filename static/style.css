@@ -1371,3 +1371,24 @@ html, body {
     font-size: 0.75rem;
     padding: 2px 4px;
 }
+
+/* Player profile controls in the left panel. */
+#player-profile-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+#player-profile-wrapper .btn-add-persona {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The room wants a character and does not have one yet. */
+#btn-player-profile.profile-missing {
+    border-color: var(--accent);
+    color: var(--accent);
+}

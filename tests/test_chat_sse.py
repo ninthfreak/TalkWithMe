@@ -16,6 +16,7 @@ from app.config import (
     GeneralConfig,
     Persona,
     PersonasConfig,
+    PlayerProfile,
     TypicalLength,
 )
 from tests.factories import (
@@ -641,3 +642,121 @@ class TestTruncation:
         assert sse_events_by_type(events, "done")[0]["text"] == (
             "A full thought. And a partial"
         )
+
+
+# ---------------------------------------------------------------------------
+# Player profile — the human's own character
+# ---------------------------------------------------------------------------
+
+def _profiled_room(monkeypatch, *, require=False, **profile_fields):
+    profile = PlayerProfile(**profile_fields)
+    _patch_chatrooms(monkeypatch, [
+        ChatRoom(
+            name="Tavern",
+            persona_names=["Alex", "Luna"],
+            require_player_profile=require,
+            player_profile=profile,
+        )
+    ])
+
+
+class TestPlayerProfileInPrompt:
+    def test_profile_is_described_to_the_persona(self, client, monkeypatch):
+        _profiled_room(
+            monkeypatch,
+            name="Kira",
+            description="A retired thief who owes everyone money.",
+            appearance="Short, scarred hands, a patched green coat.",
+        )
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        system = _system_prompt(calls[0])
+        assert "You are talking with Kira." in system
+        assert "Who they are: A retired thief who owes everyone money." in system
+        # The "picture", as text.
+        assert "What they look like: Short, scarred hands, a patched green coat." in system
+        assert "Treat Kira as that character" in system
+
+    def test_named_player_replaces_the_user_in_the_preamble(self, client, monkeypatch):
+        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        system = _system_prompt(calls[0])
+        assert "Lines with no prefix are from Kira." in system
+        assert "and Kira. There is nobody else." in system
+        assert "the user" not in system
+
+    def test_appearance_is_optional(self, client, monkeypatch):
+        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        system = _system_prompt(calls[0])
+        assert "Who they are: A thief." in system
+        assert "What they look like" not in system
+
+    def test_empty_profile_leaves_the_preamble_as_it_was(self, client, monkeypatch):
+        _profiled_room(monkeypatch)
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        system = _system_prompt(calls[0])
+        assert "You are talking with" not in system
+        assert "Lines with no prefix are from the user." in system
+
+    def test_default_room_has_no_profile(self, client, monkeypatch):
+        # "default" has no chatrooms.yaml entry to carry one.
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="default")
+
+        assert "You are talking with" not in _system_prompt(calls[0])
+
+
+class TestPlayerProfileGate:
+    def test_required_but_missing_refuses_the_message(self, client, monkeypatch):
+        _profiled_room(monkeypatch, require=True)
+        calls = _capture(monkeypatch)
+
+        events = _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        types = [e["type"] for e in events]
+        assert types == ["error", "complete"]
+        assert "character profile" in events[0]["message"]
+        assert calls == []  # the LLM is never reached
+
+    def test_refused_message_is_not_recorded(self, client, monkeypatch):
+        # Bailing before the user message is added keeps the room's history
+        # clean — a refused turn should leave no trace.
+        _profiled_room(monkeypatch, require=True)
+        _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        assert session.history == []
+        from app.persistence import load_history
+        assert load_history("Tavern") == []
+
+    def test_half_filled_profile_still_counts_as_missing(self, client, monkeypatch):
+        # A name with no description says nothing useful about the character.
+        _profiled_room(monkeypatch, require=True, name="Kira")
+        events = _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        assert [e["type"] for e in events] == ["error", "complete"]
+
+    def test_complete_profile_lets_the_message_through(self, client, monkeypatch):
+        _profiled_room(monkeypatch, require=True, name="Kira", description="A thief.")
+        _capture(monkeypatch)
+
+        events = _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        assert [e["type"] for e in events][-1] == "complete"
+        assert sse_events_by_type(events, "done")
+
+    def test_profile_without_the_requirement_never_blocks(self, client, monkeypatch):
+        _profiled_room(monkeypatch, require=False)
+        _capture(monkeypatch)
+
+        events = _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        assert sse_events_by_type(events, "done")
