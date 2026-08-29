@@ -73,6 +73,15 @@ async function sendMessage() {
         return;
     }
 
+    // A room can require the player to have a character before chatting.
+    // The server enforces this too; stopping here keeps the typed message
+    // in the box so it is not lost behind the modal.
+    if (profileRequiredButMissing()) {
+        appendErrorBubble("This room needs your character profile before you can chat.");
+        openPlayerProfile();
+        return;
+    }
+
     // Auto-select a persona if the user mentioned one by name in their message.
     // This runs before getWhoAnswers() so the "Selected persona" radio is
     // already checked by the time we determine who should respond.

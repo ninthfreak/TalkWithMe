@@ -48,6 +48,14 @@
                     </label>
                 </div>
 
+                <div id="player-profile-wrapper">
+                    <label class="checkbox-option">
+                        <input type="checkbox" id="require-profile-toggle">
+                        <span>Require my character</span>
+                    </label>
+                    <button id="btn-player-profile" class="btn-add-persona" title="Describe the character you play in this room">Your character&hellip;</button>
+                </div>
+
                 <h3>Who should answer?</h3>
                 <div id="who-chooser">
                     <label class="chooser-option">
@@ -257,6 +265,39 @@
     </div>
 
     <!-- Settings Modal -->
+    <div id="player-profile-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pp-profile-title">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="pp-profile-title">Your character</h2>
+                <button id="pp-profile-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
+            </div>
+            <div id="pp-profile-room" class="field-hint"></div>
+            <div id="pp-profile-error" class="pe-form-error hidden"></div>
+            <form id="pp-profile-form" novalidate>
+                <div class="settings-body">
+                    <div class="form-row">
+                        <label for="ppf-name">Name <span class="required">*</span></label>
+                        <input id="ppf-name" type="text" maxlength="40" placeholder="What the personas should call you" required>
+                    </div>
+                    <div class="form-row">
+                        <label for="ppf-description">Who you are <span class="required">*</span></label>
+                        <textarea id="ppf-description" maxlength="2000" rows="6" placeholder="Your character: who they are, what they want, how they behave." required></textarea>
+                        <span class="field-hint">2000 chars max</span>
+                    </div>
+                    <div class="form-row">
+                        <label for="ppf-appearance">What you look like</label>
+                        <textarea id="ppf-appearance" maxlength="1000" rows="4" placeholder="Describe your appearance in words, e.g. &ldquo;tall, weathered, a long grey coat and a limp.&rdquo;"></textarea>
+                        <span class="field-hint">Optional. This is the &ldquo;picture&rdquo;, written out &mdash; the personas read it, so describe rather than upload.</span>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="pp-profile-btn-cancel" class="btn-secondary">Cancel</button>
+                    <button type="submit" id="pp-profile-btn-save" class="btn-accent">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div id="settings-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="modal-box">
             <div class="modal-header">
@@ -381,8 +422,8 @@
                         <legend>Chat Behaviour</legend>
                         <div class="form-row form-row-inline">
                             <div class="form-col">
-                                <label for="gsf-max-persona-replies">Max Persona Replies <span class="field-hint">(1–4)</span></label>
-                                <input id="gsf-max-persona-replies" type="number" min="1" max="4" required>
+                                <label for="gsf-max-persona-replies">Max Persona Replies <span class="field-hint">(1–6)</span></label>
+                                <input id="gsf-max-persona-replies" type="number" min="1" max="6" required>
                             </div>
                         </div>
                         <div class="form-row">
@@ -401,6 +442,17 @@
                         <div class="form-row">
                             <label for="gsf-max-turns-for-context">Max Turns for Context <span class="field-hint">(1–50)</span></label>
                             <input id="gsf-max-turns-for-context" type="number" min="1" max="50" required>
+                        </div>
+                        <div class="form-row">
+                            <label for="gsf-typical-length">Typical Response Length</label>
+                            <select id="gsf-typical-length">
+                                <option value="terse">Terse &mdash; one or two short sentences</option>
+                                <option value="brief">Brief &mdash; two to four sentences</option>
+                                <option value="normal">Normal &mdash; a short paragraph</option>
+                                <option value="detailed">Detailed &mdash; a few paragraphs</option>
+                                <option value="unrestricted">Unrestricted &mdash; no guidance</option>
+                            </select>
+                            <span class="field-hint">Default for the &ldquo;default&rdquo; room and for any room that has not set its own. Shapes length by instructing the persona &mdash; use this instead of lowering Max Tokens.</span>
                         </div>
                     </fieldset>
                 </div>

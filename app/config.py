@@ -135,7 +135,7 @@ class STTConfig(BaseModel):
 class GeneralConfig(BaseModel):
     """Application-wide feature flags and preferences."""
     persona_name_mentions: bool = True
-    max_persona_replies: int = Field(default=1, ge=1, le=4)
+    max_persona_replies: int = Field(default=1, ge=1, le=6)
     max_turns_for_context: int = Field(default=6, ge=1, le=50, description="Max history turns sent to the LLM")
     show_tool_calls: bool = True
     # Fallback tier, and the only one the implicit "default" room can use
@@ -212,12 +212,40 @@ class PersonasConfig(BaseModel):
 # Chat Rooms
 # ---------------------------------------------------------------------------
 
+class PlayerProfile(BaseModel):
+    """The human user's own character in a room.
+
+    Personas are told who they are talking to, so the user can be a
+    character in the room's fiction rather than an anonymous prompt.
+
+    *appearance* is the "picture": deliberately text, not an image. The
+    LLM is the audience for this field, and it reads a description; an
+    uploaded image would have to be captioned before it was any use.
+    """
+
+    name: str = Field(default="", max_length=40)
+    description: str = Field(default="", max_length=2000)
+    appearance: str = Field(default="", max_length=1000)
+
+    @property
+    def is_complete(self) -> bool:
+        """True once the profile says who the player is.
+
+        Appearance stays optional — a character can be described without
+        being pictured.
+        """
+        return bool(self.name.strip() and self.description.strip())
+
+
 class ChatRoom(BaseModel):
     """A named grouping of personas."""
     name: str
     persona_names: List[str] = Field(default_factory=list)
     echo_chamber: bool = False
     typical_length: TypicalLength = TypicalLength.NORMAL
+    # When true, the room refuses messages until player_profile is complete.
+    require_player_profile: bool = False
+    player_profile: PlayerProfile = Field(default_factory=PlayerProfile)
 
 
 class ChatRoomsConfig(BaseModel):

@@ -1,4 +1,7 @@
-"""Docs consistency: AGENTS.md's API table must match the registered routes.
+"""Static consistency checks that would otherwise only fail at runtime.
+
+Two kinds live here: AGENTS.md's API table against the registered routes,
+and the frontend's getElementById calls against the template's ids.
 
 The endpoint table is hand-maintained next to the code, so it drifts
 silently (it has, historically). This test extracts the real /api/ routes
@@ -91,3 +94,42 @@ def test_agents_md_api_endpoints_table_matches_registered_routes():
         "Rows in the AGENTS.md API table that match no registered route: "
         + ", ".join(f"{method} {path}" for method, path in ghost_rows)
     )
+
+
+# ---------------------------------------------------------------------------
+# Frontend ids: getElementById targets must exist in the template
+# ---------------------------------------------------------------------------
+#
+# The JS modules resolve their elements at load time and never null-check,
+# so an id that does not exist in index.html is a TypeError the first time
+# that dialog opens — invisible to every other test here, since none of
+# them load the page. This has already shipped once: a select was added to
+# the JS but the matching HTML edit silently failed to apply, leaving the
+# general settings modal broken.
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+INDEX_HTML = Path(__file__).resolve().parent.parent / "templates" / "index.html"
+
+
+def _template_ids() -> set[str]:
+    return set(re.findall(r'id="([^"]+)"', INDEX_HTML.read_text(encoding="utf-8")))
+
+
+def test_getelementbyid_targets_exist_in_the_template():
+    ids = _template_ids()
+    missing = []
+    for js in sorted(STATIC_DIR.glob("*.js")):
+        for target in re.findall(r'getElementById\("([^"]+)"\)', js.read_text(encoding="utf-8")):
+            if target not in ids:
+                missing.append(f"{js.name} -> #{target}")
+    assert not missing, (
+        "static/*.js resolves ids that templates/index.html does not define: "
+        + ", ".join(sorted(set(missing)))
+    )
+
+
+def test_labels_point_at_elements_that_exist():
+    ids = _template_ids()
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    dangling = sorted({f for f in re.findall(r'<label for="([^"]+)"', html) if f not in ids})
+    assert not dangling, f"<label for=...> targets with no matching id: {dangling}"

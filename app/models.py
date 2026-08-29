@@ -4,7 +4,7 @@ from typing import List, Optional, Literal
 
 from pydantic import BaseModel, Field
 
-from app.config import TypicalLength
+from app.config import PlayerProfile, TypicalLength
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +208,7 @@ class GeneralSettingsRequest(BaseModel):
     to wipe out show_tool_calls on every save.
     """
     persona_name_mentions: Optional[bool] = None
-    max_persona_replies: Optional[int] = Field(default=None, ge=1, le=4)
+    max_persona_replies: Optional[int] = Field(default=None, ge=1, le=6)
     max_turns_for_context: Optional[int] = Field(default=None, ge=1, le=50)
     show_tool_calls: Optional[bool] = None
     typical_length: Optional[TypicalLength] = None
@@ -292,6 +292,8 @@ class ChatRoomResponse(BaseModel):
     persona_names: List[str] = Field(default_factory=list)
     echo_chamber: bool = False
     typical_length: TypicalLength = TypicalLength.NORMAL
+    require_player_profile: bool = False
+    player_profile: PlayerProfile = Field(default_factory=PlayerProfile)
 
 
 class ChatRoomCreateRequest(BaseModel):
@@ -312,3 +314,15 @@ class EchoChamberRequest(BaseModel):
 class TypicalLengthRequest(BaseModel):
     """Set a chat room's typical response length tier."""
     typical_length: TypicalLength
+
+
+class PlayerProfileRequest(BaseModel):
+    """Set the human user's character profile for a chat room."""
+    name: str = Field(default="", max_length=40)
+    description: str = Field(default="", max_length=2000)
+    appearance: str = Field(default="", max_length=1000)
+
+
+class RequirePlayerProfileRequest(BaseModel):
+    """Toggle whether a chat room demands a player profile before chatting."""
+    require_player_profile: bool

@@ -7,3 +7,10 @@ chat_rooms: []
 #   echo_chamber: false
 #   # terse | brief | normal | detailed | unrestricted
 #   typical_length: brief
+#   # Refuse messages until player_profile has a name and a description.
+#   require_player_profile: false
+#   player_profile:
+#     name: Kira
+#     description: A retired thief who owes everyone money.
+#     # The "picture", written out - the personas read this, they cannot see.
+#     appearance: Short, scarred hands, a patched green coat and a limp.

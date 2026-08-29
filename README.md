@@ -260,7 +260,7 @@ For lowest lag time, consider OmniVoice as the TTS server. It is considerably fa
 
 ## Persona-to-persona chat
 
-By default, only one AI persona in the current chat room will answer your prompt. You can make it feel more like a group chat by turning up the `max_persona_replies` option in `settings.yaml` (or by visiting the settings dialog). You can choose any number between 1 and 4. The given number of AI personas will answer your prompt (or reply to the persona who responded before them). Your personas may argue amongst themselves, depending on their respective system prompts!
+By default, only one AI persona in the current chat room will answer your prompt. You can make it feel more like a group chat by turning up the `max_persona_replies` option in `settings.yaml` (or by visiting the settings dialog). You can choose any number between 1 and 6. The given number of AI personas will answer your prompt (or reply to the persona who responded before them). Your personas may argue amongst themselves, depending on their respective system prompts!
 
 If replies come out too long, set a [typical response length](#response-length) rather than lowering `max_tokens`.
 
@@ -397,6 +397,42 @@ thought inviting them to finish it.
 
 None of this is configurable; it applies to every room except echo chamber rooms, where
 nothing is generated in the first place.
+
+## Playing a character yourself
+
+By default the personas know nothing about you — you are just "the user". A chat room can
+instead be told who *you* are, so the personas address you by name and react to the
+character you are playing.
+
+Open **Your character…** in the left panel (it appears for any room except "All
+Personas") and fill in:
+
+- **Name** — what the personas call you.
+- **Who you are** — your character: who they are, what they want, how they behave.
+- **What you look like** — optional. This is the "picture", and it is deliberately
+  *text*: the personas are the audience for it and they read descriptions, so write
+  "short, scarred hands, a patched green coat and a limp" rather than uploading a photo.
+
+Each room has its own profile, so you can be a different character in each one. Ticking
+**Require my character** makes the room refuse messages until the profile has a name and
+a description — useful for a roleplay room you do not want to start out of character.
+The appearance field is never required.
+
+What a persona is told then looks like this:
+
+```
+The only people here are: Luna (A philosophical poet), and Kira. There is nobody else.
+Lines from other people appear as "[Name]: text". Lines with no prefix are from Kira.
+
+You are talking with Kira.
+Who they are: A retired thief who owes everyone money. Wary, sharp-tongued.
+What they look like: Short, scarred hands, a patched green coat and a limp.
+Treat Kira as that character: react to who they are and how they look, and address
+them by name. Never write their lines for them.
+```
+
+The profile lives in `chatrooms.yaml`, which is gitignored — it stays on your machine.
+The "All Personas" room cannot carry a profile, since it has no entry of its own.
 
 ## Echo chamber
 
