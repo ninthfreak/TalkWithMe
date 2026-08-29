@@ -23,6 +23,7 @@ from app.config import (
     derive_max_tokens,
     get_chatrooms,
     get_personas,
+    get_player,
     get_settings,
     resolve_typical_length,
 )
@@ -100,18 +101,16 @@ def _find_room(chat_room: str) -> Optional[ChatRoom]:
 # Room preamble — who is here, and the rules of the room
 # ---------------------------------------------------------------------------
 
-def _user_label(room: Optional[ChatRoom]) -> str:
+def _user_label() -> str:
     """What the human is called in the transcript and the prompt.
 
-    The player's character name when the room has one, else a neutral
-    "User". Every consumer takes it from here: the preamble, the "[Name]: "
-    tags in history, the stop strings, and the reply guard. If they
-    disagreed, a persona could be told not to speak as "Kira" while the
-    transcript tagged them "User".
+    The player's character name when they have one, else a neutral "User".
+    Every consumer takes it from here: the preamble, the "[Name]: " tags in
+    history, the stop strings, and the reply guard. If they disagreed, a
+    persona could be told not to speak as "Kira" while the transcript
+    tagged them "User".
     """
-    if room is not None and room.player_profile.name.strip():
-        return room.player_profile.name.strip()
-    return "User"
+    return get_player().profile.name.strip() or "User"
 
 
 def _player_lines(player: PlayerProfile, speaker: str) -> list[str]:
@@ -316,7 +315,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     # one. Checked here, not only in the frontend, for the same reason
     # persona eligibility is: the server is the authority. Bail before the
     # user message is recorded, so nothing half-happens.
-    if room is not None and room.require_player_profile and not room.player_profile.is_complete:
+    if room is not None and room.require_player_profile and not get_player().profile.is_complete:
         yield f'data: {json.dumps({"type": "error", "message": PROFILE_REQUIRED_MESSAGE})}\n\n'
         yield f'data: {json.dumps({"type": "complete"})}\n\n'
         return
@@ -343,7 +342,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     # Add user message to history (persisted automatically)
     session.add_user_message(req.message, user_message_id)
 
-    user_label = _user_label(room)
+    user_label = _user_label()
 
     # Echo comes from the request, because the Echo chamber checkbox is
     # client-side UI state rather than something stored on the room. Only
@@ -414,7 +413,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
                 max_turns_for_context=settings.general.max_turns_for_context,
                 room_preamble=_build_room_preamble(
                     persona, req.chat_room, eligible, length,
-                    player=room.player_profile if room else None,
+                    player=get_player().profile,
                 ),
                 user_label=user_label,
             )
@@ -574,13 +573,13 @@ def _build_suggestion_prompt(chat_room: str) -> list[dict]:
     not a writer working on their behalf.
     """
     room = _find_room(chat_room)
-    user_label = _user_label(room)
+    user_label = _user_label()
     eligible = _resolve_room_personas(chat_room)
     settings = get_settings()
     length = resolve_typical_length(None, room, settings.general.typical_length)
-    profile = room.player_profile if room is not None else None
+    profile = get_player().profile
 
-    named = bool(profile and profile.name.strip())
+    named = bool(profile.name.strip())
     if named:
         lines = [f'You are {user_label}, in a group chat called "{chat_room}".']
     else:
@@ -665,7 +664,7 @@ async def suggest_reply(req: SuggestReplyRequest):
     # The same guard the personas get, pointed the other way: strip a
     # "[Tony]: " prefix the model added, and cut it off if it carries on
     # into a persona's reply.
-    user_label = _user_label(room)
+    user_label = _user_label()
     guard = ReplyGuard(user_label, _resolve_room_personas(req.chat_room))
     cleaned = (guard.feed(text) + guard.flush()).strip()
 

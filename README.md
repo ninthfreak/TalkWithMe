@@ -61,6 +61,7 @@ Most settings can be changed in the UI. Behind the scenes, configuration is stor
 - `settings.yaml` stores LLM, TTS, STT, and MCP server endpoints plus general chat parameters
 - `chatrooms.yaml` stores configured chat rooms (if any)
 - `personas.yaml` stores all personas
+- `player.yaml` stores your own character
 
 Those three names appear twice, and the difference matters:
 
@@ -488,10 +489,11 @@ Once your character has a name, your own messages are labelled with it, the same
 persona messages are labelled — still on the right-hand side, so it stays obvious which
 are yours.
 
-Each room has its own profile, so you can be a different character in each one. Ticking
-**Require my character** makes the room refuse messages until the profile has a name and
-a description — useful for a roleplay room you do not want to start out of character.
-The appearance field is never required.
+You have one character, and it applies wherever you are — it is yours, not the room's, so
+switching rooms does not change who you are. What *is* a room setting is whether a room
+insists on it: tick **Require my character** in the room editor and that room refuses
+messages until your character has a name and a description. The appearance field is never
+required.
 
 What a persona is told then looks like this:
 
@@ -506,8 +508,9 @@ Treat Kira as that character: react to who they are and how they look, and addre
 them by name. Never write their lines for them.
 ```
 
-The profile lives in `config/chatrooms.yaml`, which is gitignored — it stays on your machine.
-The "All Personas" room cannot carry a profile, since it has no entry of its own.
+Your character lives in `config/player.yaml`, which is gitignored — it stays on your
+machine. If you had characters set per room before, the first one is moved across for you
+on startup and the log says which.
 
 ## Writing your own lines with help
 

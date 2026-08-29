@@ -4,7 +4,7 @@ from typing import List, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.config import LengthBias, PlayerProfile, TypicalLength
+from app.config import LengthBias, TypicalLength
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +311,6 @@ class ChatRoomResponse(BaseModel):
     persona_names: List[str] = Field(default_factory=list)
     typical_length: TypicalLength = TypicalLength.NORMAL
     require_player_profile: bool = False
-    player_profile: PlayerProfile = Field(default_factory=PlayerProfile)
 
 
 class ChatRoomCreateRequest(BaseModel):
@@ -325,7 +324,7 @@ class AssignPersonasRequest(BaseModel):
 
 
 class PlayerProfileRequest(BaseModel):
-    """The human user's character profile for a chat room."""
+    """The human user's own character. Not per room — see PlayerConfig."""
     name: str = Field(default="", max_length=40)
     description: str = Field(default="", max_length=2000)
     appearance: str = Field(default="", max_length=1000)
@@ -354,4 +353,10 @@ class ChatRoomUpdateRequest(BaseModel):
 
     typical_length: Optional[TypicalLength] = None
     require_player_profile: Optional[bool] = None
-    player_profile: Optional[PlayerProfileRequest] = None
+
+
+class PlayerProfileResponse(BaseModel):
+    """The human user's character, as returned to the frontend."""
+    name: str = ""
+    description: str = ""
+    appearance: str = ""

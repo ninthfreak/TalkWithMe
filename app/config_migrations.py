@@ -34,7 +34,10 @@ logger = logging.getLogger(__name__)
 # 4 = echo_chamber is not a room attribute. The Echo chamber checkbox under
 #     the chat room selector is client-side UI state, sent with each
 #     message — the room never knew about it.
-CONFIG_SCHEMA_VERSION = 4
+# 5 = the player's character profile is not a room attribute either. A room
+#     can *require* one (require_player_profile stays), but the profile
+#     itself belongs to the player and now lives in player.yaml.
+CONFIG_SCHEMA_VERSION = 5
 
 Notes = List[str]
 Step = Callable[[dict], Tuple[dict, Notes]]
@@ -172,7 +175,62 @@ def migrate_personas(raw: dict) -> Tuple[dict, Notes]:
 # go through _apply so the stamp is added and a future step has somewhere
 # to live.
 
-_CHATROOM_STEPS: Dict[int, Step] = {3: _chatrooms_v3_to_v4}
+def _chatrooms_v4_to_v5(raw: dict) -> Tuple[dict, Notes]:
+    """Drop player_profile from stored rooms.
+
+    Whether a room requires a profile is a property of the room; the
+    profile itself is the player's, and interacts with whichever room they
+    are in. `lift_player_profile()` moves the value into player.yaml before
+    this drops it, so nothing is lost.
+    """
+    notes: Notes = []
+    for room in raw.get("chat_rooms") or []:
+        if isinstance(room, dict) and "player_profile" in room:
+            room.pop("player_profile")
+            notes.append(
+                f"{room.get('name', '<unknown>')}: dropped 'player_profile' "
+                "— your character lives in player.yaml now, not in a room"
+            )
+    return raw, notes
+
+
+_CHATROOM_STEPS: Dict[int, Step] = {
+    3: _chatrooms_v3_to_v4,
+    4: _chatrooms_v4_to_v5,
+}
+
+
+def migrate_player(raw: dict) -> Tuple[dict, Notes]:
+    """Bring a raw player.yaml dict up to the current schema."""
+    return _apply(raw, {})
+
+
+def lift_player_profile(chatrooms_raw: dict) -> dict:
+    """The first non-empty player_profile found in a rooms file, or {}.
+
+    Used once, when player.yaml does not exist yet, to carry a profile
+    across from the rooms it used to be stored in. Profiles were per room,
+    so several may exist; the first named one wins and the rest are
+    reported, because silently picking one of several characters would be
+    worse than saying so.
+    """
+    found = []
+    for room in chatrooms_raw.get("chat_rooms") or []:
+        if not isinstance(room, dict):
+            continue
+        profile = room.get("player_profile") or {}
+        if isinstance(profile, dict) and str(profile.get("name", "")).strip():
+            found.append((room.get("name", "<unknown>"), profile))
+    if not found:
+        return {}
+    if len(found) > 1:
+        logger.info(
+            "Several rooms had a character; keeping %s's (from '%s') and "
+            "discarding %s. Edit it under \"Your character\" if that is the wrong one.",
+            found[0][1].get("name"), found[0][0],
+            ", ".join(f"{p.get('name')} (from '{r}')" for r, p in found[1:]),
+        )
+    return found[0][1]
 
 
 def migrate_chatrooms(raw: dict) -> Tuple[dict, Notes]:

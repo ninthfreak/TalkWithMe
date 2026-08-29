@@ -17,6 +17,7 @@ from app.config import (
     Persona,
     PersonasConfig,
     LengthBias,
+    PlayerConfig,
     PlayerProfile,
     TypicalLength,
 )
@@ -690,13 +691,19 @@ class TestTruncation:
 # ---------------------------------------------------------------------------
 
 def _profiled_room(monkeypatch, *, require=False, **profile_fields):
-    profile = PlayerProfile(**profile_fields)
+    """A room, plus the player's character.
+
+    Two separate things now: the room only knows whether it *requires* a
+    character, and the character itself is the player's, in player.yaml.
+    """
+    monkeypatch.setattr(
+        app_config, "_player_cache", PlayerConfig(profile=PlayerProfile(**profile_fields))
+    )
     _patch_chatrooms(monkeypatch, [
         ChatRoom(
             name="Tavern",
             persona_names=["Alex", "Luna"],
             require_player_profile=require,
-            player_profile=profile,
         )
     ])
 

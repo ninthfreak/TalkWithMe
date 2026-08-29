@@ -16,7 +16,9 @@ from pydantic import BaseModel, Field, model_validator
 from app.config_migrations import (
     CONFIG_SCHEMA_VERSION,
     migrate_chatrooms,
+    lift_player_profile,
     migrate_personas,
+    migrate_player,
     migrate_settings,
 )
 
@@ -301,14 +303,27 @@ class PlayerProfile(BaseModel):
         return bool(self.name.strip() and self.description.strip())
 
 
+class PlayerConfig(BaseModel):
+    """The human's own character. One profile, not one per room.
+
+    Stored in its own file beside personas.yaml, which is the shape of the
+    thing: personas.yaml holds the AI characters, player.yaml holds the
+    human one. It is not room data — a room can *require* a profile, which
+    is a property of the room, but the profile itself belongs to the
+    player and interacts with whichever room they are in.
+    """
+
+    profile: PlayerProfile = Field(default_factory=PlayerProfile)
+
+
 class ChatRoom(BaseModel):
     """A named grouping of personas."""
     name: str
     persona_names: List[str] = Field(default_factory=list)
     typical_length: TypicalLength = TypicalLength.NORMAL
-    # When true, the room refuses messages until player_profile is complete.
+    # A property of the room: whether it insists on knowing who you are
+    # before you can chat. The profile itself lives in player.yaml.
     require_player_profile: bool = False
-    player_profile: PlayerProfile = Field(default_factory=PlayerProfile)
 
 
 class ChatRoomsConfig(BaseModel):
@@ -361,10 +376,12 @@ _CONFIG_DIR_NAME = "config"
 SETTINGS_FILE = "settings.yaml"
 PERSONAS_FILE = "personas.yaml"
 CHATROOMS_FILE = "chatrooms.yaml"
+PLAYER_FILE = "player.yaml"
 
 _settings_cache: Optional[AppSettings] = None
 _personas_cache: Optional[PersonasConfig] = None
 _chatrooms_cache: Optional[ChatRoomsConfig] = None
+_player_cache: Optional[PlayerConfig] = None
 
 
 def config_dir() -> Path:
@@ -465,6 +482,33 @@ def load_chatrooms(path: Optional[Path] = None) -> ChatRoomsConfig:
     return _chatrooms_cache
 
 
+def load_player(path: Optional[Path] = None) -> PlayerConfig:
+    """Parse player.yaml. Returns an empty profile if the file is missing."""
+    global _player_cache
+    target = path or config_path(PLAYER_FILE)
+    if not target.exists():
+        return PlayerConfig()
+    raw, notes = migrate_player(_read_raw(target))
+    _log_notes(PLAYER_FILE, notes)
+    _player_cache = PlayerConfig(profile=PlayerProfile(**raw.get("profile", {})))
+    return _player_cache
+
+
+def get_player() -> PlayerConfig:
+    """Return the cached player config, loading if necessary."""
+    if _player_cache is None:
+        return load_player()
+    return _player_cache
+
+
+def save_player(config: PlayerConfig, path: Optional[Path] = None) -> None:
+    """Write player.yaml into config/ and update the in-memory cache."""
+    global _player_cache
+    target = path or config_dir() / PLAYER_FILE
+    _write_raw(target, {"profile": config.profile.model_dump(mode="json")})
+    _player_cache = config
+
+
 def get_settings() -> AppSettings:
     """Return cached settings, loading if necessary."""
     if _settings_cache is None:
@@ -534,10 +578,27 @@ def migrate_config_files() -> list:
     Returns the list of filenames that were migrated, for logging.
     """
     migrated = []
+
+    # Profiles used to be stored per room. Carry one across before the
+    # chatrooms migration drops the key, so upgrading does not silently
+    # lose the character someone had set up.
+    player_file = config_dir() / PLAYER_FILE
+    rooms_file = config_path(CHATROOMS_FILE)
+    if not player_file.exists() and rooms_file.exists():
+        profile = lift_player_profile(_read_raw(rooms_file))
+        if profile:
+            logger.info(
+                "Moved your character '%s' out of %s and into %s",
+                profile.get("name"), CHATROOMS_FILE, PLAYER_FILE,
+            )
+            _write_raw(player_file, {"profile": profile})
+            migrated.append(PLAYER_FILE)
+
     for filename, migrate in (
         (SETTINGS_FILE, migrate_settings),
         (PERSONAS_FILE, migrate_personas),
         (CHATROOMS_FILE, migrate_chatrooms),
+        (PLAYER_FILE, migrate_player),
     ):
         live = config_dir() / filename
         legacy = legacy_path(filename)
@@ -547,15 +608,39 @@ def migrate_config_files() -> list:
         _log_notes(filename, notes)
         _write_raw(live, raw)
         migrated.append(filename)
+
+    # Files already in config/ are migrated in memory on every load, but
+    # nothing rewrites them until the next save, so a stale key can sit on
+    # disk indefinitely. Bring any out-of-date file up to the current
+    # schema here, once, so what is on disk matches what the app reads.
+    for filename, migrate in (
+        (SETTINGS_FILE, migrate_settings),
+        (PERSONAS_FILE, migrate_personas),
+        (CHATROOMS_FILE, migrate_chatrooms),
+        (PLAYER_FILE, migrate_player),
+    ):
+        live = config_dir() / filename
+        if filename in migrated or not live.exists():
+            continue
+        raw = _read_raw(live)
+        if raw.get("schema_version") == CONFIG_SCHEMA_VERSION:
+            continue
+        migrated_raw, notes = migrate(raw)
+        _log_notes(filename, notes)
+        _write_raw(live, migrated_raw)
+        migrated.append(filename)
+
     return migrated
 
 
 def reload_all():
     """Force-reload all config files. Useful for dev hot-reload."""
-    global _settings_cache, _personas_cache, _chatrooms_cache
+    global _settings_cache, _personas_cache, _chatrooms_cache, _player_cache
     _settings_cache = None
     _personas_cache = None
     _chatrooms_cache = None
+    _player_cache = None
     load_settings()
     load_personas()
     load_chatrooms()
+    load_player()

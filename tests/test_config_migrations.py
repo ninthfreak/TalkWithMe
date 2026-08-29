@@ -19,6 +19,7 @@ from app.config import (
     config_path,
     load_chatrooms,
     load_personas,
+    load_player,
     load_settings,
     migrate_config_files,
     save_personas,
@@ -125,7 +126,6 @@ class TestLegacyChatroomsAndSettings:
         assert room.persona_names == ["Alex", "Luna"]          # preserved
         assert room.typical_length is TypicalLength.NORMAL     # defaulted
         assert room.require_player_profile is False
-        assert room.player_profile.name == ""
 
     def test_legacy_settings_load_and_keep_their_values(self, tmp_path):
         target = tmp_path / "settings.yaml"
@@ -217,7 +217,9 @@ class TestLocationMigration:
         (config_dir() / "personas.yaml").write_text(
             "personas:\n- name: Mine\n  system_prompt: hi\n"
         )
-        assert "personas.yaml" not in migrate_config_files()
+        migrate_config_files()
+        # It may be schema-stamped in place, but its *content* is never
+        # replaced by the repo-root copy.
         assert [p.name for p in load_personas().personas] == ["Mine"]
 
     def test_migration_is_idempotent(self, tmp_path):
@@ -282,3 +284,110 @@ class TestEchoChamberIsNotRoomState:
     def test_rooms_without_the_key_produce_no_notes(self):
         _, notes = migrate_chatrooms({"chat_rooms": [{"name": "TNG"}]})
         assert notes == []
+
+
+class TestPlayerProfileLeavesTheRoom:
+    """Profiles used to be stored per room; they belong to the player.
+
+    Upgrading must not silently lose a character someone set up, so the
+    value is carried into player.yaml before the room key is dropped.
+    """
+
+    ROOMS_WITH_PROFILES = """\
+chat_rooms:
+- name: Pub
+  persona_names: [Alex]
+  require_player_profile: true
+  player_profile: {name: Gregory, description: An innkeeper., appearance: Greying.}
+- name: Docks
+  persona_names: [Luna]
+  player_profile: {name: Sal, description: A dockhand., appearance: ''}
+"""
+
+    def _upgrade(self, tmp_path):
+        (tmp_path / "chatrooms.yaml").write_text(self.ROOMS_WITH_PROFILES)
+        return migrate_config_files()
+
+    def test_the_profile_moves_into_its_own_file(self, tmp_path):
+        assert "player.yaml" in self._upgrade(tmp_path)
+        assert load_player().profile.name == "Gregory"
+
+    def test_the_rooms_keep_their_requirement_but_lose_the_profile(self, tmp_path):
+        self._upgrade(tmp_path)
+        rooms = {r.name: r for r in load_chatrooms().chat_rooms}
+        assert rooms["Pub"].require_player_profile is True
+        assert not hasattr(rooms["Pub"], "player_profile")
+
+    def test_one_character_is_chosen_and_the_choice_is_reported(self, tmp_path, caplog):
+        # Several rooms could each have had a character; silently picking
+        # one of them would be worse than saying which.
+        with caplog.at_level("INFO"):
+            self._upgrade(tmp_path)
+        assert "keeping Gregory's" in caplog.text
+        assert "Sal" in caplog.text
+
+    def test_an_existing_player_file_is_never_overwritten(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "player.yaml").write_text("profile:\n  name: Mine\n")
+        (tmp_path / "chatrooms.yaml").write_text(self.ROOMS_WITH_PROFILES)
+
+        migrate_config_files()
+        # Same rule: an existing character is never replaced by one lifted
+        # out of the rooms file.
+        assert load_player().profile.name == "Mine"
+
+    def test_rooms_without_profiles_produce_no_player_file(self, tmp_path):
+        (tmp_path / "chatrooms.yaml").write_text(
+            "chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n"
+        )
+        assert "player.yaml" not in migrate_config_files()
+
+    def test_a_room_key_alone_is_dropped_by_the_schema_step(self):
+        migrated, notes = migrate_chatrooms({"chat_rooms": [
+            {"name": "TNG", "require_player_profile": True,
+             "player_profile": {"name": "Kira"}},
+        ]})
+        room = migrated["chat_rooms"][0]
+        assert "player_profile" not in room
+        assert room["require_player_profile"] is True
+        assert any("player_profile" in n for n in notes)
+
+
+class TestOutOfDateFilesAreRewritten:
+    """Loading migrates in memory; nothing rewrote the file until a save.
+
+    A stale key could therefore sit on disk indefinitely, so what the app
+    reads and what the file says drifted apart.
+    """
+
+    def test_an_existing_config_file_is_brought_up_to_date(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "chatrooms.yaml").write_text(
+            "chat_rooms:\n- name: Pub\n  persona_names: [Alex]\n"
+            "  player_profile: {name: Gregory, description: An innkeeper.}\n"
+        )
+
+        assert "chatrooms.yaml" in migrate_config_files()
+
+        raw = yaml.safe_load((tmp_path / "config" / "chatrooms.yaml").read_text())
+        assert raw["schema_version"] == CONFIG_SCHEMA_VERSION
+        assert "player_profile" not in raw["chat_rooms"][0]
+
+    def test_a_current_file_is_left_alone(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        target = tmp_path / "config" / "chatrooms.yaml"
+        target.write_text(
+            f"schema_version: {CONFIG_SCHEMA_VERSION}\nchat_rooms:\n- name: Pub\n"
+        )
+        before = target.read_text()
+
+        assert migrate_config_files() == []
+        assert target.read_text() == before
+
+    def test_it_is_idempotent(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "personas.yaml").write_text(
+            "personas:\n- name: Alex\n  system_prompt: hi\n  typical_length: terse\n"
+        )
+        assert "personas.yaml" in migrate_config_files()
+        assert migrate_config_files() == []

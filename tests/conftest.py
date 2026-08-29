@@ -23,7 +23,7 @@ import app.routers.persistence as persistence_router
 import app.services.tool_registry as tool_registry
 from app.session import session as global_session
 
-from tests.factories import make_chatrooms, make_personas, make_settings
+from tests.factories import make_chatrooms, make_personas, make_player, make_settings
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +41,8 @@ def isolated_app_state(tmp_path, monkeypatch):
     monkeypatch.setattr(app_config, "_settings_cache", make_settings())
     monkeypatch.setattr(app_config, "_personas_cache", make_personas())
     monkeypatch.setattr(app_config, "_chatrooms_cache", make_chatrooms())
+    # The player's character is global, so it leaks between tests without this.
+    monkeypatch.setattr(app_config, "_player_cache", make_player())
 
     # Module-level registries that survive across tests.
     persistence._pending_audio.clear()

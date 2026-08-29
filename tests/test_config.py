@@ -452,10 +452,12 @@ class TestTypicalLengthPersistence:
 
 
 class TestPlayerProfile:
-    def test_room_defaults_to_no_profile_and_no_requirement(self):
-        room = ChatRoom(name="R")
-        assert room.require_player_profile is False
-        assert room.player_profile.is_complete is False
+    def test_a_room_defaults_to_not_requiring_a_character(self):
+        assert ChatRoom(name="R").require_player_profile is False
+
+    def test_a_room_holds_no_profile_of_its_own(self):
+        # The requirement is the room's; the character is the player's.
+        assert not hasattr(ChatRoom(name="R"), "player_profile")
 
     @pytest.mark.parametrize("fields, complete", [
         ({"name": "Kira", "description": "A thief."}, True),
@@ -469,24 +471,30 @@ class TestPlayerProfile:
         # being pictured.
         assert PlayerProfile(**fields).is_complete is complete
 
-    def test_absent_keys_load_as_an_empty_profile(self, tmp_path):
+    def test_absent_keys_load_as_no_requirement(self, tmp_path):
         target = tmp_path / "chatrooms.yaml"
         target.write_text("chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n")
-        room = load_chatrooms(target).chat_rooms[0]
-        assert room.require_player_profile is False
-        assert room.player_profile.name == ""
+        assert load_chatrooms(target).chat_rooms[0].require_player_profile is False
 
-    def test_profile_round_trips_through_yaml(self, tmp_path):
+    def test_the_requirement_round_trips_through_yaml(self, tmp_path):
         target = tmp_path / "chatrooms.yaml"
-        save_chatrooms(ChatRoomsConfig(chat_rooms=[ChatRoom(
-            name="TNG",
-            require_player_profile=True,
-            player_profile=PlayerProfile(
-                name="Kira", description="A thief.", appearance="Green coat."
-            ),
-        )]), target)
+        save_chatrooms(ChatRoomsConfig(chat_rooms=[
+            ChatRoom(name="TNG", require_player_profile=True)
+        ]), target)
+        assert load_chatrooms(target).chat_rooms[0].require_player_profile is True
 
-        room = load_chatrooms(target).chat_rooms[0]
-        assert room.require_player_profile is True
-        assert room.player_profile.name == "Kira"
-        assert room.player_profile.appearance == "Green coat."
+    def test_the_player_profile_round_trips_in_its_own_file(self, tmp_path):
+        from app.config import PlayerConfig, load_player, save_player
+
+        target = tmp_path / "player.yaml"
+        save_player(PlayerConfig(profile=PlayerProfile(
+            name="Kira", description="A thief.", appearance="Green coat."
+        )), target)
+
+        profile = load_player(target).profile
+        assert profile.name == "Kira"
+        assert profile.appearance == "Green coat."
+
+    def test_a_missing_player_file_gives_an_empty_profile(self, tmp_path):
+        from app.config import load_player
+        assert load_player(tmp_path / "nope.yaml").profile.is_complete is False

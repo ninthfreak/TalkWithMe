@@ -340,11 +340,11 @@ function handleSSEEvent(event) {
 
 /**
  * Label the human's own bubble with their character name, matching how
- * persona bubbles are labelled. Nothing is added when the room has no
- * character, so an ordinary chat looks exactly as it did.
+ * persona bubbles are labelled. Nothing is added when no character is
+ * set, so an ordinary chat looks exactly as it did.
  */
-function addUserNameLabel(wrapper, roomName) {
-    const name = playerDisplayName(roomName);
+function addUserNameLabel(wrapper) {
+    const name = playerDisplayName();
     if (!name) return;
     const nameEl = document.createElement("div");
     nameEl.className = "bubble-name";
@@ -543,7 +543,7 @@ function appendPersistedUserBubble(msg, roomName) {
     const wrapper = document.createElement("div");
     wrapper.className = "user-message-content";
 
-    addUserNameLabel(wrapper, roomName);
+    addUserNameLabel(wrapper);
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";

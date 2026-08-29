@@ -137,6 +137,7 @@ function setupChatRoomEventListeners() {
 
     setupPlayerProfileEventListeners();
     setupRoomEditorEventListeners();
+    loadPlayerProfile();
 
     // Chat rooms editor button in topbar
     document.getElementById("btn-chat-rooms").addEventListener("click", openChatRoomsEditor);
@@ -534,20 +535,27 @@ function currentRoomInfo() {
     return roomByName(currentChatRoom);
 }
 
+/** The player's own character, cached from /api/player. */
+let playerProfile = emptyProfile();
+
+async function loadPlayerProfile() {
+    try {
+        const resp = await fetch("/api/player");
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        playerProfile = await resp.json();
+    } catch (err) {
+        console.error("Failed to load player profile:", err);
+    }
+    applyPlayerProfileControls(currentChatRoom !== "default");
+}
+
 function emptyProfile() {
     return { name: "", description: "", appearance: "" };
 }
 
-/**
- * The name to show on the human's own messages, or "" for none.
- *
- * Takes a room name so persisted history renders with the character who
- * belongs to *that* room, not whichever room happens to be selected.
- */
-function playerDisplayName(roomName) {
-    const name = roomName || currentChatRoom;
-    const room = allChatRooms.find(r => r.name.toLowerCase() === String(name).toLowerCase());
-    return ((room && room.player_profile && room.player_profile.name) || "").trim();
+/** The name to show on the human's own messages, or "" for none. */
+function playerDisplayName() {
+    return (playerProfile.name || "").trim();
 }
 
 function profileIsComplete(profile) {
@@ -560,43 +568,33 @@ function profileIsComplete(profile) {
 function profileRequiredButMissing() {
     const room = currentRoomInfo();
     if (!room || !room.require_player_profile) return false;
-    return !profileIsComplete(room.player_profile);
+    return !profileIsComplete(playerProfile);
 }
 
 /** Reflect the current room's profile state in the left panel. */
 function applyPlayerProfileControls(isActiveRoom) {
-    const room = currentRoomInfo();
-    const profile = (room && room.player_profile) || emptyProfile();
+    const profile = playerProfile;
 
-    btnPlayerProfile.disabled = !isActiveRoom;
+    // Editable in every room: it is the player's character, not the
+    // room's, so "default" is not a special case.
+    btnPlayerProfile.disabled = false;
 
     // Showing the character's name doubles as confirmation it was saved.
     btnPlayerProfile.textContent = profile.name.trim()
         ? `Your character: ${profile.name.trim()}`
         : "Your character…";
     btnPlayerProfile.classList.toggle("profile-missing", profileRequiredButMissing());
-    playerProfileWrapper.classList.toggle("hidden", !isActiveRoom);
 }
-
-// Which room the open profile dialog is editing. Not always the selected
-// room: the room editor can open it for any room.
-let profileRoomName = null;
 
 function roomByName(name) {
     return allChatRooms.find(
         r => r.name.toLowerCase() === String(name).toLowerCase());
 }
 
-function openPlayerProfile(roomName) {
-    const room = roomName ? roomByName(roomName) : currentRoomInfo();
-    if (!room) return;
-    profileRoomName = room.name;
-    const profile = room.player_profile || emptyProfile();
-    ppfName.value = profile.name || "";
-    ppfDescription.value = profile.description || "";
-    ppfAppearance.value = profile.appearance || "";
-    document.getElementById("pp-profile-room").textContent =
-        `This character is used in "${room.name}" only.`;
+function openPlayerProfile() {
+    ppfName.value = playerProfile.name || "";
+    ppfDescription.value = playerProfile.description || "";
+    ppfAppearance.value = playerProfile.appearance || "";
     hidePlayerProfileError();
     playerProfileOverlay.classList.remove("hidden");
     ppfName.focus();
@@ -618,8 +616,6 @@ function hidePlayerProfileError() {
 
 async function savePlayerProfile(e) {
     if (e) e.preventDefault();
-    const room = profileRoomName ? roomByName(profileRoomName) : currentRoomInfo();
-    if (!room) return;
 
     const payload = {
         name: ppfName.value.trim(),
@@ -635,7 +631,13 @@ async function savePlayerProfile(e) {
     }
 
     try {
-        await saveRoomSettings(room.name, { player_profile: payload });
+        const resp = await fetch("/api/player", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        playerProfile = await resp.json();
         closePlayerProfile();
         applyPlayerProfileControls(currentChatRoom !== "default");
         refreshRoomEditProfileSummary();
@@ -684,14 +686,14 @@ function openRoomEditor(roomName) {
 }
 
 function refreshRoomEditProfileSummary() {
+    // Read-only: whether a character exists decides whether this room's
+    // requirement can be met. Editing it happens under "Your character",
+    // because the character is the player's and not the room's.
     const el = document.getElementById("re-profile-summary");
-    if (!el || !editingRoomName) return;
-    const room = allChatRooms.find(
-        r => r.name.toLowerCase() === editingRoomName.toLowerCase());
-    const profile = (room && room.player_profile) || emptyProfile();
-    el.textContent = profile.name.trim()
-        ? `Currently: ${profile.name.trim()}`
-        : "No character set for this room.";
+    if (!el) return;
+    el.textContent = (playerProfile.name || "").trim()
+        ? `Your character is ${playerProfile.name.trim()}.`
+        : "You have no character set yet — set one under \u201cYour character\u201d.";
 }
 
 function closeRoomEditor() {
@@ -739,11 +741,6 @@ function setupRoomEditorEventListeners() {
     document.getElementById("re-form").addEventListener("submit", submitRoomEditor);
     document.getElementById("re-btn-close").addEventListener("click", closeRoomEditor);
     document.getElementById("re-btn-cancel").addEventListener("click", closeRoomEditor);
-    document.getElementById("re-btn-edit-profile").addEventListener("click", () => {
-        // The profile has its own editor; reuse it rather than duplicating
-        // three fields in a second dialog.
-        openPlayerProfile(editingRoomName);
-    });
     roomEditOverlay.addEventListener("click", (e) => {
         if (e.target === roomEditOverlay) closeRoomEditor();
     });

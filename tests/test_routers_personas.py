@@ -247,8 +247,7 @@ class TestCascadePreservesRoomSettings:
 
     def _configure_room(self, client):
         client.put("/api/chatrooms/TNG", json={
-            "typical_length": "terse",
-            "player_profile": {"name": "Kira", "description": "A thief."},
+            "typical_length": "terse", "require_player_profile": True,
         })
 
     def test_rename_preserves_room_settings(self, client):

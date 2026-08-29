@@ -14,7 +14,6 @@ from fastapi import APIRouter, HTTPException
 from app.config import (
     ChatRoom,
     ChatRoomsConfig,
-    PlayerProfile,
     get_chatrooms,
     get_personas,
     get_settings,
@@ -39,7 +38,6 @@ def _to_response(room: ChatRoom) -> ChatRoomResponse:
         persona_names=list(room.persona_names),
         typical_length=room.typical_length,
         require_player_profile=room.require_player_profile,
-        player_profile=room.player_profile,
     )
 
 
@@ -237,13 +235,6 @@ def update_chatroom(name: str, req: ChatRoomUpdateRequest):
     room = _editable_room_or_400(name)
 
     update = req.model_dump(exclude_none=True)
-    if "player_profile" in update:
-        # Nested model arrives as a plain dict; whitespace-only fields are
-        # the same as empty, so a profile is never "complete" by accident.
-        update["player_profile"] = PlayerProfile(
-            **{k: v.strip() for k, v in update["player_profile"].items()}
-        )
-
     if not update:
         # Nothing to change — report the room as it stands rather than
         # rewriting chatrooms.yaml for no reason.
