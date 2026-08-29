@@ -1061,7 +1061,7 @@ class TestSuggestReply:
         self._suggest(client)
 
         prompt = seen[0]["messages"][0]["content"]
-        assert "Match their voice" in prompt
+        assert "How you write" in prompt
         assert "- aye, what'll it be then" in prompt
         assert "- comin right up" in prompt
         # A persona's line is context, not a voice sample.
@@ -1077,9 +1077,9 @@ class TestSuggestReply:
         prompt = seen[0]["messages"][0]["content"]
         assert "[Alex]: Rain, mostly." in prompt
 
-    def test_the_character_profile_is_written_in_the_first_person(self, client, monkeypatch):
-        # Not the persona-facing block, which ends "never write their lines
-        # for them" — the exact opposite of what is being asked here.
+    def test_the_character_description_is_a_section_of_its_own(self, client, monkeypatch):
+        # It carries *what* to say, so it gets the same structural weight as
+        # the voice sample rather than a passing mention.
         _profiled_room(monkeypatch, name="Kira", description="A retired thief.",
                        appearance="A patched green coat.")
         seen = self._stub(monkeypatch)
@@ -1087,17 +1087,57 @@ class TestSuggestReply:
         self._suggest(client, room="Tavern")
 
         prompt = seen[0]["messages"][0]["content"]
-        assert "You are Kira. A retired thief." in prompt
-        assert "You look like this: A patched green coat." in prompt
-        assert "Never write their lines for them" not in prompt
+        assert "Who you are:\nA retired thief." in prompt
+        assert "What you look like:\nA patched green coat." in prompt
 
-    def test_it_writes_as_the_named_character(self, client, monkeypatch):
+    def test_the_description_carries_an_instruction_to_act_on_it(self, client, monkeypatch):
+        # Without this the description was decoration: the draft sounded
+        # right and behaved like nobody in particular.
+        _profiled_room(monkeypatch, name="Kira", description="A retired thief.")
+        seen = self._stub(monkeypatch)
+
+        self._suggest(client, room="Tavern")
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "Stay in character" in prompt
+        assert "should follow from who you are" in prompt
+
+    def test_no_stay_in_character_line_without_a_description(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        self._suggest(client)
+        assert "Stay in character" not in seen[0]["messages"][0]["content"]
+
+    def test_the_persona_facing_profile_block_is_not_reused(self, client, monkeypatch):
+        # _player_lines() ends "never write their lines for them" — the exact
+        # opposite of what is being asked here.
+        _profiled_room(monkeypatch, name="Kira", description="A thief.",
+                       appearance="A green coat.")
+        seen = self._stub(monkeypatch)
+
+        self._suggest(client, room="Tavern")
+
+        prompt = seen[0]["messages"][0]["content"]
+        assert "Never write their lines for them" not in prompt
+        assert "You are talking with" not in prompt
+
+    def test_it_writes_in_the_second_person_as_the_character(self, client, monkeypatch):
         _profiled_room(monkeypatch, name="Kira", description="A thief.")
         seen = self._stub(monkeypatch)
 
         self._suggest(client, room="Tavern")
 
-        assert "next message for Kira" in seen[0]["messages"][0]["content"]
+        prompt = seen[0]["messages"][0]["content"]
+        assert prompt.startswith('You are Kira, in a group chat called "Tavern".')
+        # No third-person framing left over — the model is the character,
+        # not a writer working on their behalf.
+        assert "next message for Kira" not in prompt
+
+    def test_an_unnamed_player_is_described_rather_than_called_user(self, client, monkeypatch):
+        seen = self._stub(monkeypatch)
+        self._suggest(client)
+        prompt = seen[0]["messages"][0]["content"]
+        assert "You are the human in a group chat" in prompt
+        assert 'shown in the transcript as "User"' in prompt
 
     def test_prose_uses_the_configured_temperature_not_the_routers(self, client, monkeypatch):
         # chat_completion defaults to 0.1, which is right for picking a name

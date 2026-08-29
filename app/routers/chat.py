@@ -556,38 +556,64 @@ def _player_voice_sample(user_label: str) -> list[str]:
 
 
 def _build_suggestion_prompt(chat_room: str) -> list[dict]:
-    """Ask the LLM for the player's next message, in the player's voice."""
+    """Ask the LLM for the player's next message, in the player's voice.
+
+    Two different jobs, kept apart on purpose:
+
+    * the **character description** decides *what* to say — the manner,
+      what this character cares about, how they would react;
+    * the **voice sample** (their own past messages) decides *how* to say
+      it — vocabulary, sentence shape, how much they usually write.
+
+    An earlier version mentioned the description in a single line while
+    giving the sample a labelled section and an explicit "match this"
+    instruction, so drafts came back sounding right and behaving like
+    nobody in particular. Both now get a section and an instruction.
+
+    Written in the second person throughout: the model is the character,
+    not a writer working on their behalf.
+    """
     room = _find_room(chat_room)
     user_label = _user_label(room)
     eligible = _resolve_room_personas(chat_room)
     settings = get_settings()
     length = resolve_typical_length(None, room, settings.general.typical_length)
+    profile = room.player_profile if room is not None else None
 
-    lines = [
-        f'You are writing the next message for {user_label} in a group chat '
-        f'called "{chat_room}".',
-    ]
+    named = bool(profile and profile.name.strip())
+    if named:
+        lines = [f'You are {user_label}, in a group chat called "{chat_room}".']
+    else:
+        lines = [
+            f'You are the human in a group chat called "{chat_room}", shown in '
+            f'the transcript as "{user_label}".'
+        ]
 
-    if room is not None:
-        # Deliberately NOT _player_lines(): that block is written for
-        # personas talking *to* the player and ends "never write their lines
-        # for them", which is the exact opposite of this task. Here the
-        # profile is addressed to the writer as the character themselves.
-        profile = room.player_profile
-        if profile.description.strip():
-            lines.append(f"You are {user_label}. {profile.description.strip()}")
-        if profile.appearance.strip():
-            lines.append(f"You look like this: {profile.appearance.strip()}")
+    # Deliberately NOT _player_lines(): that block is addressed to personas
+    # talking *to* the player and ends "never write their lines for them",
+    # which is the exact opposite of this task.
+    if profile and profile.description.strip():
+        lines += ["", "Who you are:", profile.description.strip()]
+    if profile and profile.appearance.strip():
+        lines += ["", "What you look like:", profile.appearance.strip()]
+
+    if profile and (profile.description.strip() or profile.appearance.strip()):
+        lines += [
+            "",
+            "Stay in character. What you say should follow from who you are — "
+            "your manner, what you care about, and how someone like you would "
+            "react to what was just said.",
+        ]
 
     if eligible:
-        lines += ["", f"The others in the room are: {', '.join(eligible)}."]
+        lines += ["", f"The others here are: {', '.join(eligible)}."]
 
     sample = _player_voice_sample(user_label)
     if sample:
         lines += [
             "",
-            f"Here is how {user_label} writes. Match their voice, their "
-            "vocabulary and how much they usually say:",
+            "How you write — match this voice, vocabulary and typical length "
+            "(these are your own earlier messages):",
         ]
         lines += [f"- {s}" for s in sample]
 
@@ -604,14 +630,14 @@ def _build_suggestion_prompt(chat_room: str) -> list[dict]:
     )
     lines += [
         "",
-        f"Write {user_label}'s next message. Output only the message itself — "
-        "no name prefix, no quotation marks, no narration, and no explanation "
-        f"of what you wrote.{length_line}",
+        "Write your next message. Output only the message itself — no name "
+        "prefix, no quotation marks, no narration, and no explanation of what "
+        f"you wrote.{length_line}",
     ]
 
     return [
         {"role": "system", "content": "\n".join(lines)},
-        {"role": "user", "content": f"Write {user_label}'s next message."},
+        {"role": "user", "content": "Write your next message."},
     ]
 
 

@@ -512,9 +512,15 @@ The "All Personas" room cannot carry a profile, since it has no entry of its own
 ## Writing your own lines with help
 
 The pencil button beside the send arrow drafts **your** next message and puts it in the
-input box. It reads your own recent messages as a guide to voice, vocabulary and length,
-plus your character profile and the conversation so far, so the draft sounds like you
-rather than like an assistant.
+input box.
+
+It draws on two things, for two different reasons. Your **character description** decides
+what you would say — your manner, what you care about, how someone like you would react to
+what was just said. Your **own recent messages** decide how you would say it: vocabulary,
+sentence shape, how much you usually write. It also sees the conversation so far and who
+else is in the room, so the draft sounds like you rather than like an assistant.
+
+Without a character set for the room it still works, going on your past messages alone.
 
 It goes into the input box, never straight into the chat — edit it, send it, echo it, or
 clear it. Nothing is sent or saved until you press send.
