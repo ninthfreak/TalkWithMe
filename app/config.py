@@ -193,7 +193,14 @@ class GeneralConfig(BaseModel):
     """Application-wide feature flags and preferences."""
     persona_name_mentions: bool = True
     max_persona_replies: int = Field(default=1, ge=1, le=6)
-    max_turns_for_context: int = Field(default=6, ge=1, le=50, description="Max history turns sent to the LLM")
+    max_turns_for_context: int = Field(
+        default=6, ge=1, le=50,
+        description=(
+            "How many recent exchanges to send to the LLM. One exchange is a "
+            "human message plus every persona reply it drew, so this does not "
+            "shrink as more personas answer."
+        ),
+    )
     show_tool_calls: bool = True
     # Fallback tier, and the only one the implicit "default" room can use
     # (it has no chatrooms.yaml entry to carry an override).

@@ -27,7 +27,7 @@ from app.config import (
     resolve_typical_length,
 )
 from app.models import ChatRequest
-from app.session import session
+from app.session import recent_exchanges, session
 from app.services.llm import chat_completion, stream_chat, stream_chat_with_tools
 from app.services.reply_guard import ReplyGuard, stop_sequences
 from app.services.tool_registry import get_all_tools
@@ -227,9 +227,10 @@ def _build_router_prompt(user_message: str, chat_room: str) -> list[dict]:
         f"- {p.name}: {p.router_hints}" for p in active_personas
     )
 
-    # Include last N conversation turns for context
+    # Same windowing as the reply prompt: whole exchanges, so the router
+    # never sees answers whose question has been cut away.
     max_context = get_settings().general.max_turns_for_context
-    recent = session.history[-max_context:]
+    recent = recent_exchanges(session.history, max_context)
     context_lines = []
     for msg in recent:
         if msg.role == "user":

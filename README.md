@@ -452,6 +452,22 @@ thought inviting them to finish it.
 None of this is configurable; it applies to every room except echo chamber rooms, where
 nothing is generated in the first place.
 
+## How much the personas remember
+
+Personas are sent the last few **exchanges** of the conversation, set by *Exchanges of
+Context* in the settings dialog (default 6).
+
+An exchange is one message from you plus every reply it drew. That distinction matters as
+soon as more than one persona answers: if the window counted individual messages instead,
+a six-persona room would burn a whole setting of 6 on a single question and its answers,
+and anything before it would be gone. Asking a room to guess something and then revealing
+the answer would leave the personas reacting to the reveal without ever having seen the
+question — reading it as a remark from nowhere.
+
+Counting exchanges keeps a question and the answers it drew together, and the window no
+longer shrinks as you add personas to a room. Raise the number if you want them to
+remember further back; the cost is a longer prompt on every reply.
+
 ## Playing a character yourself
 
 By default the personas know nothing about you — you are just "the user". A chat room can

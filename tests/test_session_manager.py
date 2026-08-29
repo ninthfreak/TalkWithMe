@@ -270,3 +270,135 @@ class TestUserLabel:
             "[Alex]: North.",
             "[Sig]: Mistake.",
         ]
+
+
+class TestExchangeWindowing:
+    """Context is windowed by exchange, never by raw message count.
+
+    Reported: a room was asked to guess something, six personas guessed,
+    and the answer was then revealed — but the personas treated the reveal
+    as a statement out of nowhere. A flat tail slice of six *messages* in a
+    six-persona room cannot even hold one exchange, so the question that
+    prompted the guesses had already fallen out of the window.
+    """
+
+    def _guessing_game(self, manager, personas=6):
+        manager.add_user_message_no_persist("Guess what animal I'm thinking of.")
+        for i in range(personas):
+            manager.add_assistant_message_no_persist(f"A badger.", f"P{i}")
+        manager.add_user_message_no_persist("It was an otter.")
+
+    def test_the_question_survives_a_wide_room(self, manager):
+        self._guessing_game(manager)
+        messages = manager.build_llm_messages(
+            "sys", "P0", max_turns_for_context=6, user_label="Tony"
+        )
+        contents = [m["content"] for m in messages]
+        assert "[Tony]: Guess what animal I'm thinking of." in contents
+        assert "[Tony]: It was an otter." in contents
+
+    def test_one_exchange_of_context_still_holds_every_reply(self, manager):
+        # Even at the minimum, an exchange is kept whole.
+        self._guessing_game(manager)
+        messages = manager.build_llm_messages(
+            "sys", "P0", max_turns_for_context=1, user_label="Tony"
+        )
+        # The last exchange is the reveal, which has no replies yet.
+        assert [m["content"] for m in messages[1:]] == ["[Tony]: It was an otter."]
+
+    def test_two_exchanges_keeps_the_question_and_all_its_answers(self, manager):
+        self._guessing_game(manager)
+        messages = manager.build_llm_messages(
+            "sys", "P9", max_turns_for_context=2, user_label="Tony"
+        )
+        contents = [m["content"] for m in messages[1:]]
+        assert contents[0] == "[Tony]: Guess what animal I'm thinking of."
+        assert contents[-1] == "[Tony]: It was an otter."
+        assert len(contents) == 8   # question + 6 guesses + reveal
+
+    def test_older_exchanges_are_dropped_whole(self, manager):
+        for i in range(5):
+            manager.add_user_message_no_persist(f"question {i}")
+            manager.add_assistant_message_no_persist(f"answer {i}", "P0")
+
+        messages = manager.build_llm_messages(
+            "sys", "P1", max_turns_for_context=2, user_label="Tony"
+        )
+        contents = [m["content"] for m in messages[1:]]
+        # Two complete exchanges, oldest first — never half of one.
+        assert contents == [
+            "[Tony]: question 3", "[P0]: answer 3",
+            "[Tony]: question 4", "[P0]: answer 4",
+        ]
+
+    def test_window_does_not_shrink_as_personas_are_added(self, manager):
+        # The bug in one line: the same setting used to buy less context in
+        # a bigger room. It must not.
+        for personas in (1, 6):
+            m = SessionManager()
+            m.add_user_message_no_persist("the question")
+            for i in range(personas):
+                m.add_assistant_message_no_persist("a reply", f"P{i}")
+            m.add_user_message_no_persist("the reveal")
+            contents = [
+                x["content"]
+                for x in m.build_llm_messages("sys", "Z", max_turns_for_context=2,
+                                              user_label="Tony")
+            ]
+            assert "[Tony]: the question" in contents, f"lost with {personas} personas"
+
+    def test_history_shorter_than_the_window_is_kept_entirely(self, manager):
+        manager.add_user_message_no_persist("only question")
+        manager.add_assistant_message_no_persist("only answer", "P0")
+        messages = manager.build_llm_messages("sys", "P1", max_turns_for_context=10)
+        assert len(messages) == 3
+
+    def test_no_limit_keeps_everything(self, manager):
+        self._guessing_game(manager)
+        messages = manager.build_llm_messages("sys", "P0", max_turns_for_context=None)
+        assert len(messages) == 9
+
+
+class TestContextCharBudget:
+    """A safety valve, not the main control — but it must shed whole
+    exchanges and never the human message anchoring the last one."""
+
+    def test_oldest_exchanges_go_first(self):
+        from app.session import recent_exchanges
+        from app.models import ChatMessage
+
+        history = []
+        for i in range(5):
+            history.append(ChatMessage(role="user", content=f"q{i} " + "x" * 500))
+            history.append(ChatMessage(role="assistant", content="a" * 500, persona="P"))
+
+        window = recent_exchanges(history, max_exchanges=50, char_budget=2200)
+
+        assert len(window) < len(history)
+        assert window[0].role == "user"              # starts on a whole exchange
+        assert window[-1].content.startswith("a")    # keeps the newest
+
+    def test_the_last_human_message_is_never_dropped(self):
+        from app.session import recent_exchanges
+        from app.models import ChatMessage
+
+        history = [ChatMessage(role="user", content="the question " + "x" * 200)]
+        history += [
+            ChatMessage(role="assistant", content="y" * 400, persona=f"P{i}")
+            for i in range(6)
+        ]
+
+        window = recent_exchanges(history, max_exchanges=50, char_budget=500)
+
+        assert window[0].role == "user"
+        assert window[0].content.startswith("the question")
+
+    def test_a_window_inside_budget_is_untouched(self):
+        from app.session import recent_exchanges
+        from app.models import ChatMessage
+
+        history = [
+            ChatMessage(role="user", content="q"),
+            ChatMessage(role="assistant", content="a", persona="P"),
+        ]
+        assert recent_exchanges(history, max_exchanges=10) == history
