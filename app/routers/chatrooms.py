@@ -37,6 +37,7 @@ def _to_response(room: ChatRoom) -> ChatRoomResponse:
     return ChatRoomResponse(
         name=room.name,
         persona_names=list(room.persona_names),
+        echo_chamber=room.echo_chamber,
         typical_length=room.typical_length,
         require_player_profile=room.require_player_profile,
         player_profile=room.player_profile,
@@ -91,6 +92,7 @@ def list_all_chatrooms():
         ChatRoomResponse(
             name=DEFAULT_ROOM,
             persona_names=all_persona_names,
+            echo_chamber=False,
             typical_length=get_settings().general.typical_length,
         )
     ]
@@ -160,6 +162,7 @@ def get_chatroom(name: str):
         return ChatRoomResponse(
             name=DEFAULT_ROOM,
             persona_names=all_persona_names,
+            echo_chamber=False,
             typical_length=get_settings().general.typical_length,
         )
 

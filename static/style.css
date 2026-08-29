@@ -1416,8 +1416,3 @@ html, body {
     color: var(--text-primary);
     background: var(--bg-hover);
 }
-
-/* Echo action in the input bar, beside the mic and send buttons. */
-#btn-echo {
-    font-size: 1.1rem;
-}

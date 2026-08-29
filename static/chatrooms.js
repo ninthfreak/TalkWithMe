@@ -95,6 +95,12 @@ function applyChatRoomFilter() {
     // Update dropdown selection
     chatRoomDropdown.value = currentChatRoom;
 
+    // Update echo chamber checkbox state (case-insensitive, matching backend behavior)
+    const roomInfo = allChatRooms.find(r => r.name.toLowerCase() === currentChatRoom.toLowerCase());
+    const echoEnabled = roomInfo ? roomInfo.echo_chamber : false;
+    echoChamberToggle.checked = echoEnabled;
+    echoChamberToggle.disabled = !isActiveRoom;
+
     applyPlayerProfileControls(isActiveRoom);
 }
 
@@ -125,6 +131,11 @@ function setupChatRoomEventListeners() {
     // Dropdown change: switch rooms
     chatRoomDropdown.addEventListener("change", () => {
         switchChatRoom(chatRoomDropdown.value);
+    });
+
+    // Echo chamber toggle
+    echoChamberToggle.addEventListener("change", () => {
+        updateEchoChamber(currentChatRoom, echoChamberToggle.checked);
     });
 
     // "Add persona" button in sidebar
@@ -187,6 +198,30 @@ async function switchChatRoom(roomName) {
 
     // Re-apply filter
     applyChatRoomFilter();
+}
+
+/**
+ * Persist echo chamber toggle for the current chat room.
+ */
+async function updateEchoChamber(roomName, enabled) {
+    if (roomName === "default") {
+        // Default room cannot be modified
+        echoChamberToggle.checked = false;
+        return;
+    }
+    // Skip no-op to avoid unnecessary PUTs (and handle case-insensitive room matching)
+    const currentRoom = allChatRooms.find(r => r.name.toLowerCase() === roomName.toLowerCase());
+    if (currentRoom && currentRoom.echo_chamber === enabled) {
+        return;
+    }
+    try {
+        await saveRoomSettings(roomName, { echo_chamber: enabled });
+        // Reload from server to sync all state (persona lists, echo flag, etc.)
+        await loadChatRooms();
+    } catch (err) {
+        console.error("Update echo chamber error:", err);
+        echoChamberToggle.checked = !enabled;
+    }
 }
 
 /**
@@ -687,6 +722,7 @@ function openRoomEditor(roomName) {
 
     document.getElementById("re-title").textContent = `Edit “${room.name}”`;
     reTypicalLength.value = room.typical_length || "normal";
+    reEchoChamber.checked = !!room.echo_chamber;
     reRequireProfile.checked = !!room.require_player_profile;
     document.getElementById("re-personas").textContent =
         room.persona_names.length
@@ -732,6 +768,7 @@ async function submitRoomEditor(e) {
     // control and the field.
     const patch = {
         typical_length: reTypicalLength.value,
+        echo_chamber: reEchoChamber.checked,
         require_player_profile: reRequireProfile.checked,
     };
 
