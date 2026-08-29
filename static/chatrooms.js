@@ -328,10 +328,11 @@ function renderChatRoomList() {
    max_tokens down to shorten replies is what cut personas off mid-sentence
    and made the next one continue the unfinished thought. */
 const TYPICAL_LENGTH_OPTIONS = [
-    ["terse", "Terse"],
-    ["brief", "Brief"],
-    ["normal", "Normal"],
-    ["detailed", "Detailed"],
+    ["terse", "Terse — a few words"],
+    ["brief", "Brief — one sentence"],
+    ["normal", "Normal — a sentence or two"],
+    ["detailed", "Detailed — two or three"],
+    ["verbose", "Verbose — a paragraph"],
     ["unrestricted", "Unrestricted"],
 ];
 

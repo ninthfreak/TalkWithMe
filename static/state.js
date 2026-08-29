@@ -95,7 +95,7 @@ const pfAvatarImage = document.getElementById("pf-avatar-image");
 const pfReferenceAudio = document.getElementById("pf-reference-audio");
 const pfReferenceAudioTx = document.getElementById("pf-reference-audio-transcript");
 const pfAllowToolCalls = document.getElementById("pf-allow-tool-calls");
-const pfTypicalLength = document.getElementById("pf-typical-length");
+const pfLengthBias = document.getElementById("pf-length-bias");
 const gsfTypicalLength = document.getElementById("gsf-typical-length");
 
 // Player profile (the human's character in the current room)

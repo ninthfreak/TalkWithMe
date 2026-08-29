@@ -5,7 +5,8 @@ chat_rooms: []
 # - name: debate-club
 #   persona_names: [Alex, Luna]
 #   echo_chamber: false
-#   # terse | brief | normal | detailed | unrestricted
+#   # Calibrated for chat: normal is a sentence or two.
+#   # terse | brief | normal | detailed | verbose | unrestricted
 #   typical_length: brief
 #   # Refuse messages until player_profile has a name and a description.
 #   require_player_profile: false

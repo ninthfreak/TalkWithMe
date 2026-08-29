@@ -133,3 +133,44 @@ def test_labels_point_at_elements_that_exist():
     html = INDEX_HTML.read_text(encoding="utf-8")
     dangling = sorted({f for f in re.findall(r'<label for="([^"]+)"', html) if f not in ids})
     assert not dangling, f"<label for=...> targets with no matching id: {dangling}"
+
+
+# ---------------------------------------------------------------------------
+# Enum options offered by the UI must match the enums the API accepts
+# ---------------------------------------------------------------------------
+#
+# The selects are hand-written HTML/JS, so a renamed or added enum member
+# drifts silently: the UI keeps offering a value the API now rejects, or
+# quietly hides one it accepts. Both fail only when a user clicks.
+
+CHATROOMS_JS = STATIC_DIR / "chatrooms.js"
+
+
+def _select_options(html: str, select_id: str) -> set[str]:
+    block = re.search(
+        rf'<select id="{re.escape(select_id)}">(.*?)</select>', html, re.DOTALL
+    )
+    assert block, f"no <select id={select_id}> in index.html"
+    return set(re.findall(r'<option value="([^"]*)"', block.group(1)))
+
+
+def test_room_length_selects_offer_every_tier():
+    from app.config import TypicalLength
+
+    expected = {t.value for t in TypicalLength}
+    html = INDEX_HTML.read_text(encoding="utf-8")
+
+    assert _select_options(html, "gsf-typical-length") == expected
+
+    # The per-room select in the chat room editor is built in JS.
+    js = CHATROOMS_JS.read_text(encoding="utf-8")
+    listed = re.search(r"const TYPICAL_LENGTH_OPTIONS = \[(.*?)\];", js, re.DOTALL)
+    assert listed, "TYPICAL_LENGTH_OPTIONS not found in chatrooms.js"
+    assert set(re.findall(r'\["([^"]+)"', listed.group(1))) == expected
+
+
+def test_persona_length_bias_select_offers_every_bias():
+    from app.config import LengthBias
+
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert _select_options(html, "pf-length-bias") == {b.value for b in LengthBias}
