@@ -1,4 +1,12 @@
-# Room dynamics
+# Room dynamics (parked roadmap)
+
+> **Status: parked.** This was scoped as one pass and is too large for one.
+> The work actually being done first is in
+> [`feature_response_control.md`](feature_response_control.md), which takes the
+> minimum slice of §2 (a roster and the room rules) that persona containment needs.
+> The rest below — per-room reply counts, @mentions, follow-up routing, and ambient
+> rounds — is kept as a roadmap, not a commitment, and should be re-scoped before any
+> of it is built.
 
 This document describes an addition to the TalkWithMe app.
 
