@@ -62,18 +62,43 @@ Most settings can be changed in the UI. Behind the scenes, configuration is stor
 - `chatrooms.yaml` stores configured chat rooms (if any)
 - `personas.yaml` stores all personas
 
-These three files hold your own rooms, personas, and server addresses, so they are
-**gitignored** and never committed. Tracked alongside them are `settings.yaml.example`,
-`personas.yaml.example`, and `chatrooms.yaml.example` — copy one to the matching name to
-start from it:
+Those three names appear twice, and the difference matters:
 
-```bash
-cp settings.yaml.example settings.yaml
+| Where | What it is |
+|-------|------------|
+| `config/settings.yaml`, `config/personas.yaml`, `config/chatrooms.yaml` | **Your** live config. The app reads and writes only these. Gitignored. |
+| `settings.yaml`, `personas.yaml`, `chatrooms.yaml` at the repo root | The shipped starting points. Tracked by git, and never written to. |
+
+On first run the app copies anything it finds at the repo root into `config/`, upgrading
+it to the current schema on the way, and logs what it changed. Your existing setup
+carries over untouched — you do not have to move anything by hand.
+
+The root copies are deliberately left tracked and unmodified. Untracking them would make
+your next `git pull` try to *delete* files you had edited locally, which git refuses:
+
+```
+error: Your local changes to the following files would be overwritten by merge:
+        chatrooms.yaml
+        personas.yaml
+        settings.yaml
 ```
 
-None of the three is required. With no config files present the app starts on built-in
-defaults with an empty persona list, and writes each file the first time you save from
-the UI.
+Because the app no longer touches them, once `config/` exists you can safely discard any
+local edits to the root copies with `git restore settings.yaml personas.yaml
+chatrooms.yaml` and never see that message again.
+
+Nothing is required to run: with no config at all the app starts on built-in defaults
+with an empty persona list, and writes `config/` the first time you save from the UI.
+
+### Old config files
+
+Every file the app writes carries a `schema_version`, and older files are upgraded when
+they load — you never have to hand-edit YAML after an update. Renamed keys are carried
+across, and settings that changed shape are translated rather than dropped: a persona
+that used to carry an absolute `typical_length: terse`, for example, becomes
+`length_bias: much_shorter`, keeping it the short-spoken one relative to its room. Every
+change is logged at startup. A file written by a *newer* version of the app still loads,
+with a warning that some settings may be ignored.
 
 ### Server settings
 
@@ -373,13 +398,13 @@ at both ends, so a laconic persona in an already-terse room is simply terse, not
 and an unrestricted room ignores the nudge entirely (there is no target to be relative to).
 
 ```yaml
-# chatrooms.yaml — the room sets the register
+# config/chatrooms.yaml — the room sets the register
 chat_rooms:
   - name: debate-club
     persona_names: [Alex, Sig]
     typical_length: normal
 
-# personas.yaml — the persona sits relative to it
+# config/personas.yaml — the persona sits relative to it
 personas:
   - name: Sig
     length_bias: much_shorter
@@ -449,7 +474,7 @@ Treat Kira as that character: react to who they are and how they look, and addre
 them by name. Never write their lines for them.
 ```
 
-The profile lives in `chatrooms.yaml`, which is gitignored — it stays on your machine.
+The profile lives in `config/chatrooms.yaml`, which is gitignored — it stays on your machine.
 The "All Personas" room cannot carry a profile, since it has no entry of its own.
 
 ## Echo chamber

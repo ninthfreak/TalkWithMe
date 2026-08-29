@@ -5,16 +5,16 @@ tests/__pycache__/
 future*.md
 chatrooms/
 
-# Local config: your rooms, personas and server URLs stay on your machine.
-# Templates are tracked as *.yaml.example; the app also runs fine with none
-# of these present (it falls back to defaults and an empty persona list).
-settings.yaml
-personas.yaml
-chatrooms.yaml
-# ...and any backup/variant copies alongside them.
+# Live config: your rooms, personas and server URLs. The app reads and
+# writes config/ and never touches the tracked *.yaml files at the repo
+# root, which stay as shipped starting points. Keeping the root files
+# tracked is deliberate: untracking them made `git pull` try to delete
+# files people had edited locally, which git refuses ("Your local changes
+# would be overwritten by merge").
+config/
+# Backup/variant copies alongside the root files.
 personas.yaml.*
 chatrooms.yaml.*
 settings.yaml.*
-!*.yaml.example
 testsetup.sh
 restore.sh

@@ -436,8 +436,10 @@ class TestTypicalLengthPersistence:
         assert "length_bias: much_shorter" in target.read_text()
         assert load_personas(target).personas[0].length_bias is LengthBias.MUCH_SHORTER
 
-    def test_legacy_persona_typical_length_is_dropped_not_fatal(self, tmp_path, caplog):
-        # The absolute per-persona tier is gone; an old file must still load.
+    def test_legacy_persona_typical_length_becomes_a_bias(self, tmp_path, caplog):
+        # The absolute per-persona tier is gone, but it encoded an intent
+        # ("longer than usual"), so that intent carries over rather than
+        # being dropped.
         target = tmp_path / "personas.yaml"
         target.write_text(
             "personas:\n- name: Alex\n  system_prompt: hi\n  typical_length: detailed\n"
@@ -445,8 +447,8 @@ class TestTypicalLengthPersistence:
         with caplog.at_level("INFO"):
             persona = load_personas(target).personas[0]
 
-        assert persona.length_bias is LengthBias.MATCH
-        assert "no longer supported" in caplog.text
+        assert persona.length_bias is LengthBias.LONGER
+        assert "typical_length: detailed" in caplog.text
 
 
 class TestPlayerProfile:

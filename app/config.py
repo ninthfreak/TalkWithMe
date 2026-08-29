@@ -13,6 +13,13 @@ from typing import Dict, List, NamedTuple, Optional
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from app.config_migrations import (
+    CONFIG_SCHEMA_VERSION,
+    migrate_chatrooms,
+    migrate_personas,
+    migrate_settings,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -336,19 +343,79 @@ def resolve_typical_length(
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Live config lives in config/, which git never tracked and .gitignore
+# excludes. The identically-named files at the repo root are the *shipped*
+# starting points and stay tracked: untracking them made `git pull` try to
+# delete files people had edited locally, which git refuses outright
+# ("Your local changes to the following files would be overwritten by
+# merge"). Nothing the app writes ever touches them again.
+_CONFIG_DIR_NAME = "config"
+
+SETTINGS_FILE = "settings.yaml"
+PERSONAS_FILE = "personas.yaml"
+CHATROOMS_FILE = "chatrooms.yaml"
+
 _settings_cache: Optional[AppSettings] = None
 _personas_cache: Optional[PersonasConfig] = None
 _chatrooms_cache: Optional[ChatRoomsConfig] = None
 
 
+def config_dir() -> Path:
+    """Directory holding the live config. Resolved per call, not at import,
+    so tests can repoint _PROJECT_ROOT."""
+    return _PROJECT_ROOT / _CONFIG_DIR_NAME
+
+
+def legacy_path(filename: str) -> Path:
+    """Where this file lived before config/ existed: the repo root."""
+    return _PROJECT_ROOT / filename
+
+
+def config_path(filename: str) -> Path:
+    """The live path for *filename*, preferring config/.
+
+    Falls back to the repo-root copy when config/ has nothing yet, so an
+    existing install keeps working on the very first run after upgrading —
+    ``migrate_config_files()`` then moves it across properly.
+    """
+    live = config_dir() / filename
+    if live.exists():
+        return live
+    return legacy_path(filename)
+
+
+def _read_raw(target: Path) -> dict:
+    with open(target) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _log_notes(filename: str, notes: list) -> None:
+    for note in notes:
+        logger.info("Migrated %s: %s", filename, note)
+
+
+def _write_raw(target: Path, raw: dict) -> None:
+    """Write *raw* to *target*, creating config/ if needed.
+
+    schema_version leads the file so a human opening it can see which
+    schema it is in without reading to the bottom.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    ordered = {"schema_version": CONFIG_SCHEMA_VERSION}
+    ordered.update({k: v for k, v in raw.items() if k != "schema_version"})
+    with open(target, "w") as f:
+        yaml.dump(ordered, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
 def load_settings(path: Optional[Path] = None) -> AppSettings:
-    """Parse settings.yaml. Falls back to defaults if file is missing."""
+    """Parse settings.yaml. Falls back to defaults if the file is missing."""
     global _settings_cache
-    target = path or _PROJECT_ROOT / "settings.yaml"
+    target = path or config_path(SETTINGS_FILE)
     if not target.exists():
         return AppSettings()
-    with open(target) as f:
-        raw = yaml.safe_load(f) or {}
+    raw, notes = migrate_settings(_read_raw(target))
+    _log_notes(SETTINGS_FILE, notes)
     _settings_cache = AppSettings(
         llm=LLMSettings(**raw.get("llm", {})),
         tts=TTSConfig(**raw.get("tts", {})),
@@ -360,40 +427,36 @@ def load_settings(path: Optional[Path] = None) -> AppSettings:
 
 
 def load_personas(path: Optional[Path] = None) -> PersonasConfig:
-    """Parse personas.yaml. Returns empty list if file is missing.
+    """Parse personas.yaml. Returns an empty list if the file is missing.
 
-    Migrates the legacy 'language' key to 'reference_audio_language' on the
-    fly, so existing personas.yaml files from before the rename still load
-    without requiring manual edits.
+    Legacy keys are rewritten in the raw dict first (see
+    app/config_migrations.py), so a file from any earlier release loads
+    without hand-editing.
     """
     global _personas_cache
-    target = path or _PROJECT_ROOT / "personas.yaml"
+    target = path or config_path(PERSONAS_FILE)
     if not target.exists():
         return PersonasConfig()
-    with open(target) as f:
-        raw = yaml.safe_load(f) or {}
-    migrated = []
-    for p in raw.get("personas", []):
-        if "typical_length" in p:
-            # Superseded by length_bias, which is relative to the room. An
-            # absolute tier cannot be mapped onto a relative one without
-            # knowing the room, so it is dropped — loudly, not silently.
-            logger.info(
-                "Persona '%s': 'typical_length: %s' is no longer supported; "
-                "personas now use 'length_bias' relative to the room. "
-                "Defaulting to 'match'.",
-                p.get("name", "<unknown>"), p.pop("typical_length"),
-            )
-        if "language" in p and "reference_audio_language" not in p:
-            name = p.get("name", "<unknown>")
-            logger.info(
-                "Persona '%s': migrating legacy 'language' key to 'reference_audio_language'",
-                name,
-            )
-            p["reference_audio_language"] = p.pop("language")
-        migrated.append(p)
-    _personas_cache = PersonasConfig(personas=[Persona(**p) for p in migrated])
+    raw, notes = migrate_personas(_read_raw(target))
+    _log_notes(PERSONAS_FILE, notes)
+    _personas_cache = PersonasConfig(
+        personas=[Persona(**p) for p in raw.get("personas", [])]
+    )
     return _personas_cache
+
+
+def load_chatrooms(path: Optional[Path] = None) -> ChatRoomsConfig:
+    """Parse chatrooms.yaml. Returns an empty config if the file is missing."""
+    global _chatrooms_cache
+    target = path or config_path(CHATROOMS_FILE)
+    if not target.exists():
+        return ChatRoomsConfig()
+    raw, notes = migrate_chatrooms(_read_raw(target))
+    _log_notes(CHATROOMS_FILE, notes)
+    _chatrooms_cache = ChatRoomsConfig(
+        chat_rooms=[ChatRoom(**cr) for cr in raw.get("chat_rooms", [])]
+    )
+    return _chatrooms_cache
 
 
 def get_settings() -> AppSettings:
@@ -410,39 +473,6 @@ def get_personas() -> PersonasConfig:
     return _personas_cache
 
 
-def save_personas(config: PersonasConfig, path: Optional[Path] = None) -> None:
-    """Serialize PersonasConfig back to personas.yaml and update the in-memory cache."""
-    global _personas_cache
-    target = path or _PROJECT_ROOT / "personas.yaml"
-    # mode="json" keeps enums as plain strings; a bare model_dump() would
-    # write a Python object tag into the YAML.
-    raw = {
-        "personas": [
-            p.model_dump(mode="json", exclude_none=False)
-            for p in config.personas
-        ]
-    }
-    with open(target, "w") as f:
-        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    _personas_cache = config
-
-
-def save_settings(config: AppSettings, path: Optional[Path] = None) -> None:
-    """Serialize AppSettings back to settings.yaml and update the in-memory cache."""
-    global _settings_cache
-    target = path or _PROJECT_ROOT / "settings.yaml"
-    raw = {
-        "llm": config.llm.model_dump(mode="json", exclude_none=False),
-        "tts": config.tts.model_dump(mode="json", exclude_none=False),
-        "stt": config.stt.model_dump(mode="json", exclude_none=False),
-        "general": config.general.model_dump(mode="json", exclude_none=False),
-        "mcp": config.mcp.model_dump(mode="json", exclude_none=False),
-    }
-    with open(target, "w") as f:
-        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    _settings_cache = config
-
-
 def get_chatrooms() -> ChatRoomsConfig:
     """Return cached chat rooms, loading if necessary."""
     if _chatrooms_cache is None:
@@ -450,33 +480,68 @@ def get_chatrooms() -> ChatRoomsConfig:
     return _chatrooms_cache
 
 
-def load_chatrooms(path: Optional[Path] = None) -> ChatRoomsConfig:
-    """Parse chatrooms.yaml. Returns empty config if file is missing."""
-    global _chatrooms_cache
-    target = path or _PROJECT_ROOT / "chatrooms.yaml"
-    if not target.exists():
-        return ChatRoomsConfig()
-    with open(target) as f:
-        raw = yaml.safe_load(f) or {}
-    _chatrooms_cache = ChatRoomsConfig(
-        chat_rooms=[ChatRoom(**cr) for cr in raw.get("chat_rooms", [])]
-    )
-    return _chatrooms_cache
+def save_personas(config: PersonasConfig, path: Optional[Path] = None) -> None:
+    """Write personas.yaml into config/ and update the in-memory cache."""
+    global _personas_cache
+    target = path or config_dir() / PERSONAS_FILE
+    # mode="json" keeps enums as plain strings; a bare model_dump() would
+    # write a Python object tag into the YAML.
+    _write_raw(target, {
+        "personas": [p.model_dump(mode="json", exclude_none=False) for p in config.personas]
+    })
+    _personas_cache = config
+
+
+def save_settings(config: AppSettings, path: Optional[Path] = None) -> None:
+    """Write settings.yaml into config/ and update the in-memory cache."""
+    global _settings_cache
+    target = path or config_dir() / SETTINGS_FILE
+    _write_raw(target, {
+        "llm": config.llm.model_dump(mode="json", exclude_none=False),
+        "tts": config.tts.model_dump(mode="json", exclude_none=False),
+        "stt": config.stt.model_dump(mode="json", exclude_none=False),
+        "general": config.general.model_dump(mode="json", exclude_none=False),
+        "mcp": config.mcp.model_dump(mode="json", exclude_none=False),
+    })
+    _settings_cache = config
 
 
 def save_chatrooms(config: ChatRoomsConfig, path: Optional[Path] = None) -> None:
-    """Serialize ChatRoomsConfig back to chatrooms.yaml and update the in-memory cache."""
+    """Write chatrooms.yaml into config/ and update the in-memory cache."""
     global _chatrooms_cache
-    target = path or _PROJECT_ROOT / "chatrooms.yaml"
-    raw = {
-        "chat_rooms": [
-            cr.model_dump(mode="json", exclude_none=False)
-            for cr in config.chat_rooms
-        ]
-    }
-    with open(target, "w") as f:
-        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    target = path or config_dir() / CHATROOMS_FILE
+    _write_raw(target, {
+        "chat_rooms": [cr.model_dump(mode="json", exclude_none=False) for cr in config.chat_rooms]
+    })
     _chatrooms_cache = config
+
+
+def migrate_config_files() -> list:
+    """Copy any repo-root config into config/, upgrading the schema.
+
+    Runs once at startup. It **copies**, never moves or deletes: the root
+    files are tracked by git, and removing them is exactly what produced
+    "Your local changes to the following files would be overwritten by
+    merge" on the next pull. After this runs the root copies are inert —
+    edits there are ignored, and `git restore` on them is safe.
+
+    Returns the list of filenames that were migrated, for logging.
+    """
+    migrated = []
+    for filename, migrate in (
+        (SETTINGS_FILE, migrate_settings),
+        (PERSONAS_FILE, migrate_personas),
+        (CHATROOMS_FILE, migrate_chatrooms),
+    ):
+        live = config_dir() / filename
+        legacy = legacy_path(filename)
+        if live.exists() or not legacy.exists():
+            continue
+        raw, notes = migrate(_read_raw(legacy))
+        _log_notes(filename, notes)
+        _write_raw(live, raw)
+        migrated.append(filename)
+    return migrated
 
 
 def reload_all():
