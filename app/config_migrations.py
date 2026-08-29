@@ -29,13 +29,12 @@ logger = logging.getLogger(__name__)
 # 2 = personas use length_bias (relative) instead of typical_length
 #     (absolute); rooms gained typical_length / player_profile; the length
 #     scale was recalibrated for chat.
-# 3 = no structural change. A version 3 briefly removed the room-level
-#     echo_chamber flag; that was reverted, so nothing is rewritten. The
-#     number is *not* rolled back to 2, because files stamped 3 by the
-#     short-lived version would otherwise warn "newer than this app
-#     understands" on every load. Rooms that were migrated while it was in
-#     place lost their echo_chamber flag and default to off.
-CONFIG_SCHEMA_VERSION = 3
+# 3 = no structural change (a removal that was reverted; the number is
+#     kept so files stamped by it do not warn on every load).
+# 4 = echo_chamber is not a room attribute. The Echo chamber checkbox under
+#     the chat room selector is client-side UI state, sent with each
+#     message — the room never knew about it.
+CONFIG_SCHEMA_VERSION = 4
 
 Notes = List[str]
 Step = Callable[[dict], Tuple[dict, Notes]]
@@ -140,6 +139,25 @@ def _personas_v1_to_v2(raw: dict) -> Tuple[dict, Notes]:
 _PERSONA_STEPS: Dict[int, Step] = {1: _personas_v1_to_v2}
 
 
+def _chatrooms_v3_to_v4(raw: dict) -> Tuple[dict, Notes]:
+    """Drop echo_chamber from stored rooms.
+
+    The checkbox stays exactly where it was, under the chat room selector,
+    but it is UI state rather than something the room owns: the left panel
+    holds controls you use *while in* a room, which is not the same as
+    settings that belong *to* the room.
+    """
+    notes: Notes = []
+    for room in raw.get("chat_rooms") or []:
+        if isinstance(room, dict) and "echo_chamber" in room:
+            was = room.pop("echo_chamber")
+            notes.append(
+                f"{room.get('name', '<unknown>')}: dropped 'echo_chamber: {was}' "
+                "— the Echo chamber checkbox is UI state now, not a room setting"
+            )
+    return raw, notes
+
+
 def migrate_personas(raw: dict) -> Tuple[dict, Notes]:
     """Bring a raw personas.yaml dict up to the current schema."""
     return _apply(raw, _PERSONA_STEPS)
@@ -154,9 +172,12 @@ def migrate_personas(raw: dict) -> Tuple[dict, Notes]:
 # go through _apply so the stamp is added and a future step has somewhere
 # to live.
 
+_CHATROOM_STEPS: Dict[int, Step] = {3: _chatrooms_v3_to_v4}
+
+
 def migrate_chatrooms(raw: dict) -> Tuple[dict, Notes]:
     """Bring a raw chatrooms.yaml dict up to the current schema."""
-    return _apply(raw, {})
+    return _apply(raw, _CHATROOM_STEPS)
 
 
 def migrate_settings(raw: dict) -> Tuple[dict, Notes]:

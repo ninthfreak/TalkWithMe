@@ -26,6 +26,15 @@ class ChatRequest(BaseModel):
         default=None,
         description="Frontend-generated UUID for this message (for audio association)",
     )
+    echo: bool = Field(
+        default=False,
+        description=(
+            "Echo this message back verbatim in a persona's voice instead of "
+            "answering it. Driven by the Echo chamber checkbox in the left "
+            "panel, which is client-side UI state — echoing is not something "
+            "the room knows about."
+        ),
+    )
 
 
 class SuggestReplyRequest(BaseModel):
@@ -300,7 +309,6 @@ class ChatRoomResponse(BaseModel):
     """A chat room returned to the frontend."""
     name: str
     persona_names: List[str] = Field(default_factory=list)
-    echo_chamber: bool = False
     typical_length: TypicalLength = TypicalLength.NORMAL
     require_player_profile: bool = False
     player_profile: PlayerProfile = Field(default_factory=PlayerProfile)
@@ -345,6 +353,5 @@ class ChatRoomUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     typical_length: Optional[TypicalLength] = None
-    echo_chamber: Optional[bool] = None
     require_player_profile: Optional[bool] = None
     player_profile: Optional[PlayerProfileRequest] = None

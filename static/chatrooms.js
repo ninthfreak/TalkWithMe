@@ -95,11 +95,9 @@ function applyChatRoomFilter() {
     // Update dropdown selection
     chatRoomDropdown.value = currentChatRoom;
 
-    // Update echo chamber checkbox state (case-insensitive, matching backend behavior)
-    const roomInfo = allChatRooms.find(r => r.name.toLowerCase() === currentChatRoom.toLowerCase());
-    const echoEnabled = roomInfo ? roomInfo.echo_chamber : false;
-    echoChamberToggle.checked = echoEnabled;
-    echoChamberToggle.disabled = !isActiveRoom;
+    // The echo chamber checkbox is deliberately untouched here: it is UI
+    // state, not room config, so switching rooms neither loads nor resets
+    // it, and it works in every room including "default".
 
     applyPlayerProfileControls(isActiveRoom);
 }
@@ -134,10 +132,6 @@ function setupChatRoomEventListeners() {
     });
 
     // Echo chamber toggle
-    echoChamberToggle.addEventListener("change", () => {
-        updateEchoChamber(currentChatRoom, echoChamberToggle.checked);
-    });
-
     // "Add persona" button in sidebar
     btnAddPersona.addEventListener("click", openPersonaPicker);
 
@@ -198,30 +192,6 @@ async function switchChatRoom(roomName) {
 
     // Re-apply filter
     applyChatRoomFilter();
-}
-
-/**
- * Persist echo chamber toggle for the current chat room.
- */
-async function updateEchoChamber(roomName, enabled) {
-    if (roomName === "default") {
-        // Default room cannot be modified
-        echoChamberToggle.checked = false;
-        return;
-    }
-    // Skip no-op to avoid unnecessary PUTs (and handle case-insensitive room matching)
-    const currentRoom = allChatRooms.find(r => r.name.toLowerCase() === roomName.toLowerCase());
-    if (currentRoom && currentRoom.echo_chamber === enabled) {
-        return;
-    }
-    try {
-        await saveRoomSettings(roomName, { echo_chamber: enabled });
-        // Reload from server to sync all state (persona lists, echo flag, etc.)
-        await loadChatRooms();
-    } catch (err) {
-        console.error("Update echo chamber error:", err);
-        echoChamberToggle.checked = !enabled;
-    }
 }
 
 /**
@@ -598,8 +568,6 @@ function applyPlayerProfileControls(isActiveRoom) {
     const room = currentRoomInfo();
     const profile = (room && room.player_profile) || emptyProfile();
 
-    requireProfileToggle.checked = room ? !!room.require_player_profile : false;
-    requireProfileToggle.disabled = !isActiveRoom;
     btnPlayerProfile.disabled = !isActiveRoom;
 
     // Showing the character's name doubles as confirmation it was saved.
@@ -677,25 +645,8 @@ async function savePlayerProfile(e) {
     }
 }
 
-async function updateRequirePlayerProfile(enabled) {
-    const room = currentRoomInfo();
-    if (!room || room.require_player_profile === enabled) return;
-    try {
-        await saveRoomSettings(room.name, { require_player_profile: enabled });
-        applyPlayerProfileControls(true);
-        // Turning the requirement on with nothing filled in should say so
-        // now, rather than at the moment the next message is refused.
-        if (profileRequiredButMissing()) openPlayerProfile();
-    } catch (err) {
-        console.error("Failed to update profile requirement:", err);
-        requireProfileToggle.checked = room.require_player_profile;
-    }
-}
-
 function setupPlayerProfileEventListeners() {
     btnPlayerProfile.addEventListener("click", openPlayerProfile);
-    requireProfileToggle.addEventListener("change", () =>
-        updateRequirePlayerProfile(requireProfileToggle.checked));
     document.getElementById("pp-profile-form").addEventListener("submit", savePlayerProfile);
     document.getElementById("pp-profile-btn-close").addEventListener("click", closePlayerProfile);
     document.getElementById("pp-profile-btn-cancel").addEventListener("click", closePlayerProfile);
@@ -722,7 +673,6 @@ function openRoomEditor(roomName) {
 
     document.getElementById("re-title").textContent = `Edit “${room.name}”`;
     reTypicalLength.value = room.typical_length || "normal";
-    reEchoChamber.checked = !!room.echo_chamber;
     reRequireProfile.checked = !!room.require_player_profile;
     document.getElementById("re-personas").textContent =
         room.persona_names.length
@@ -768,7 +718,6 @@ async function submitRoomEditor(e) {
     // control and the field.
     const patch = {
         typical_length: reTypicalLength.value,
-        echo_chamber: reEchoChamber.checked,
         require_player_profile: reRequireProfile.checked,
     };
 

@@ -343,12 +343,13 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     # Add user message to history (persisted automatically)
     session.add_user_message(req.message, user_message_id)
 
-    echo_enabled = room.echo_chamber if room else False
     user_label = _user_label(room)
 
-    # Echo chamber overrides max_replies — only one persona echoes the user.
-    # Multiple identical echoes from different personas would be pointless noise.
-    if echo_enabled:
+    # Echo comes from the request, because the Echo chamber checkbox is
+    # client-side UI state rather than something stored on the room. Only
+    # one persona echoes — several identical echoes would be noise — so it
+    # overrides max_replies for this turn.
+    if req.echo:
         max_replies = 1
 
     # A cut reply costs an attempt but not a slot. Tracking attempts per
@@ -396,7 +397,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
 
         truncated = False
 
-        if echo_enabled:
+        if req.echo:
             # Echo chamber: bypass the LLM entirely and return the user's message verbatim.
             # No preamble, no length tier, no guard — nothing was generated.
             full_text = req.message

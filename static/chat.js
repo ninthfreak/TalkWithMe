@@ -133,6 +133,9 @@ async function sendMessage() {
                 who_answers: who,
                 chat_room: currentChatRoom,
                 message_id: pendingUserMessageId,
+                // Straight off the checkbox: echoing is a mode the user is
+                // in, not something stored against the room.
+                echo: echoChamberToggle.checked,
             }),
         });
 

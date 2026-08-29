@@ -122,7 +122,7 @@ class TestLegacyChatroomsAndSettings:
         target = tmp_path / "chatrooms.yaml"
         target.write_text(LEGACY_CHATROOMS)
         room = load_chatrooms(target).chat_rooms[0]
-        assert room.echo_chamber is True                       # preserved
+        assert room.persona_names == ["Alex", "Luna"]          # preserved
         assert room.typical_length is TypicalLength.NORMAL     # defaulted
         assert room.require_player_profile is False
         assert room.player_profile.name == ""
@@ -244,40 +244,41 @@ class TestPathResolution:
         assert [p.name for p in load_personas().personas] == ["Alex", "Luna", "Sam"]
 
 
-class TestEchoChamberSurvives:
-    """echo_chamber is a room setting again after a brief removal.
+class TestEchoChamberIsNotRoomState:
+    """The Echo chamber checkbox stays under the chat room selector, but it
+    is UI state: the left panel holds controls you use *while in* a room,
+    which is not the same as settings belonging *to* the room."""
 
-    A version 3 dropped it; that was reverted. The version number stays at
-    3 so files stamped by the short-lived version do not warn on every
-    load, and no step rewrites rooms, so the flag is carried through.
-    """
-
-    @pytest.mark.parametrize("header", ["", "schema_version: 2\n"])
-    def test_the_flag_is_preserved_however_the_file_is_stamped(self, tmp_path, header):
+    def test_a_room_with_echo_chamber_still_loads(self, tmp_path):
         target = tmp_path / "chatrooms.yaml"
         target.write_text(
-            header + "chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n"
-            "  echo_chamber: true\n"
+            "chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n  echo_chamber: true\n"
         )
-        assert load_chatrooms(target).chat_rooms[0].echo_chamber is True
+        room = load_chatrooms(target).chat_rooms[0]
+        assert room.persona_names == ["Alex"]
+        assert not hasattr(room, "echo_chamber")
 
-    def test_a_file_stamped_by_the_reverted_version_loads_without_warning(
-        self, tmp_path, caplog
-    ):
-        target = tmp_path / "chatrooms.yaml"
-        target.write_text(
-            "schema_version: 3\nchat_rooms:\n- name: TNG\n  persona_names: [Alex]\n"
-        )
-        with caplog.at_level("WARNING"):
-            room = load_chatrooms(target).chat_rooms[0]
+    @pytest.mark.parametrize("version", [None, 2, 3])
+    def test_the_key_is_dropped_from_any_earlier_version(self, version):
+        raw = {"chat_rooms": [{"name": "TNG", "echo_chamber": True}]}
+        if version is not None:
+            raw["schema_version"] = version
 
-        assert room.name == "TNG"
-        assert room.echo_chamber is False   # the removal dropped it; defaults off
-        assert "newer than this app understands" not in caplog.text
+        migrated, notes = migrate_chatrooms(raw)
 
-    def test_no_chatroom_migration_rewrites_rooms(self):
-        raw, notes = migrate_chatrooms(
-            {"chat_rooms": [{"name": "TNG", "echo_chamber": True}]}
-        )
-        assert raw["chat_rooms"][0]["echo_chamber"] is True
+        assert "echo_chamber" not in migrated["chat_rooms"][0]
+        assert migrated["schema_version"] == CONFIG_SCHEMA_VERSION
+        assert any("echo_chamber" in n for n in notes)
+
+    def test_other_room_settings_are_untouched(self):
+        migrated, _ = migrate_chatrooms({"chat_rooms": [
+            {"name": "TNG", "echo_chamber": True, "typical_length": "brief",
+             "require_player_profile": True},
+        ]})
+        room = migrated["chat_rooms"][0]
+        assert room["typical_length"] == "brief"
+        assert room["require_player_profile"] is True
+
+    def test_rooms_without_the_key_produce_no_notes(self):
+        _, notes = migrate_chatrooms({"chat_rooms": [{"name": "TNG"}]})
         assert notes == []

@@ -100,12 +100,10 @@ const pfLengthBias = document.getElementById("pf-length-bias");
 const gsfTypicalLength = document.getElementById("gsf-typical-length");
 
 // Player profile (the human's character in the current room)
-const requireProfileToggle = document.getElementById("require-profile-toggle");
 const btnPlayerProfile = document.getElementById("btn-player-profile");
 const playerProfileWrapper = document.getElementById("player-profile-wrapper");
 const roomEditOverlay = document.getElementById("room-edit-overlay");
 const reTypicalLength = document.getElementById("re-typical-length");
-const reEchoChamber = document.getElementById("re-echo-chamber");
 const reRequireProfile = document.getElementById("re-require-profile");
 const playerProfileOverlay = document.getElementById("player-profile-overlay");
 const ppfName = document.getElementById("ppf-name");

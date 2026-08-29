@@ -305,7 +305,6 @@ class ChatRoom(BaseModel):
     """A named grouping of personas."""
     name: str
     persona_names: List[str] = Field(default_factory=list)
-    echo_chamber: bool = False
     typical_length: TypicalLength = TypicalLength.NORMAL
     # When true, the room refuses messages until player_profile is complete.
     require_player_profile: bool = False

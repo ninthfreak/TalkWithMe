@@ -223,8 +223,8 @@ Selecting the "Chat rooms" control in the top right brings up the chat room edit
 Here, you can:
 
 - **Create** a new chat room (names must be unique)
-- **Edit** a room's settings — typical response length, echo chamber, and whether the
-  room requires your character. This is the place to change how an existing room
+- **Edit** a room's settings — typical response length and whether the room requires
+  your character. This is the place to change how an existing room
   behaves, and new room options will appear here as they are added.
 - **Delete** a chat room (and its chat history)
 
@@ -238,7 +238,6 @@ chat_rooms:
   - Troi
   - Data
   - Picard
-  echo_chamber: false
 - name: Language_learning
   persona_names:
   - English expert
@@ -247,7 +246,6 @@ chat_rooms:
 - name: chit-chat
   persona_names:
   - kstew
-  echo_chamber: true
 ```
 
 Personas can be added/removed to a chat room via the main chat interface's left panel:
@@ -452,8 +450,8 @@ name has that prefix removed. And if a reply *does* hit the token ceiling, the n
 persona is handed it trimmed to its last complete sentence, so there is no dangling
 thought inviting them to finish it.
 
-None of this is configurable; it applies to every room except echo chamber rooms, where
-nothing is generated in the first place.
+None of this is configurable; it applies to every reply, except an echoed message,
+where nothing is generated in the first place.
 
 ## How much the personas remember
 
@@ -529,9 +527,13 @@ it. Nothing is sent or saved until you press send.
 
 ## Echo chamber
 
-Enabling the "echo chamber" option in a chat room will cause the responding persona to simply echo back
-whatever you type or speak, verbatim. This is useful with TTS servers, if you want to hear a persona
-speak a specific line of dialogue. This option is disabled by default.
+The **Echo chamber** checkbox under the chat room selector makes the responding persona
+echo back whatever you type or speak, verbatim, instead of answering it. It is useful with
+TTS servers when you want to hear a persona speak a specific line of dialogue.
+
+It is a control, not a room setting: it applies to whatever you send while it is ticked,
+it stays as you left it when you switch rooms, and it works in "All Personas" too. It is
+off by default and is not saved between sessions.
 
 ## Detailed setup guide
 
