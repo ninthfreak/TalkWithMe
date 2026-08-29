@@ -303,6 +303,8 @@ function renderChatRoomList() {
         countEl.className = "cr-list-item-count";
         countEl.textContent = `${room.persona_names.length} persona${room.persona_names.length !== 1 ? 's' : ''}`;
 
+        const lengthEl = createTypicalLengthSelect(room);
+
         const deleteBtn = document.createElement("button");
         deleteBtn.className = "cr-list-item-delete";
         deleteBtn.textContent = "Delete";
@@ -311,8 +313,58 @@ function renderChatRoomList() {
 
         item.appendChild(nameEl);
         item.appendChild(countEl);
+        item.appendChild(lengthEl);
         item.appendChild(deleteBtn);
         crListEl.appendChild(item);
+    }
+}
+
+/* Typical response length is what shapes reply length, via an instruction
+   in the persona's prompt. It is deliberately not a token count: clamping
+   max_tokens down to shorten replies is what cut personas off mid-sentence
+   and made the next one continue the unfinished thought. */
+const TYPICAL_LENGTH_OPTIONS = [
+    ["terse", "Terse"],
+    ["brief", "Brief"],
+    ["normal", "Normal"],
+    ["detailed", "Detailed"],
+    ["unrestricted", "Unrestricted"],
+];
+
+function createTypicalLengthSelect(room) {
+    const select = document.createElement("select");
+    select.className = "cr-list-item-length";
+    select.title = `Typical response length for "${room.name}"`;
+    for (const [value, label] of TYPICAL_LENGTH_OPTIONS) {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = label;
+        select.appendChild(opt);
+    }
+    select.value = room.typical_length || "normal";
+    select.addEventListener("change", () => updateTypicalLength(room, select));
+    return select;
+}
+
+async function updateTypicalLength(room, select) {
+    const previous = room.typical_length || "normal";
+    if (select.value === previous) return;
+    try {
+        const resp = await fetch(
+            `/api/chatrooms/${encodeURIComponent(room.name)}/typical-length`,
+            {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ typical_length: select.value }),
+            }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        // Keep the cached room in sync so reopening the editor shows the
+        // saved value rather than a stale one.
+        room.typical_length = select.value;
+    } catch (err) {
+        console.error("Failed to update typical length:", err);
+        select.value = previous;
     }
 }
 

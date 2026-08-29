@@ -44,6 +44,7 @@ class TestGetSettings:
             "max_persona_replies": 1,
             "max_turns_for_context": 6,
             "show_tool_calls": True,
+            "typical_length": "normal",
         }
 
 
@@ -102,6 +103,7 @@ class TestUpdateSettings:
             "max_persona_replies": 3,         # preserved
             "max_turns_for_context": 12,      # preserved
             "show_tool_calls": False,         # updated
+            "typical_length": "normal",       # preserved
         }
 
     def test_missing_general_section_preserves_everything(self, client, monkeypatch):
@@ -125,6 +127,7 @@ class TestUpdateSettings:
             "max_persona_replies": 4,
             "max_turns_for_context": 9,
             "show_tool_calls": False,
+            "typical_length": "normal",
         }
 
     def test_mcp_section_carried_over_from_current_config(self, client, monkeypatch):

@@ -24,16 +24,29 @@ from app.services.tool_registry import get_server_for_tool
 logger = logging.getLogger(__name__)
 
 
-def _base_payload(messages: List[dict]) -> dict:
-    """Common /v1/chat/completions payload fields (model, sampling, streaming)."""
+def _base_payload(
+    messages: List[dict],
+    max_tokens: Optional[int] = None,
+    stop: Optional[List[str]] = None,
+) -> dict:
+    """Common /v1/chat/completions payload fields (model, sampling, streaming).
+
+    *max_tokens* overrides the configured ceiling for this call — the chat
+    flow derives it from the room/persona length tier. *stop* carries the
+    other room personas' speaker prefixes so the backend stops before
+    continuing someone else's turn.
+    """
     settings = get_settings()
-    return {
+    payload = {
         "model": settings.llm.model,
         "messages": messages,
-        "max_tokens": settings.llm.max_tokens,
+        "max_tokens": max_tokens if max_tokens is not None else settings.llm.max_tokens,
         "temperature": settings.llm.temperature,
         "stream": True,
     }
+    if stop:
+        payload["stop"] = stop
+    return payload
 
 
 async def _iter_completion_chunks(payload: dict) -> AsyncGenerator[dict, None]:
@@ -64,16 +77,32 @@ async def _iter_completion_chunks(payload: dict) -> AsyncGenerator[dict, None]:
 
 async def stream_chat(
     messages: List[Dict[str, str]],
-) -> AsyncGenerator[str, None]:
-    """Stream tokens from the LLM's /v1/chat/completions endpoint.
+    max_tokens: Optional[int] = None,
+    stop: Optional[List[str]] = None,
+) -> AsyncGenerator[dict, None]:
+    """Stream a reply from the LLM's /v1/chat/completions endpoint.
 
-    Yields individual token strings as they arrive.
+    Yields event dicts, matching the shape stream_chat_with_tools() uses so
+    the chat router can treat both paths identically:
+
+      {"type": "token", "token": str}
+      {"type": "finish", "reason": str | None}   — exactly one, last
+
+    The trailing "finish" event is what makes truncation detectable:
+    reason == "length" means the reply was cut off at max_tokens, and the
+    caller must mark it so the next persona is not handed a dangling
+    sentence to complete.
     """
-    payload = _base_payload(messages)
+    payload = _base_payload(messages, max_tokens=max_tokens, stop=stop)
+    finish_reason: Optional[str] = None
     async for choice in _iter_completion_chunks(payload):
         token = (choice.get("delta") or {}).get("content") or ""
         if token:
-            yield token
+            yield {"type": "token", "token": token}
+        # Intermediate chunks carry null; keep the last non-null value.
+        if choice.get("finish_reason"):
+            finish_reason = choice["finish_reason"]
+    yield {"type": "finish", "reason": finish_reason}
 
 
 async def chat_completion(messages: List[Dict[str, str]], max_tokens: int = 64) -> str:
@@ -174,6 +203,8 @@ def _try_parse_arguments(raw: str) -> Optional[dict]:
 async def stream_chat_with_tools(
     messages: List[dict],
     tools: List[dict],
+    max_tokens: Optional[int] = None,
+    stop: Optional[List[str]] = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream a persona reply, running an agentic MCP tool-call loop.
 
@@ -181,6 +212,7 @@ async def stream_chat_with_tools(
       {"type": "token", "token": str}
       {"type": "tool_call", "tool_name": str, "arguments": dict,
        "result": str, "failed": bool}
+      {"type": "finish", "reason": str | None}   — exactly one, last
 
     The loop continues while the LLM answers with tool_calls, up to
     mcp.max_tool_iterations tool rounds. The FINAL round is sent without
@@ -199,7 +231,7 @@ async def stream_chat_with_tools(
     conversation = list(messages)
     for round_num in range(max_iterations + 1):
         is_final_round = round_num == max_iterations
-        payload = _base_payload(conversation)
+        payload = _base_payload(conversation, max_tokens=max_tokens, stop=stop)
         if tool_list and not is_final_round:
             payload["tools"] = tool_list
 
@@ -219,7 +251,9 @@ async def stream_chat_with_tools(
                 finish_reason = choice["finish_reason"]
 
         if not pending_tool_calls:
-            return  # Plain text response — the loop is done.
+            # Plain text response — the loop is done.
+            yield {"type": "finish", "reason": finish_reason}
+            return
 
         # Pathological case: the model emitted tool calls even though no
         # tools were offered on the final round. Executing hallucinated
@@ -228,6 +262,7 @@ async def stream_chat_with_tools(
             logger.warning(
                 "LLM still emitted tool calls on the final (tool-less) round; stopping"
             )
+            yield {"type": "finish", "reason": finish_reason}
             return
 
         tool_calls = [

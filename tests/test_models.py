@@ -147,6 +147,7 @@ class TestGeneralSettingsRequestPartialUpdate:
             "max_persona_replies": None,
             "max_turns_for_context": None,
             "show_tool_calls": None,
+            "typical_length": None,
         }
 
     def test_general_settings_request_exclude_none_drops_omitted_fields(self):

@@ -1361,3 +1361,13 @@ html, body {
 .audio-play-btn:active {
     transform: scale(0.95);
 }
+
+/* Per-room typical response length, in the chat room editor rows.
+   The name cell already takes the free space (flex: 1), so this just
+   needs to hold its own width between the count and the delete button. */
+.cr-list-item-length {
+    flex-shrink: 0;
+    max-width: 9rem;
+    font-size: 0.75rem;
+    padding: 2px 4px;
+}

@@ -4,6 +4,8 @@ from typing import List, Optional, Literal
 
 from pydantic import BaseModel, Field
 
+from app.config import TypicalLength
+
 
 # ---------------------------------------------------------------------------
 # Request models
@@ -45,6 +47,8 @@ class PersonaCreateRequest(BaseModel):
     reference_audio_transcript: Optional[str] = None
     reference_audio_language: str = Field(default="en", min_length=2, max_length=2)
     allow_tool_calls: bool = False
+    # None inherits the room's tier.
+    typical_length: Optional[TypicalLength] = None
 
 
 class PersonaUpdateRequest(PersonaCreateRequest):
@@ -92,6 +96,7 @@ class PersonaDetailResponse(BaseModel):
     reference_audio_transcript: Optional[str] = None
     reference_audio_language: str
     allow_tool_calls: bool = False
+    typical_length: Optional[TypicalLength] = None
     tts_capable: bool = False
 
 
@@ -206,6 +211,7 @@ class GeneralSettingsRequest(BaseModel):
     max_persona_replies: Optional[int] = Field(default=None, ge=1, le=4)
     max_turns_for_context: Optional[int] = Field(default=None, ge=1, le=50)
     show_tool_calls: Optional[bool] = None
+    typical_length: Optional[TypicalLength] = None
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -248,6 +254,7 @@ class GeneralSettingsResponse(BaseModel):
     max_persona_replies: int
     max_turns_for_context: int
     show_tool_calls: bool
+    typical_length: TypicalLength
 
 
 class SettingsResponse(BaseModel):
@@ -268,6 +275,11 @@ class ChatMessage(BaseModel):
     content: str
     # Which persona produced this message (only set for assistant messages)
     persona: Optional[str] = None
+    # True when the LLM stopped at max_tokens rather than finishing. Affects
+    # only how the message is rendered to *other* personas (see
+    # build_llm_messages) — never what is displayed or persisted. Kept out of
+    # the on-disk format: it is a property of one generation, not the message.
+    truncated: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +291,7 @@ class ChatRoomResponse(BaseModel):
     name: str
     persona_names: List[str] = Field(default_factory=list)
     echo_chamber: bool = False
+    typical_length: TypicalLength = TypicalLength.NORMAL
 
 
 class ChatRoomCreateRequest(BaseModel):
@@ -294,3 +307,8 @@ class AssignPersonasRequest(BaseModel):
 class EchoChamberRequest(BaseModel):
     """Toggle echo chamber mode for a chat room."""
     echo_chamber: bool
+
+
+class TypicalLengthRequest(BaseModel):
+    """Set a chat room's typical response length tier."""
+    typical_length: TypicalLength

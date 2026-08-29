@@ -17,6 +17,13 @@ from app.config import (
     PersonasConfig,
     STTConfig,
     TTSConfig,
+    TypicalLength,
+    derive_max_tokens,
+    load_chatrooms,
+    load_personas,
+    resolve_typical_length,
+    save_chatrooms,
+    save_personas,
 )
 from tests.factories import make_chatrooms, make_personas, make_settings
 
@@ -273,3 +280,87 @@ class TestCaching:
         assert app_config.get_settings().llm.base_url == "http://reloaded:1"
         assert [p.name for p in app_config.get_personas().personas] == ["Fresh"]
         assert [r.name for r in app_config.get_chatrooms().chat_rooms] == ["NewRoom"]
+
+
+# ---------------------------------------------------------------------------
+# Typical response length
+# ---------------------------------------------------------------------------
+
+class TestTypicalLengthDefaults:
+    def test_persona_defaults_to_inheriting(self):
+        assert Persona(name="A", system_prompt="p").typical_length is None
+
+    def test_room_and_global_default_to_normal(self):
+        assert ChatRoom(name="R").typical_length is TypicalLength.NORMAL
+        assert GeneralConfig().typical_length is TypicalLength.NORMAL
+
+
+class TestResolveTypicalLength:
+    def test_persona_override_wins(self):
+        persona = Persona(name="A", system_prompt="p", typical_length=TypicalLength.TERSE)
+        room = ChatRoom(name="R", typical_length=TypicalLength.DETAILED)
+        assert resolve_typical_length(persona, room, TypicalLength.BRIEF) is TypicalLength.TERSE
+
+    def test_room_wins_when_persona_inherits(self):
+        persona = Persona(name="A", system_prompt="p")
+        room = ChatRoom(name="R", typical_length=TypicalLength.DETAILED)
+        assert resolve_typical_length(persona, room, TypicalLength.BRIEF) is TypicalLength.DETAILED
+
+    def test_global_used_when_there_is_no_room(self):
+        # room=None is the implicit "default" room: no entry, no override.
+        persona = Persona(name="A", system_prompt="p")
+        assert resolve_typical_length(persona, None, TypicalLength.BRIEF) is TypicalLength.BRIEF
+
+
+class TestDeriveMaxTokens:
+    def test_cap_sits_well_above_the_word_target(self):
+        # ~120 words at NORMAL; the cap must not be shaping replies.
+        assert derive_max_tokens(TypicalLength.NORMAL, 1024) == 504
+
+    def test_short_tiers_share_the_floor(self):
+        # Below the floor the cap would start truncating again, which is the
+        # failure this feature removes. The prompt line separates the tiers.
+        assert derive_max_tokens(TypicalLength.TERSE, 1024) == 256
+        assert derive_max_tokens(TypicalLength.BRIEF, 1024) == 256
+
+    def test_configured_ceiling_is_never_exceeded(self):
+        assert derive_max_tokens(TypicalLength.DETAILED, 1024) == 1024
+        assert derive_max_tokens(TypicalLength.NORMAL, 300) == 300
+
+    def test_unrestricted_uses_the_ceiling_unchanged(self):
+        assert derive_max_tokens(TypicalLength.UNRESTRICTED, 777) == 777
+
+
+class TestTypicalLengthPersistence:
+    def test_absent_keys_load_as_defaults(self, tmp_path):
+        # Files written before this feature must load unchanged.
+        (tmp_path / "personas.yaml").write_text(
+            "personas:\n- name: Alex\n  system_prompt: hi\n"
+        )
+        (tmp_path / "chatrooms.yaml").write_text(
+            "chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n"
+        )
+        personas = load_personas(tmp_path / "personas.yaml")
+        rooms = load_chatrooms(tmp_path / "chatrooms.yaml")
+
+        assert personas.personas[0].typical_length is None
+        assert rooms.chat_rooms[0].typical_length is TypicalLength.NORMAL
+
+    def test_round_trips_as_a_plain_string(self, tmp_path):
+        target = tmp_path / "chatrooms.yaml"
+        save_chatrooms(
+            ChatRoomsConfig(chat_rooms=[
+                ChatRoom(name="TNG", typical_length=TypicalLength.TERSE)
+            ]),
+            target,
+        )
+        # A bare model_dump() would write a Python enum tag here.
+        assert "typical_length: terse" in target.read_text()
+        assert load_chatrooms(target).chat_rooms[0].typical_length is TypicalLength.TERSE
+
+    def test_persona_none_round_trips(self, tmp_path):
+        target = tmp_path / "personas.yaml"
+        save_personas(
+            PersonasConfig(personas=[Persona(name="Alex", system_prompt="hi")]), target
+        )
+        assert load_personas(target).personas[0].typical_length is None

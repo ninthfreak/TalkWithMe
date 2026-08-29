@@ -140,6 +140,18 @@
                         <span class="field-hint">This persona may invoke tools from MCP servers configured in settings.yaml</span>
                     </div>
                     <div class="form-row">
+                        <label for="pf-typical-length">Typical Response Length</label>
+                        <select id="pf-typical-length">
+                            <option value="">Use room default</option>
+                            <option value="terse">Terse &mdash; one or two short sentences</option>
+                            <option value="brief">Brief &mdash; two to four sentences</option>
+                            <option value="normal">Normal &mdash; a short paragraph</option>
+                            <option value="detailed">Detailed &mdash; a few paragraphs</option>
+                            <option value="unrestricted">Unrestricted &mdash; no guidance</option>
+                        </select>
+                        <span class="field-hint">Overrides the room&rsquo;s setting for this persona only. Longer replies are still allowed when the situation calls for it.</span>
+                    </div>
+                    <div class="form-row">
                         <label for="pf-avatar-color">Avatar Color</label>
                         <input id="pf-avatar-color" type="color" value="#FF0000">
                     </div>
@@ -269,6 +281,7 @@
                             <div class="form-col">
                                 <label for="sf-llm-max-tokens">Max Tokens</label>
                                 <input id="sf-llm-max-tokens" type="number" min="1" required>
+                                <span class="field-hint">A hard ceiling, not a style control. To shorten replies use Typical Response Length &mdash; lowering this cuts personas off mid-sentence.</span>
                             </div>
                             <div class="form-col">
                                 <label for="sf-llm-temperature">Temperature</label>

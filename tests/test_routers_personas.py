@@ -233,3 +233,38 @@ class TestGetAvatar:
     def test_unknown_persona_avatar_404(self, client):
         resp = client.get("/api/personas/NoSuchOne/avatar")
         assert resp.status_code == 404
+
+
+class TestCascadePreservesRoomSettings:
+    """Renaming or deleting a persona must not reset the rooms it touches.
+
+    The cascades used to rebuild each ChatRoom from just name +
+    persona_names, which silently reset echo_chamber (and would have reset
+    typical_length) on every rename and delete.
+    """
+
+    def _configure_room(self, client):
+        client.put("/api/chatrooms/TNG/echo-chamber", json={"echo_chamber": True})
+        client.put(
+            "/api/chatrooms/TNG/typical-length", json={"typical_length": "terse"}
+        )
+
+    def test_rename_preserves_room_settings(self, client):
+        self._configure_room(client)
+        detail = client.get("/api/personas/Alex/detail").json()
+        detail["name"] = "Alexander"
+        assert client.put("/api/personas/Alex", json=detail).status_code == 200
+
+        body = client.get("/api/chatrooms/TNG").json()
+        assert body["persona_names"] == ["Alexander", "Luna"]
+        assert body["echo_chamber"] is True
+        assert body["typical_length"] == "terse"
+
+    def test_delete_preserves_room_settings(self, client):
+        self._configure_room(client)
+        assert client.delete("/api/personas/Alex").status_code == 204
+
+        body = client.get("/api/chatrooms/TNG").json()
+        assert body["persona_names"] == ["Luna"]
+        assert body["echo_chamber"] is True
+        assert body["typical_length"] == "terse"

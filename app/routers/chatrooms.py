@@ -16,6 +16,7 @@ from app.config import (
     ChatRoomsConfig,
     get_chatrooms,
     get_personas,
+    get_settings,
     save_chatrooms,
 )
 from app.models import (
@@ -23,6 +24,7 @@ from app.models import (
     ChatRoomCreateRequest,
     ChatRoomResponse,
     EchoChamberRequest,
+    TypicalLengthRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,12 @@ DEFAULT_ROOM = "default"
 
 
 def _to_response(room: ChatRoom) -> ChatRoomResponse:
-    return ChatRoomResponse(name=room.name, persona_names=list(room.persona_names), echo_chamber=room.echo_chamber)
+    return ChatRoomResponse(
+        name=room.name,
+        persona_names=list(room.persona_names),
+        echo_chamber=room.echo_chamber,
+        typical_length=room.typical_length,
+    )
 
 
 @router.get("", response_model=List[ChatRoomResponse])
@@ -48,7 +55,14 @@ def list_all_chatrooms():
     config = get_chatrooms()
     # "default" room always contains all configured personas
     all_persona_names = [p.name for p in get_personas().personas]
-    result = [ChatRoomResponse(name=DEFAULT_ROOM, persona_names=all_persona_names, echo_chamber=False)]
+    result = [
+        ChatRoomResponse(
+            name=DEFAULT_ROOM,
+            persona_names=all_persona_names,
+            echo_chamber=False,
+            typical_length=get_settings().general.typical_length,
+        )
+    ]
     result.extend(_to_response(r) for r in config.chat_rooms)
     return result
 
@@ -112,7 +126,12 @@ def get_chatroom(name: str):
     """Return a specific chat room's details, including 'default'."""
     if name.lower() == DEFAULT_ROOM:
         all_persona_names = [p.name for p in get_personas().personas]
-        return ChatRoomResponse(name=DEFAULT_ROOM, persona_names=all_persona_names, echo_chamber=False)
+        return ChatRoomResponse(
+            name=DEFAULT_ROOM,
+            persona_names=all_persona_names,
+            echo_chamber=False,
+            typical_length=get_settings().general.typical_length,
+        )
 
     config = get_chatrooms()
     room = next((r for r in config.chat_rooms if r.name.lower() == name.lower()), None)
@@ -150,7 +169,7 @@ def assign_personas(name: str, req: AssignPersonasRequest):
         if pname not in updated_names:
             updated_names.append(pname)
 
-    updated_room = ChatRoom(name=room.name, persona_names=updated_names, echo_chamber=room.echo_chamber)
+    updated_room = room.model_copy(update={"persona_names": updated_names})
     updated_rooms = [updated_room if r.name.lower() == room.name.lower() else r for r in config.chat_rooms]
     save_chatrooms(ChatRoomsConfig(chat_rooms=updated_rooms))
     return _to_response(updated_room)
@@ -171,7 +190,7 @@ def remove_persona_from_room(name: str, persona_name: str):
         raise HTTPException(status_code=404, detail=f"Chat room '{name}' not found.")
 
     updated_names = [p for p in room.persona_names if p != persona_name]
-    updated_room = ChatRoom(name=room.name, persona_names=updated_names, echo_chamber=room.echo_chamber)
+    updated_room = room.model_copy(update={"persona_names": updated_names})
     updated_rooms = [updated_room if r.name.lower() == room.name.lower() else r for r in config.chat_rooms]
     save_chatrooms(ChatRoomsConfig(chat_rooms=updated_rooms))
     return _to_response(updated_room)
@@ -189,11 +208,29 @@ def set_echo_chamber(name: str, req: EchoChamberRequest):
     room = next((r for r in config.chat_rooms if r.name.lower() == name.lower()), None)
     if not room:
         raise HTTPException(status_code=404, detail=f"Chat room '{name}' not found.")
-    updated_room = ChatRoom(
-        name=room.name,
-        persona_names=list(room.persona_names),
-        echo_chamber=req.echo_chamber,
-    )
+    updated_room = room.model_copy(update={"echo_chamber": req.echo_chamber})
+    updated_rooms = [updated_room if r.name.lower() == room.name.lower() else r for r in config.chat_rooms]
+    save_chatrooms(ChatRoomsConfig(chat_rooms=updated_rooms))
+    return _to_response(updated_room)
+
+
+@router.put("/{name}/typical-length", response_model=ChatRoomResponse)
+def set_typical_length(name: str, req: TypicalLengthRequest):
+    """Set a room's typical response length. Cannot modify the 'default' room.
+
+    "default" has no chatrooms.yaml entry to store an override in, so it
+    always reports the global general.typical_length instead.
+    """
+    if name.lower() == DEFAULT_ROOM:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The '{DEFAULT_ROOM}' chat room cannot be modified.",
+        )
+    config = get_chatrooms()
+    room = next((r for r in config.chat_rooms if r.name.lower() == name.lower()), None)
+    if not room:
+        raise HTTPException(status_code=404, detail=f"Chat room '{name}' not found.")
+    updated_room = room.model_copy(update={"typical_length": req.typical_length})
     updated_rooms = [updated_room if r.name.lower() == room.name.lower() else r for r in config.chat_rooms]
     save_chatrooms(ChatRoomsConfig(chat_rooms=updated_rooms))
     return _to_response(updated_room)

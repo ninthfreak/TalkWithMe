@@ -5,13 +5,79 @@ Caches parsed config so we're not hitting disk on every request.
 """
 
 import logging
+import math
+from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Typical response length
+# ---------------------------------------------------------------------------
+#
+# Length is shaped by a *prompt instruction*, not by max_tokens. Clamping
+# max_tokens down to shorten replies is what caused personas to be cut off
+# mid-sentence, which in turn is what made the next persona continue the
+# unfinished thought in the wrong voice. The tier below drives the prompt
+# line; the derived token cap is only a runaway guard.
+
+
+class TypicalLength(str, Enum):
+    """How long a persona's replies should typically be."""
+
+    TERSE = "terse"
+    BRIEF = "brief"
+    NORMAL = "normal"
+    DETAILED = "detailed"
+    UNRESTRICTED = "unrestricted"
+
+
+class LengthSpec(NamedTuple):
+    """A tier's word target and the phrasing used in the prompt.
+
+    words == 0 means "no guidance": no prompt line and no derived cap.
+    """
+
+    words: int
+    phrasing: str
+
+
+TYPICAL_LENGTH_SPECS: Dict[TypicalLength, LengthSpec] = {
+    TypicalLength.TERSE: LengthSpec(25, "one or two short sentences"),
+    TypicalLength.BRIEF: LengthSpec(60, "two to four sentences"),
+    TypicalLength.NORMAL: LengthSpec(120, "a short paragraph"),
+    TypicalLength.DETAILED: LengthSpec(250, "a few paragraphs"),
+    TypicalLength.UNRESTRICTED: LengthSpec(0, ""),
+}
+
+# Rough English tokens-per-word for the derived cap. Deliberately not a
+# setting — it is a constant of the encoding, not a preference.
+_TOKENS_PER_WORD = 1.4
+# The cap sits well above the target so "go longer when it genuinely needs
+# it" stays possible. Only a runaway reply should ever hit it.
+_LENGTH_HEADROOM = 3.0
+# Below this, the cap starts shaping replies again instead of guarding them
+# — which is the exact failure this feature exists to remove. TERSE and
+# BRIEF therefore share this floor; the prompt line is what separates them.
+_MIN_DERIVED_MAX_TOKENS = 256
+
+
+def derive_max_tokens(length: TypicalLength, ceiling: int) -> int:
+    """Token cap for a reply of the given tier, never above *ceiling*.
+
+    *ceiling* is settings.llm.max_tokens, which keeps its meaning as the
+    absolute maximum: this can only lower it, never raise it.
+    """
+    spec = TYPICAL_LENGTH_SPECS[length]
+    if spec.words == 0:
+        return ceiling
+    derived = math.ceil(spec.words * _TOKENS_PER_WORD * _LENGTH_HEADROOM)
+    return min(ceiling, max(derived, _MIN_DERIVED_MAX_TOKENS))
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +138,9 @@ class GeneralConfig(BaseModel):
     max_persona_replies: int = Field(default=1, ge=1, le=4)
     max_turns_for_context: int = Field(default=6, ge=1, le=50, description="Max history turns sent to the LLM")
     show_tool_calls: bool = True
+    # Fallback tier, and the only one the implicit "default" room can use
+    # (it has no chatrooms.yaml entry to carry an override).
+    typical_length: TypicalLength = TypicalLength.NORMAL
 
 
 class MCPServerConfig(BaseModel):
@@ -125,6 +194,9 @@ class Persona(BaseModel):
     reference_audio_transcript: Optional[str] = None
     reference_audio_language: str = "en"
     allow_tool_calls: bool = False
+    # None inherits the room's tier — a terse persona can stay terse in a
+    # room of ramblers, but most personas should just follow the room.
+    typical_length: Optional[TypicalLength] = None
 
     @property
     def tts_capable(self) -> bool:
@@ -145,10 +217,28 @@ class ChatRoom(BaseModel):
     name: str
     persona_names: List[str] = Field(default_factory=list)
     echo_chamber: bool = False
+    typical_length: TypicalLength = TypicalLength.NORMAL
 
 
 class ChatRoomsConfig(BaseModel):
     chat_rooms: List[ChatRoom] = Field(default_factory=list)
+
+
+def resolve_typical_length(
+    persona: Optional[Persona],
+    room: Optional[ChatRoom],
+    general_default: TypicalLength,
+) -> TypicalLength:
+    """Resolve the effective tier: persona override, else room, else global.
+
+    *room* is None for the implicit "default" room, which has no
+    chatrooms.yaml entry and therefore falls back to the global value.
+    """
+    if persona is not None and persona.typical_length is not None:
+        return persona.typical_length
+    if room is not None:
+        return room.typical_length
+    return general_default
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +314,11 @@ def save_personas(config: PersonasConfig, path: Optional[Path] = None) -> None:
     """Serialize PersonasConfig back to personas.yaml and update the in-memory cache."""
     global _personas_cache
     target = path or _PROJECT_ROOT / "personas.yaml"
+    # mode="json" keeps enums as plain strings; a bare model_dump() would
+    # write a Python object tag into the YAML.
     raw = {
         "personas": [
-            p.model_dump(exclude_none=False)
+            p.model_dump(mode="json", exclude_none=False)
             for p in config.personas
         ]
     }
@@ -240,11 +332,11 @@ def save_settings(config: AppSettings, path: Optional[Path] = None) -> None:
     global _settings_cache
     target = path or _PROJECT_ROOT / "settings.yaml"
     raw = {
-        "llm": config.llm.model_dump(exclude_none=False),
-        "tts": config.tts.model_dump(exclude_none=False),
-        "stt": config.stt.model_dump(exclude_none=False),
-        "general": config.general.model_dump(exclude_none=False),
-        "mcp": config.mcp.model_dump(exclude_none=False),
+        "llm": config.llm.model_dump(mode="json", exclude_none=False),
+        "tts": config.tts.model_dump(mode="json", exclude_none=False),
+        "stt": config.stt.model_dump(mode="json", exclude_none=False),
+        "general": config.general.model_dump(mode="json", exclude_none=False),
+        "mcp": config.mcp.model_dump(mode="json", exclude_none=False),
     }
     with open(target, "w") as f:
         yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -278,7 +370,7 @@ def save_chatrooms(config: ChatRoomsConfig, path: Optional[Path] = None) -> None
     target = path or _PROJECT_ROOT / "chatrooms.yaml"
     raw = {
         "chat_rooms": [
-            cr.model_dump(exclude_none=False)
+            cr.model_dump(mode="json", exclude_none=False)
             for cr in config.chat_rooms
         ]
     }
