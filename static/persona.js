@@ -17,7 +17,9 @@
  */
 function renderPersonaList(list, showRemoveButtons) {
     personaListEl.innerHTML = "";
-    const personaList = list || personas;
+    // Always render alphabetically (case-insensitive), regardless of the
+    // order the caller's list happens to be in.
+    const personaList = [...(list || personas)].sort(comparePersonasByName);
     const showRemove = !!showRemoveButtons;
 
     for (const p of personaList) {
@@ -156,7 +158,8 @@ async function renderPersonaEditorList() {
     try {
         const resp = await fetch("/api/personas");
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const list = await resp.json();
+        // Alphabetical (case-insensitive), not YAML/creation order.
+        const list = (await resp.json()).sort(comparePersonasByName);
         peListEl.innerHTML = "";
 
         if (list.length === 0) {
