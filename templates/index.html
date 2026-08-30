@@ -41,15 +41,8 @@
                     </select>
                 </div>
 
-                <div id="echo-chamber-wrapper">
-                    <label class="checkbox-option">
-                        <input type="checkbox" id="echo-chamber-toggle" title="While ticked, a persona repeats what you send back verbatim instead of answering it">
-                        <span>Echo chamber</span>
-                    </label>
-                </div>
-
-                <div id="player-profile-wrapper">
-                    <button id="btn-player-profile" class="btn-add-persona" title="Describe the character you play in this room">Your character&hellip;</button>
+                <div id="playing-as-wrapper">
+                    <button id="btn-playing-as" class="btn-add-persona" title="Play as one of the personas, or as yourself">Playing as&hellip;</button>
                 </div>
 
                 <h3>Who should answer?</h3>
@@ -289,13 +282,13 @@
                         <legend>Requiring a character</legend>
                         <div class="form-row">
                             <label class="settings-checkbox-label">
-                                <input id="re-require-profile" type="checkbox">
-                                <span>Require my character</span>
+                                <input id="re-require-persona" type="checkbox">
+                                <span>Require a character</span>
                             </label>
-                            <span class="field-hint">Refuse messages until your character has a name and a description.</span>
+                            <span class="field-hint">Refuse messages until you are playing as one of the personas.</span>
                         </div>
                         <div class="form-row">
-                            <span id="re-profile-summary" class="field-hint"></span>
+                            <span id="re-playing-as-summary" class="field-hint"></span>
                         </div>
                     </fieldset>
                     <fieldset class="settings-section">
@@ -314,34 +307,46 @@
         </div>
     </div>
 
-    <div id="player-profile-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pp-profile-title">
+    <div id="playing-as-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pa-title">
         <div class="modal-box">
             <div class="modal-header">
-                <h2 id="pp-profile-title">Your character</h2>
-                <button id="pp-profile-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
+                <h2 id="pa-title">Playing as</h2>
+                <button id="pa-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
             </div>
-            <div id="pp-profile-room" class="field-hint">This is your character everywhere; rooms can require it but do not own it.</div>
-            <div id="pp-profile-error" class="pe-form-error hidden"></div>
-            <form id="pp-profile-form" novalidate>
+            <div class="modal-intro field-hint">Adopt one of the personas and the others will treat you as that character. Whoever you play stops answering on their own &mdash; you are them. This follows you between rooms; a room can insist on it, but it is yours, not the room&rsquo;s.</div>
+            <div id="pa-error" class="pe-form-error hidden"></div>
+            <form id="pa-form" novalidate>
                 <div class="settings-body">
-                    <div class="form-row">
-                        <label for="ppf-name">Name <span class="required">*</span></label>
-                        <input id="ppf-name" type="text" maxlength="40" placeholder="What the personas should call you" required>
-                    </div>
-                    <div class="form-row">
-                        <label for="ppf-description">Who you are <span class="required">*</span></label>
-                        <textarea id="ppf-description" maxlength="2000" rows="6" placeholder="Your character: who they are, what they want, how they behave." required></textarea>
-                        <span class="field-hint">2000 chars max</span>
-                    </div>
-                    <div class="form-row">
-                        <label for="ppf-appearance">What you look like</label>
-                        <textarea id="ppf-appearance" maxlength="1000" rows="4" placeholder="Describe your appearance in words, e.g. &ldquo;tall, weathered, a long grey coat and a limp.&rdquo;"></textarea>
-                        <span class="field-hint">Optional. This is the &ldquo;picture&rdquo;, written out &mdash; the personas read it, so describe rather than upload.</span>
+                    <div id="pa-list" class="pa-list">
+                        <!-- Populated by JS -->
                     </div>
                 </div>
                 <div class="form-actions">
-                    <button type="button" id="pp-profile-btn-cancel" class="btn-secondary">Cancel</button>
-                    <button type="submit" id="pp-profile-btn-save" class="btn-accent">Save</button>
+                    <button type="button" id="pa-btn-cancel" class="btn-secondary">Cancel</button>
+                    <button type="submit" id="pa-btn-save" class="btn-accent">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="speak-as-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="sa-title">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2 id="sa-title">Speak as</h2>
+                <button id="sa-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
+            </div>
+            <div class="modal-intro field-hint">Put words in their mouth. This is posted as theirs, word for word &mdash; the LLM is not asked anything.</div>
+            <div id="sa-error" class="pe-form-error hidden"></div>
+            <form id="sa-form" novalidate>
+                <div class="settings-body">
+                    <div class="form-row">
+                        <label for="sa-text">What they say</label>
+                        <textarea id="sa-text" maxlength="8192" rows="6" placeholder="Their line, exactly as it should appear." required></textarea>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="sa-btn-cancel" class="btn-secondary">Cancel</button>
+                    <button type="submit" id="sa-btn-save" class="btn-accent">Say it</button>
                 </div>
             </form>
         </div>
@@ -503,7 +508,7 @@
                                 <option value="verbose">Verbose &mdash; a short paragraph</option>
                                 <option value="unrestricted">Unrestricted &mdash; no guidance</option>
                             </select>
-                            <span class="field-hint">Default for the &ldquo;default&rdquo; room and for any room that has not set its own. Shapes length by instructing the persona &mdash; use this instead of lowering Max Tokens.</span>
+                            <span class="field-hint">Used by the &ldquo;default&rdquo; room, which has no settings of its own. Every other room carries its own value, set in the room editor. Shapes length by instructing the persona &mdash; use this instead of lowering Max Tokens.</span>
                         </div>
                     </fieldset>
                 </div>

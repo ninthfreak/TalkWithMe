@@ -17,6 +17,7 @@ Follow the development of this app on my YouTube channel:
 
 - Chat with one or more AI personas in a simulated group chat
 - Set up chat rooms and assign personas to them
+- Play as one of the personas yourself, and put words in any other persona's mouth
 - Smart persona routing: let the LLM decide, pick randomly, or choose manually
 - Optional TTS: AI responses spoken aloud via a TTS server
 - Optional STT: Click the microphone icon to speak your prompt
@@ -61,7 +62,7 @@ Most settings can be changed in the UI. Behind the scenes, configuration is stor
 - `settings.yaml` stores LLM, TTS, STT, and MCP server endpoints plus general chat parameters
 - `chatrooms.yaml` stores configured chat rooms (if any)
 - `personas.yaml` stores all personas
-- `player.yaml` stores your own character
+- `player.yaml` stores which persona you are playing, if any
 
 Those three names appear twice, and the difference matters:
 
@@ -224,8 +225,8 @@ Selecting the "Chat rooms" control in the top right brings up the chat room edit
 Here, you can:
 
 - **Create** a new chat room (names must be unique)
-- **Edit** a room's settings — typical response length and whether the room requires
-  your character. This is the place to change how an existing room
+- **Edit** a room's settings — typical response length and whether the room requires you
+  to be playing a character. This is the place to change how an existing room
   behaves, and new room options will appear here as they are added.
 - **Delete** a chat room (and its chat history)
 
@@ -451,8 +452,9 @@ name has that prefix removed. And if a reply *does* hit the token ceiling, the n
 persona is handed it trimmed to its last complete sentence, so there is no dangling
 thought inviting them to finish it.
 
-None of this is configurable; it applies to every reply, except an echoed message,
-where nothing is generated in the first place.
+None of this is configurable; it applies to every reply the LLM generates. A line you
+put in a persona's mouth yourself is left exactly as you typed it — nothing was
+generated, so there is nothing to guard against.
 
 ## How much the personas remember
 
@@ -472,71 +474,76 @@ remember further back; the cost is a longer prompt on every reply.
 
 ## Playing a character yourself
 
-By default the personas know nothing about you — you are just "the user". A chat room can
-instead be told who *you* are, so the personas address you by name and react to the
-character you are playing.
+By default the personas know nothing about you — you are just "the user". You can instead
+play as one of the personas, so the others address you by name and react to who you are.
 
-Open **Your character…** in the left panel (it appears for any room except "All
-Personas") and fill in:
+Open **Playing as…** in the left panel and pick someone from the list, or "Myself" to go
+back to being nobody in particular. That is the whole thing: you adopt a character that
+already exists rather than writing a second one. The personas already carry a name, a
+description and a system prompt, and describing your character separately meant two
+descriptions of the same kind of thing, free to drift apart.
 
-- **Name** — what the personas call you.
-- **Who you are** — your character: who they are, what they want, how they behave.
-- **What you look like** — optional. This is the "picture", and it is deliberately
-  *text*: the personas are the audience for it and they read descriptions, so write
-  "short, scarred hands, a patched green coat and a limp" rather than uploading a photo.
+Whoever you are playing is marked **you** in the persona list and stops answering on their
+own — you are them, and a room where you talk to yourself is not what anyone wants. Your
+own messages are labelled with their name, the same way persona messages are labelled
+— still on the right-hand side, so it stays obvious which are yours.
 
-Once your character has a name, your own messages are labelled with it, the same way
-persona messages are labelled — still on the right-hand side, so it stays obvious which
-are yours.
+You are playing one character, and it applies wherever you go — it is yours, not the
+room's, so switching rooms does not change who you are. What *is* a room setting is
+whether a room insists on it: tick **Require a character** in the room editor and that
+room refuses messages until you are playing someone.
 
-You have one character, and it applies wherever you are — it is yours, not the room's, so
-switching rooms does not change who you are. What *is* a room setting is whether a room
-insists on it: tick **Require my character** in the room editor and that room refuses
-messages until your character has a name and a description. The appearance field is never
-required.
-
-What a persona is told then looks like this:
+What the other personas are told then looks like this:
 
 ```
 The only people here are: Luna (A philosophical poet), and Kira. There is nobody else.
-Lines from other people appear as "[Name]: text". Lines with no prefix are from Kira.
+Every message you can see is tagged with who said it, as "[Name]: text" — Kira's
+included. Your own reply is the one untagged voice: write only what Alex says, with
+no tag.
 
 You are talking with Kira.
-Who they are: A retired thief who owes everyone money. Wary, sharp-tongued.
-What they look like: Short, scarred hands, a patched green coat and a limp.
-Treat Kira as that character: react to who they are and how they look, and address
-them by name. Never write their lines for them.
+Who they are: A retired thief who owes everyone money.
+How they are written: You are Kira. You deflect with a joke when cornered.
+Treat Kira as that character: react to who they are, and address them by name. Never
+write their lines for them.
 ```
 
-Your character lives in `config/player.yaml`, which is gitignored — it stays on your
-machine. If you had characters set per room before, the first one is moved across for you
-on startup and the log says which.
+Who you are playing lives in `config/player.yaml`, which is gitignored — it stays on your
+machine. If you had a written character before, it is dropped on startup and the log says
+whose it was; pick someone from the persona list instead.
+
+## Putting words in a persona's mouth
+
+Every persona in the left panel has a 🗣 button. It opens a box, and what you type is
+posted as that persona's message, word for word. No LLM call is made — the line is yours,
+attributed to them. It is useful for steering a scene, for filling in a character who is
+not being picked, and with TTS servers when you want to hear a persona speak a specific
+line of dialogue.
+
+The rest of the room treats it as an ordinary message from that persona: it is saved with
+the history, it is spoken aloud if they have a voice, and whoever answers next sees it.
+
+This replaced an older "echo chamber" checkbox, which bounced your own message back at you
+from whichever persona happened to be picked, and stayed on until you remembered to switch
+it off. Saying who speaks and what they say, one line at a time, turned out to be what was
+actually wanted.
 
 ## Writing your own lines with help
 
 The pencil button beside the send arrow drafts **your** next message and puts it in the
 input box.
 
-It draws on two things, for two different reasons. Your **character description** decides
-what you would say — your manner, what you care about, how someone like you would react to
-what was just said. Your **own recent messages** decide how you would say it: vocabulary,
-sentence shape, how much you usually write. It also sees the conversation so far and who
-else is in the room, so the draft sounds like you rather than like an assistant.
+It draws on two things, for two different reasons. The **character you are playing**
+decides what you would say — their manner, what they care about, how someone like them
+would react to what was just said. Your **own recent messages** decide how you would say
+it: vocabulary, sentence shape, how much you usually write. It also sees the conversation
+so far and who else is in the room, so the draft sounds like you rather than like an
+assistant.
 
-Without a character set for the room it still works, going on your past messages alone.
+If you are playing as yourself it still works, going on your past messages alone.
 
 It goes into the input box, never straight into the chat — edit it, send it, or clear
 it. Nothing is sent or saved until you press send.
-
-## Echo chamber
-
-The **Echo chamber** checkbox under the chat room selector makes the responding persona
-echo back whatever you type or speak, verbatim, instead of answering it. It is useful with
-TTS servers when you want to hear a persona speak a specific line of dialogue.
-
-It is a control, not a room setting: it applies to whatever you send while it is ticked,
-it stays as you left it when you switch rooms, and it works in "All Personas" too. It is
-off by default and is not saved between sessions.
 
 ## Detailed setup guide
 

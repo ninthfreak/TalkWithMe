@@ -18,7 +18,6 @@ from app.config import (
     TYPICAL_LENGTH_SPECS,
     ChatRoom,
     Persona,
-    PlayerProfile,
     TypicalLength,
     derive_max_tokens,
     get_chatrooms,
@@ -27,7 +26,13 @@ from app.config import (
     get_settings,
     resolve_typical_length,
 )
-from app.models import ChatRequest, SuggestReplyRequest, SuggestReplyResponse
+from app.models import (
+    ChatRequest,
+    SpeakAsRequest,
+    SuggestReplyRequest,
+    SuggestReplyResponse,
+)
+from app import persistence
 from app.session import recent_exchanges, session
 from app.services.llm import chat_completion, stream_chat, stream_chat_with_tools
 from app.services.reply_guard import ReplyGuard, stop_sequences
@@ -36,9 +41,11 @@ from app.services.tool_registry import get_all_tools
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-# Shown when a room demands a player profile it does not have yet. The
-# frontend matches on this to pop the profile editor open.
-PROFILE_REQUIRED_MESSAGE = "This room needs your character profile before you can chat."
+# Shown when a room demands the player has adopted a persona and they have
+# not. The frontend matches on this to open the character picker.
+PERSONA_REQUIRED_MESSAGE = (
+    "This room needs you to be playing as someone. Pick a character first."
+)
 
 # Shown when every persona's reply was cut for writing as somebody else, so
 # the turn produced nothing. Silence here looks identical to a hang.
@@ -57,7 +64,7 @@ NO_USABLE_REPLY_MESSAGE = (
 # Persona pool resolution — derive eligible personas from chat room config
 # ---------------------------------------------------------------------------
 
-def _resolve_room_personas(chat_room: str) -> list[str]:
+def _resolve_room_personas(chat_room: str, exclude_adopted: bool = True) -> list[str]:
     """Return the list of persona names eligible for the given chat room.
 
     "default" room (or any room not found in config) includes all personas.
@@ -66,6 +73,12 @@ def _resolve_room_personas(chat_room: str) -> list[str]:
     no longer dependent on the frontend-maintained session.active_personas.
     """
     all_names = [p.name for p in get_personas().personas]
+    # The persona the player has adopted is the player, so it must not also
+    # answer as an AI — you would be talking to yourself.
+    if exclude_adopted:
+        played = get_player().adopted(set(all_names))
+        if played:
+            all_names = [n for n in all_names if n != played]
 
     if chat_room.lower() == "default":
         return all_names
@@ -101,32 +114,49 @@ def _find_room(chat_room: str) -> Optional[ChatRoom]:
 # Room preamble — who is here, and the rules of the room
 # ---------------------------------------------------------------------------
 
+def _adopted_persona() -> Optional[Persona]:
+    """The persona the player is currently playing, or None.
+
+    Resolved against the live persona list every time: the adopted persona
+    can be deleted or renamed after the fact, and a dangling reference must
+    degrade to "playing as themselves" rather than half-applying.
+    """
+    personas = {p.name: p for p in get_personas().personas}
+    name = get_player().adopted(personas.keys())
+    return personas.get(name) if name else None
+
+
 def _user_label() -> str:
     """What the human is called in the transcript and the prompt.
 
-    The player's character name when they have one, else a neutral "User".
+    The adopted persona's name when there is one, else a neutral "User".
     Every consumer takes it from here: the preamble, the "[Name]: " tags in
     history, the stop strings, and the reply guard. If they disagreed, a
     persona could be told not to speak as "Kira" while the transcript
     tagged them "User".
     """
-    return get_player().profile.name.strip() or "User"
+    adopted = _adopted_persona()
+    return adopted.name if adopted else "User"
 
 
-def _player_lines(player: PlayerProfile, speaker: str) -> list[str]:
-    """The block describing who the human is, for the persona to react to."""
-    if not (player.description.strip() or player.appearance.strip()):
+def _player_lines(player: Optional[Persona], speaker: str) -> list[str]:
+    """The block describing who the human is, for the persona to react to.
+
+    The player adopts a configured persona, so this is that persona's own
+    description and system prompt — the same text that would drive them if
+    the LLM were playing them.
+    """
+    if player is None:
         return []
 
     lines = ["", f"You are talking with {speaker}."]
     if player.description.strip():
         lines.append(f"Who they are: {player.description.strip()}")
-    if player.appearance.strip():
-        # The "picture", as text — see PlayerProfile.appearance.
-        lines.append(f"What they look like: {player.appearance.strip()}")
+    if player.system_prompt.strip():
+        lines.append(f"How they are written: {player.system_prompt.strip()}")
     lines.append(
-        f"Treat {speaker} as that character: react to who they are and how they "
-        "look, and address them by name. Never write their lines for them."
+        f"Treat {speaker} as that character: react to who they are, and address "
+        "them by name. Never write their lines for them."
     )
     return lines
 
@@ -136,7 +166,7 @@ def _build_room_preamble(
     chat_room: str,
     eligible: list[str],
     length: TypicalLength,
-    player: Optional[PlayerProfile] = None,
+    player: Optional[Persona] = None,
 ) -> str:
     """The app-generated block appended to a persona's system prompt.
 
@@ -295,8 +325,20 @@ async def _pick_persona(who_answers: str, user_message: str, chat_room: str) -> 
 
 async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     """Generator that yields SSE-formatted JSON lines."""
-    # Switch to the requested chat room for persistence
-    session.set_current_room(req.chat_room)
+    # Switch to the requested chat room for persistence. The name becomes a
+    # directory, so an invalid one is refused here rather than reaching the
+    # filesystem.
+    try:
+        session.set_current_room(req.chat_room)
+    except persistence.UnsafeRoomName as exc:
+        yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
+        yield f'data: {json.dumps({"type": "complete"})}\n\n'
+        return
+
+    # Every write this turn makes goes to the room the turn started in.
+    # Reading session.current_room at persist time instead meant a room
+    # switch mid-reply filed the reply in the room the user moved to.
+    turn_room = session.current_room
 
     # Resolve eligible personas from the chat room config — the authoritative source
     config = get_personas()
@@ -315,8 +357,8 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     # one. Checked here, not only in the frontend, for the same reason
     # persona eligibility is: the server is the authority. Bail before the
     # user message is recorded, so nothing half-happens.
-    if room is not None and room.require_player_profile and not get_player().profile.is_complete:
-        yield f'data: {json.dumps({"type": "error", "message": PROFILE_REQUIRED_MESSAGE})}\n\n'
+    if room is not None and room.require_player_persona and _adopted_persona() is None:
+        yield f'data: {json.dumps({"type": "error", "message": PERSONA_REQUIRED_MESSAGE})}\n\n'
         yield f'data: {json.dumps({"type": "complete"})}\n\n'
         return
 
@@ -340,16 +382,9 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     user_message_id = req.message_id or str(uuid.uuid4())
 
     # Add user message to history (persisted automatically)
-    session.add_user_message(req.message, user_message_id)
+    session.add_user_message(req.message, user_message_id, room=turn_room)
 
     user_label = _user_label()
-
-    # Echo comes from the request, because the Echo chamber checkbox is
-    # client-side UI state rather than something stored on the room. Only
-    # one persona echoes — several identical echoes would be noise — so it
-    # overrides max_replies for this turn.
-    if req.echo:
-        max_replies = 1
 
     # A cut reply costs an attempt but not a slot. Tracking attempts per
     # persona (rather than a flat "already tried" list) lets a persona whose
@@ -396,90 +431,84 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
 
         truncated = False
 
-        if req.echo:
-            # Echo chamber: bypass the LLM entirely and return the user's message verbatim.
-            # No preamble, no length tier, no guard — nothing was generated.
-            full_text = req.message
-            yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": full_text})}\n\n'
-        else:
-            # Length is shaped by the preamble; the derived cap only guards
-            # against a runaway, and can never exceed settings.llm.max_tokens.
-            length = resolve_typical_length(persona, room, settings.general.typical_length)
-            max_tokens = derive_max_tokens(length, settings.llm.max_tokens)
+        # Length is shaped by the preamble; the derived cap only guards
+        # against a runaway, and can never exceed settings.llm.max_tokens.
+        length = resolve_typical_length(persona, room, settings.general.typical_length)
+        max_tokens = derive_max_tokens(length, settings.llm.max_tokens)
 
-            messages = session.build_llm_messages(
-                system_prompt=persona.system_prompt,
-                responding_persona=persona_name,
-                max_turns_for_context=settings.general.max_turns_for_context,
-                room_preamble=_build_room_preamble(
-                    persona, req.chat_room, eligible, length,
-                    player=get_player().profile,
-                ),
-                user_label=user_label,
+        messages = session.build_llm_messages(
+            system_prompt=persona.system_prompt,
+            responding_persona=persona_name,
+            max_turns_for_context=settings.general.max_turns_for_context,
+            room_preamble=_build_room_preamble(
+                persona, req.chat_room, eligible, length,
+                player=_adopted_persona(),
+            ),
+            user_label=user_label,
+        )
+
+        # Layer 1: stop before the backend generates another persona's
+        # turn at all. Only catches names that exist — the guard below
+        # is what catches invented ones. The human counts as a speaker
+        # here: a persona answering *as the user* is the same failure.
+        other_voices = eligible + [user_label]
+        stop = stop_sequences(persona_name, other_voices)
+        guard = ReplyGuard(persona_name, other_voices)
+
+        stream = (
+            # Agentic path: the LLM may invoke MCP tools mid-reply. The
+            # loop runs regardless of show_tool_calls; that flag only
+            # controls whether tool_call SSE events are emitted.
+            stream_chat_with_tools(
+                messages, get_all_tools(), max_tokens=max_tokens, stop=stop
             )
+            if persona.allow_tool_calls
+            else stream_chat(messages, max_tokens=max_tokens, stop=stop)
+        )
 
-            # Layer 1: stop before the backend generates another persona's
-            # turn at all. Only catches names that exist — the guard below
-            # is what catches invented ones. The human counts as a speaker
-            # here: a persona answering *as the user* is the same failure.
-            other_voices = eligible + [user_label]
-            stop = stop_sequences(persona_name, other_voices)
-            guard = ReplyGuard(persona_name, other_voices)
-
-            stream = (
-                # Agentic path: the LLM may invoke MCP tools mid-reply. The
-                # loop runs regardless of show_tool_calls; that flag only
-                # controls whether tool_call SSE events are emitted.
-                stream_chat_with_tools(
-                    messages, get_all_tools(), max_tokens=max_tokens, stop=stop
-                )
-                if persona.allow_tool_calls
-                else stream_chat(messages, max_tokens=max_tokens, stop=stop)
-            )
-
-            full_text = ""
+        full_text = ""
+        try:
             try:
-                try:
-                    async for event in stream:
-                        if event["type"] == "token":
-                            # The guard may hold text back briefly at line
-                            # starts while it decides whether a speaker
-                            # prefix is forming. Only emit what it releases.
-                            safe = guard.feed(event["token"])
-                            if safe:
-                                full_text += safe
-                                yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": safe})}\n\n'
-                            if guard.stopped:
-                                logger.info(
-                                    "Cut %s's reply at speaker prefix %r",
-                                    persona_name, guard.cut_at,
-                                )
-                                break
-                        elif event["type"] == "tool_call" and settings.general.show_tool_calls:
-                            yield f'data: {json.dumps({"type": "tool_call", "persona": persona_name, "tool_name": event["tool_name"], "arguments": event["arguments"], "result": event["result"], "failed": event["failed"]})}\n\n'
-                        elif event["type"] == "finish":
-                            # A reply cut off at max_tokens ends mid-sentence.
-                            # Marking it keeps the next persona from being
-                            # handed a dangling thought to complete.
-                            truncated = event.get("reason") == "length"
-                finally:
-                    # Break leaves the generator suspended; closing it here
-                    # releases the upstream HTTP stream promptly.
-                    await stream.aclose()
+                async for event in stream:
+                    if event["type"] == "token":
+                        # The guard may hold text back briefly at line
+                        # starts while it decides whether a speaker
+                        # prefix is forming. Only emit what it releases.
+                        safe = guard.feed(event["token"])
+                        if safe:
+                            full_text += safe
+                            yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": safe})}\n\n'
+                        if guard.stopped:
+                            logger.info(
+                                "Cut %s's reply at speaker prefix %r",
+                                persona_name, guard.cut_at,
+                            )
+                            break
+                    elif event["type"] == "tool_call" and settings.general.show_tool_calls:
+                        yield f'data: {json.dumps({"type": "tool_call", "persona": persona_name, "tool_name": event["tool_name"], "arguments": event["arguments"], "result": event["result"], "failed": event["failed"]})}\n\n'
+                    elif event["type"] == "finish":
+                        # A reply cut off at max_tokens ends mid-sentence.
+                        # Marking it keeps the next persona from being
+                        # handed a dangling thought to complete.
+                        truncated = event.get("reason") == "length"
+            finally:
+                # Break leaves the generator suspended; closing it here
+                # releases the upstream HTTP stream promptly.
+                await stream.aclose()
 
-                tail = guard.flush()
-                if tail:
-                    full_text += tail
-                    yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": tail})}\n\n'
-            except Exception as exc:
-                logger.error("Streaming error: %s", exc)
-                # Release anything the guard was still holding, so text the
-                # model did produce is not swallowed by the failure.
-                held = guard.flush()
-                if held:
-                    yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": held})}\n\n'
-                yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
-                return
+            tail = guard.flush()
+            if tail:
+                full_text += tail
+                yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": tail})}\n\n'
+        except Exception as exc:
+            logger.error("Streaming error: %s", exc)
+            # Release anything the guard was still holding, so text the
+            # model did produce is not swallowed by the failure.
+            held = guard.flush()
+            if held:
+                yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": held})}\n\n'
+            yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
+            return
 
         if not full_text.strip():
             # The guard cut the whole reply — the persona opened by writing
@@ -495,7 +524,8 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
 
         # Persist — subsequent personas will see this in history
         session.add_assistant_message(
-            full_text, persona_name, assistant_message_id, truncated=truncated
+            full_text, persona_name, assistant_message_id,
+            truncated=truncated, room=turn_room,
         )
 
         replied_personas.append(persona_name)
@@ -577,9 +607,9 @@ def _build_suggestion_prompt(chat_room: str) -> list[dict]:
     eligible = _resolve_room_personas(chat_room)
     settings = get_settings()
     length = resolve_typical_length(None, room, settings.general.typical_length)
-    profile = get_player().profile
+    profile = _adopted_persona()
 
-    named = bool(profile.name.strip())
+    named = profile is not None
     if named:
         lines = [f'You are {user_label}, in a group chat called "{chat_room}".']
     else:
@@ -593,10 +623,10 @@ def _build_suggestion_prompt(chat_room: str) -> list[dict]:
     # which is the exact opposite of this task.
     if profile and profile.description.strip():
         lines += ["", "Who you are:", profile.description.strip()]
-    if profile and profile.appearance.strip():
-        lines += ["", "What you look like:", profile.appearance.strip()]
+    if profile and profile.system_prompt.strip():
+        lines += ["", "How you are written:", profile.system_prompt.strip()]
 
-    if profile and (profile.description.strip() or profile.appearance.strip()):
+    if profile is not None:
         lines += [
             "",
             "Stay in character. What you say should follow from who you are — "
@@ -668,4 +698,75 @@ async def suggest_reply(req: SuggestReplyRequest):
     guard = ReplyGuard(user_label, _resolve_room_personas(req.chat_room))
     cleaned = (guard.feed(text) + guard.flush()).strip()
 
-    return SuggestReplyResponse(text=cleaned or text.strip())
+    if not cleaned:
+        # The guard cut the draft to nothing — it opened as somebody else.
+        # Falling back to the raw text put a "[Luna]: ..." line in the input
+        # box for the player to send as themselves, which is exactly the
+        # nested-transcript pattern the guard exists to keep out of history.
+        raise HTTPException(
+            status_code=503,
+            detail="The draft came back in someone else's voice. Try again.",
+        )
+    return SuggestReplyResponse(text=cleaned)
+
+
+# ---------------------------------------------------------------------------
+# Speaking as a persona
+# ---------------------------------------------------------------------------
+#
+# The player writes a line and a persona says it. No LLM is involved: the
+# text is the player's, attributed to the persona they picked. This
+# replaces the old "echo chamber" room mode, which achieved the same thing
+# by bouncing your own message back at you and left the room stuck in that
+# mode until you remembered to switch it off.
+#
+# It streams the same SSE shape as a normal reply so the frontend renders
+# the bubble, persists it and speaks it through TTS with no special casing.
+
+async def _speak_stream(req: SpeakAsRequest) -> AsyncIterator[str]:
+    """Emit one persona message authored by the player."""
+    try:
+        session.set_current_room(req.chat_room)
+    except persistence.UnsafeRoomName as exc:
+        yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
+        yield f'data: {json.dumps({"type": "complete"})}\n\n'
+        return
+
+    turn_room = session.current_room
+    persona = next(
+        (p for p in get_personas().personas if p.name == req.persona), None
+    )
+    if persona is None:
+        yield f'data: {json.dumps({"type": "error", "message": f"Persona {req.persona} not found"})}\n\n'
+        yield f'data: {json.dumps({"type": "complete"})}\n\n'
+        return
+
+    text = req.text.strip()
+    if not text:
+        yield f'data: {json.dumps({"type": "error", "message": "Nothing to say."})}\n\n'
+        yield f'data: {json.dumps({"type": "complete"})}\n\n'
+        return
+
+    message_id = req.message_id or str(uuid.uuid4())
+    yield f'data: {json.dumps({"type": "start", "persona": persona.name, "user_message_id": None, "message_id": message_id})}\n\n'
+    yield f'data: {json.dumps({"type": "token", "persona": persona.name, "token": text})}\n\n'
+
+    session.add_assistant_message(text, persona.name, message_id, room=turn_room)
+    logger.info("Player spoke as %s in room '%s'", persona.name, turn_room)
+
+    yield f'data: {json.dumps({"type": "done", "persona": persona.name, "text": text, "message_id": message_id})}\n\n'
+    yield f'data: {json.dumps({"type": "complete"})}\n\n'
+
+
+@router.post("/speak")
+async def speak_as(req: SpeakAsRequest):
+    """Say something as a persona. Returns the same SSE stream as a reply."""
+    return StreamingResponse(
+        _speak_stream(req),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

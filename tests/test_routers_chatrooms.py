@@ -38,7 +38,7 @@ class TestCreateChatroom:
             "name": "Enterprise",
             "persona_names": [],
             "typical_length": "normal",
-            "require_player_profile": False,
+            "require_player_persona": False,
         }
         assert [r["name"] for r in client.get("/api/chatrooms").json()] == ["TNG", "Enterprise"]
 
@@ -176,12 +176,12 @@ class TestSetTypicalLength:
         assert client.get("/api/chatrooms/TNG").json()["typical_length"] == "terse"
 
     def test_other_room_fields_survive_the_update(self, client):
-        client.put("/api/chatrooms/TNG", json={"require_player_profile": True})
+        client.put("/api/chatrooms/TNG", json={"require_player_persona": True})
         client.put("/api/chatrooms/TNG", json={"typical_length": "brief"})
 
         body = client.get("/api/chatrooms/TNG").json()
         assert body["typical_length"] == "brief"
-        assert body["require_player_profile"] is True
+        assert body["require_player_persona"] is True
         assert body["persona_names"] == ["Alex", "Luna"]
 
     def test_default_room_cannot_be_modified(self, client):
@@ -208,25 +208,25 @@ class TestSetTypicalLength:
         assert resp.status_code == 422
 
 
-class TestRequirePlayerProfile:
+class TestRequirePlayerPersona:
     def test_toggles_and_persists(self, client):
-        resp = client.put("/api/chatrooms/TNG", json={"require_player_profile": True})
+        resp = client.put("/api/chatrooms/TNG", json={"require_player_persona": True})
         assert resp.status_code == 200
-        assert resp.json()["require_player_profile"] is True
-        assert client.get("/api/chatrooms/TNG").json()["require_player_profile"] is True
+        assert resp.json()["require_player_persona"] is True
+        assert client.get("/api/chatrooms/TNG").json()["require_player_persona"] is True
 
     def test_the_requirement_persists(self, client):
         # Turning the requirement on must not disturb an existing profile.
         client.put("/api/chatrooms/TNG", json={"typical_length": "terse"})
-        client.put("/api/chatrooms/TNG", json={"require_player_profile": True})
+        client.put("/api/chatrooms/TNG", json={"require_player_persona": True})
 
         body = client.get("/api/chatrooms/TNG").json()
-        assert body["require_player_profile"] is True
+        assert body["require_player_persona"] is True
         assert body["typical_length"] == "terse"
 
     def test_default_room_cannot_require_one(self, client):
-        resp = client.put("/api/chatrooms/default", json={"require_player_profile": True})
+        resp = client.put("/api/chatrooms/default", json={"require_player_persona": True})
         assert resp.status_code == 400
 
     def test_default_room_reports_no_requirement(self, client):
-        assert client.get("/api/chatrooms/default").json()["require_player_profile"] is False
+        assert client.get("/api/chatrooms/default").json()["require_player_persona"] is False

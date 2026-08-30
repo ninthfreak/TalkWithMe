@@ -274,3 +274,49 @@ class TestClearRoom:
 def persistence_root_path():
     """The (patched) persistence root for this test run."""
     return persistence._PERSISTENCE_ROOT
+
+
+# ---------------------------------------------------------------------------
+# Room names become directory names
+# ---------------------------------------------------------------------------
+
+class TestRoomNamesCannotEscapeTheRoot:
+    """A room name is joined onto the persistence root to make a directory.
+
+    The name reaches here from a request body, so "../config" wrote a
+    history.json (and audio files) outside the chatrooms tree — over the
+    live YAML directory, given the right name. Every entry point resolves
+    the name through the same guard.
+    """
+
+    ESCAPES = ["../config", "..", "a/b", "a\\b", "", "   ", "/etc", "room/../.."]
+
+    @pytest.mark.parametrize("name", ESCAPES)
+    def test_a_traversing_name_is_refused(self, name):
+        with pytest.raises(persistence.UnsafeRoomName):
+            persistence.safe_room_name(name)
+
+    @pytest.mark.parametrize("name", ESCAPES)
+    def test_nothing_is_written_for_a_traversing_name(self, name):
+        with pytest.raises(persistence.UnsafeRoomName):
+            persistence.persist_message(
+                name, ChatMessage(role="user", content="hello"), "id-1"
+            )
+        # Not one file anywhere under the root, and nothing beside it.
+        root = persistence_root_path()
+        assert not root.exists() or not any(root.rglob("history.json"))
+        assert not (root.parent / "config").exists()
+
+    @pytest.mark.parametrize("name", ["TNG", "Good Room-1", "chit_chat", "default"])
+    def test_ordinary_names_are_allowed(self, name):
+        assert persistence.safe_room_name(name) == name
+        persistence.persist_message(
+            name, ChatMessage(role="user", content="hello"), "id-1"
+        )
+        assert (persistence_root_path() / name / "history.json").exists()
+
+    def test_reading_a_traversing_name_is_refused_too(self):
+        # Read paths matter as much as writes: load_history("../config")
+        # would otherwise report on a directory it has no business in.
+        with pytest.raises(persistence.UnsafeRoomName):
+            persistence.load_history("../config")

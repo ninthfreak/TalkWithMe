@@ -26,15 +26,15 @@ class ChatRequest(BaseModel):
         default=None,
         description="Frontend-generated UUID for this message (for audio association)",
     )
-    echo: bool = Field(
-        default=False,
-        description=(
-            "Echo this message back verbatim in a persona's voice instead of "
-            "answering it. Driven by the Echo chamber checkbox in the left "
-            "panel, which is client-side UI state — echoing is not something "
-            "the room knows about."
-        ),
-    )
+
+
+
+class SpeakAsRequest(BaseModel):
+    """Put words in a persona's mouth — the player writes their line."""
+    persona: str = Field(..., min_length=1, description="Who says it")
+    text: str = Field(..., min_length=1, max_length=8192)
+    chat_room: str = Field(default="default")
+    message_id: Optional[str] = Field(default=None)
 
 
 class SuggestReplyRequest(BaseModel):
@@ -310,7 +310,7 @@ class ChatRoomResponse(BaseModel):
     name: str
     persona_names: List[str] = Field(default_factory=list)
     typical_length: TypicalLength = TypicalLength.NORMAL
-    require_player_profile: bool = False
+    require_player_persona: bool = False
 
 
 class ChatRoomCreateRequest(BaseModel):
@@ -323,11 +323,9 @@ class AssignPersonasRequest(BaseModel):
     persona_names: List[str] = Field(..., min_length=1)
 
 
-class PlayerProfileRequest(BaseModel):
-    """The human user's own character. Not per room — see PlayerConfig."""
-    name: str = Field(default="", max_length=40)
-    description: str = Field(default="", max_length=2000)
-    appearance: str = Field(default="", max_length=1000)
+class AdoptPersonaRequest(BaseModel):
+    """Which persona the player is playing. Empty means "themselves"."""
+    persona_name: str = Field(default="", max_length=25)
 
 
 class ChatRoomUpdateRequest(BaseModel):
@@ -341,6 +339,10 @@ class ChatRoomUpdateRequest(BaseModel):
     single-purpose endpoints this replaces (echo-chamber, typical-length,
     player-profile, require-player-profile) were already drifting apart.
 
+    `require_player_persona` was `require_player_profile` until schema 6;
+    the flag is the same room property, but what it demands is now an
+    adopted persona rather than a written profile.
+
     Membership is not here: personas have their own endpoints because
     assigning one validates against the persona list and can 422, which is
     a different operation from setting a flag.
@@ -352,11 +354,9 @@ class ChatRoomUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     typical_length: Optional[TypicalLength] = None
-    require_player_profile: Optional[bool] = None
+    require_player_persona: Optional[bool] = None
 
 
-class PlayerProfileResponse(BaseModel):
-    """The human user's character, as returned to the frontend."""
-    name: str = ""
-    description: str = ""
-    appearance: str = ""
+class PlayerResponse(BaseModel):
+    """Who the player is currently playing, as returned to the frontend."""
+    persona_name: str = ""

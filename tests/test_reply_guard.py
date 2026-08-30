@@ -152,6 +152,63 @@ class TestNoFalsePositives:
         assert run([text]) == (text, False)
 
 
+class TestMultiWordProseLeadIns:
+    """A stoplist of single words missed the phrases that actually appear.
+
+    "Final Answer:" and "Executive Summary:" both look exactly like a
+    two-word name followed by a colon, so they sailed past a bare-word
+    lookup and cut correct replies to nothing.
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Final Answer: 42.",
+            "Executive Summary: it went badly.",
+            "Short Answer: no.",
+            "One Caveat: the cache has to be warm.",
+            "My Recommendation: ship it Monday.",
+        ],
+    )
+    def test_a_phrase_ending_in_a_stoplist_word_is_not_a_speaker(self, line):
+        text, stopped = run(["Sure.\n", line])
+        assert stopped is False
+        assert text == f"Sure.\n{line}"
+
+    def test_a_real_two_word_name_still_cuts(self):
+        # The last-word check must not swallow the case it exists beside.
+        text, stopped = run(["Sure.\n", "Mary Anne: I disagree."])
+        assert stopped is True
+        assert text == "Sure.\n"
+
+
+class TestFencedCode:
+    """Inside a fenced block nothing is dialogue.
+
+    A YAML key or an HTTP header sits at the start of a line and ends in a
+    colon, which is exactly the shape of a speaker prefix.
+    """
+
+    def test_a_yaml_key_in_a_fence_does_not_cut(self):
+        text, stopped = run(["Here:\n", "```\n", "Model: llama-3\n", "```\n", "Done."])
+        assert stopped is False
+        assert "Model: llama-3" in text
+        assert text.endswith("Done.")
+
+    def test_a_speaker_after_the_fence_closes_still_cuts(self):
+        # The fence must be tracked, not merely used as an escape hatch for
+        # the rest of the reply.
+        text, stopped = run(["```\n", "Model: llama-3\n", "```\n", "Luna: I disagree."])
+        assert stopped is True
+        assert "Model: llama-3" in text
+        assert "I disagree" not in text
+
+    def test_fences_arriving_split_across_tokens_still_open(self):
+        text, stopped = run(["``", "`\n", "Note: x\n", "Header: y\n"])
+        assert stopped is False
+        assert "Header: y" in text
+
+
 class TestBuffering:
     def test_buffered_text_is_always_released(self):
         # A reply that ends while the guard is still deciding must not lose

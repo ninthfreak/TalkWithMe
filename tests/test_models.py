@@ -4,14 +4,17 @@ import pytest
 from pydantic import ValidationError
 
 from app.models import (
+    AdoptPersonaRequest,
     AssignPersonasRequest,
     AudioUploadRequest,
     ChatRequest,
     ChatRoomCreateRequest,
+    ChatRoomUpdateRequest,
     GeneralSettingsRequest,
     PersonaCreateRequest,
     SessionPersonasRequest,
     SettingsUpdateRequest,
+    SpeakAsRequest,
     STTRequest,
     TTSRequest,
 )
@@ -33,6 +36,35 @@ class TestChatRequest:
             message="hi", who_answers="random", chat_room="TNG", message_id="abc-123"
         )
         assert req.message_id == "abc-123"
+
+
+class TestSpeakAsRequest:
+    def test_defaults(self):
+        req = SpeakAsRequest(persona="Luna", text="I disagree.")
+        assert req.chat_room == "default"
+        assert req.message_id is None
+
+    @pytest.mark.parametrize("field, value", [
+        ("persona", ""),
+        ("text", ""),
+        ("text", "x" * 8193),
+    ])
+    def test_blank_or_oversized_values_are_rejected(self, field, value):
+        payload = {"persona": "Luna", "text": "hi", field: value}
+        with pytest.raises(ValidationError):
+            SpeakAsRequest(**payload)
+
+
+class TestAdoptPersonaRequest:
+    def test_an_empty_name_means_playing_yourself(self):
+        assert AdoptPersonaRequest().persona_name == ""
+
+    def test_the_cap_matches_the_persona_name_cap(self):
+        # No name that gets through here could ever fail to be a persona
+        # name for length reasons alone.
+        assert AdoptPersonaRequest(persona_name="K" * 25).persona_name == "K" * 25
+        with pytest.raises(ValidationError):
+            AdoptPersonaRequest(persona_name="K" * 26)
 
 
 class TestSessionPersonasRequest:
@@ -118,6 +150,17 @@ class TestChatRoomModels:
     def test_assign_personas_request_requires_at_least_one(self):
         with pytest.raises(ValidationError):
             AssignPersonasRequest(persona_names=[])
+
+    def test_room_update_omits_what_it_does_not_set(self):
+        # The partial-update contract: only what was sent is applied.
+        req = ChatRoomUpdateRequest(require_player_persona=True)
+        assert req.model_dump(exclude_none=True) == {"require_player_persona": True}
+
+    def test_room_update_rejects_an_unknown_key(self):
+        # extra="forbid" on purpose: on a partial-update endpoint a typo
+        # would otherwise look exactly like a successful save.
+        with pytest.raises(ValidationError):
+            ChatRoomUpdateRequest(require_player_profile=True)
 
 
 class TestAudioUploadRequest:

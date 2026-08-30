@@ -1,6 +1,7 @@
 """Personas router — list, create, update, delete, clone personas and serve avatar images."""
 
 import logging
+import re
 from pathlib import Path
 from typing import List
 
@@ -18,6 +19,33 @@ from app.config import Persona, PersonasConfig
 from app.models import PersonaResponse, PersonaDetailResponse, PersonaCreateRequest, PersonaUpdateRequest
 
 logger = logging.getLogger(__name__)
+
+# Persona names appear in URL path segments (/api/personas/{name}/detail) and
+# in the "[Name]: " transcript tags. A name containing "/" produced a persona
+# that returned 201 on create and then 404 on every edit, delete and clone —
+# permanently stuck in personas.yaml and still answering.
+_SAFE_PERSONA_NAME = re.compile(r"^[^/\\\n\r\t]+$")
+MAX_PERSONA_NAME = 25
+
+
+def _validate_persona_name(name: str) -> str:
+    """Trim and reject a name that cannot survive a round trip."""
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Persona name cannot be blank.")
+    if not _SAFE_PERSONA_NAME.match(name):
+        raise HTTPException(
+            status_code=422,
+            detail="Persona name may not contain slashes, backslashes or line breaks.",
+        )
+    if len(name) > MAX_PERSONA_NAME:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Persona name may be at most {MAX_PERSONA_NAME} characters.",
+        )
+    return name
+
+
 router = APIRouter(prefix="/api/personas", tags=["personas"])
 
 
@@ -95,9 +123,8 @@ def list_personas():
 def create_persona(req: PersonaCreateRequest):
     """Add a new persona to personas.yaml."""
     config = get_personas()
-    lower_name = req.name.strip().lower()
-    if not lower_name:
-        raise HTTPException(status_code=422, detail="Name may not be blank")
+    name = _validate_persona_name(req.name)
+    lower_name = name.lower()
     if lower_name == "user":
         raise HTTPException(
             status_code=422,
@@ -107,7 +134,7 @@ def create_persona(req: PersonaCreateRequest):
         raise HTTPException(status_code=409, detail=f"A persona named '{req.name}' already exists")
 
     new_persona = Persona(
-        name=req.name.strip(),
+        name=name,
         description=req.description or "",
         system_prompt=req.system_prompt,
         router_hints=req.router_hints,
@@ -141,9 +168,7 @@ def update_persona(name: str, req: PersonaUpdateRequest):
     if not existing:
         raise HTTPException(status_code=404, detail=f"Persona '{name}' not found")
 
-    new_name = req.name.strip()
-    if not new_name:
-        raise HTTPException(status_code=422, detail="Name may not be blank")
+    new_name = _validate_persona_name(req.name)
     if new_name.lower() == "user":
         raise HTTPException(
             status_code=422,
@@ -196,11 +221,19 @@ def clone_persona(name: str):
     if not source:
         raise HTTPException(status_code=404, detail=f"Persona '{name}' not found")
 
+    # The suffix has to fit inside MAX_PERSONA_NAME or the clone is born
+    # un-editable: PUT /api/personas/{name} would reject the very name the
+    # clone was saved under. Trim the base, not the suffix, so the result
+    # stays unique.
     existing_names = {p.name.lower() for p in config.personas}
     suffix = 2
-    while f"{name}_{suffix}".lower() in existing_names:
+    while True:
+        tail = f"_{suffix}"
+        base = name[: MAX_PERSONA_NAME - len(tail)].rstrip()
+        new_name = f"{base}{tail}"
+        if new_name.lower() not in existing_names:
+            break
         suffix += 1
-    new_name = f"{name}_{suffix}"
 
     clone = Persona(
         name=new_name,

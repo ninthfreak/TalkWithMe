@@ -125,7 +125,7 @@ class TestLegacyChatroomsAndSettings:
         room = load_chatrooms(target).chat_rooms[0]
         assert room.persona_names == ["Alex", "Luna"]          # preserved
         assert room.typical_length is TypicalLength.NORMAL     # defaulted
-        assert room.require_player_profile is False
+        assert room.require_player_persona is False
 
     def test_legacy_settings_load_and_keep_their_values(self, tmp_path):
         target = tmp_path / "settings.yaml"
@@ -279,18 +279,22 @@ class TestEchoChamberIsNotRoomState:
         ]})
         room = migrated["chat_rooms"][0]
         assert room["typical_length"] == "brief"
-        assert room["require_player_profile"] is True
+        # Renamed by the v5 -> v6 step, but the value survives.
+        assert room["require_player_persona"] is True
 
     def test_rooms_without_the_key_produce_no_notes(self):
         _, notes = migrate_chatrooms({"chat_rooms": [{"name": "TNG"}]})
         assert notes == []
 
 
-class TestPlayerProfileLeavesTheRoom:
-    """Profiles used to be stored per room; they belong to the player.
+class TestWrittenProfilesBecomeAnAdoptedPersona:
+    """Profiles were per room, then the player's, and now do not exist.
 
-    Upgrading must not silently lose a character someone set up, so the
-    value is carried into player.yaml before the room key is dropped.
+    The player adopts one of the configured personas instead, so there is
+    one description of a character rather than two that can drift. Nothing
+    maps a written profile onto a persona, so the old value is dropped —
+    but visibly, in the log, because "my character vanished" with no
+    explanation is worse than a line saying so.
     """
 
     ROOMS_WITH_PROFILES = """\
@@ -308,39 +312,17 @@ chat_rooms:
         (tmp_path / "chatrooms.yaml").write_text(self.ROOMS_WITH_PROFILES)
         return migrate_config_files()
 
-    def test_the_profile_moves_into_its_own_file(self, tmp_path):
-        assert "player.yaml" in self._upgrade(tmp_path)
-        assert load_player().profile.name == "Gregory"
-
     def test_the_rooms_keep_their_requirement_but_lose_the_profile(self, tmp_path):
         self._upgrade(tmp_path)
         rooms = {r.name: r for r in load_chatrooms().chat_rooms}
-        assert rooms["Pub"].require_player_profile is True
+        assert rooms["Pub"].require_player_persona is True
         assert not hasattr(rooms["Pub"], "player_profile")
 
-    def test_one_character_is_chosen_and_the_choice_is_reported(self, tmp_path, caplog):
-        # Several rooms could each have had a character; silently picking
-        # one of them would be worse than saying which.
-        with caplog.at_level("INFO"):
-            self._upgrade(tmp_path)
-        assert "keeping Gregory's" in caplog.text
-        assert "Sal" in caplog.text
-
-    def test_an_existing_player_file_is_never_overwritten(self, tmp_path):
-        (tmp_path / "config").mkdir()
-        (tmp_path / "config" / "player.yaml").write_text("profile:\n  name: Mine\n")
-        (tmp_path / "chatrooms.yaml").write_text(self.ROOMS_WITH_PROFILES)
-
-        migrate_config_files()
-        # Same rule: an existing character is never replaced by one lifted
-        # out of the rooms file.
-        assert load_player().profile.name == "Mine"
-
-    def test_rooms_without_profiles_produce_no_player_file(self, tmp_path):
-        (tmp_path / "chatrooms.yaml").write_text(
-            "chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n"
-        )
-        assert "player.yaml" not in migrate_config_files()
+    def test_no_player_file_is_invented_from_the_rooms(self, tmp_path):
+        # There is nothing in a written profile that names a persona, so
+        # guessing one would put words in the player's mouth.
+        assert "player.yaml" not in self._upgrade(tmp_path)
+        assert load_player().persona_name == ""
 
     def test_a_room_key_alone_is_dropped_by_the_schema_step(self):
         migrated, notes = migrate_chatrooms({"chat_rooms": [
@@ -349,8 +331,48 @@ chat_rooms:
         ]})
         room = migrated["chat_rooms"][0]
         assert "player_profile" not in room
-        assert room["require_player_profile"] is True
+        assert room["require_player_persona"] is True
         assert any("player_profile" in n for n in notes)
+
+    def test_the_room_flag_is_renamed_not_reset(self):
+        migrated, notes = migrate_chatrooms({
+            "schema_version": 5,
+            "chat_rooms": [{"name": "TNG", "require_player_profile": True}],
+        })
+        room = migrated["chat_rooms"][0]
+        assert "require_player_profile" not in room
+        assert room["require_player_persona"] is True
+        assert any("require_player_persona" in n for n in notes)
+
+    def test_a_written_profile_in_player_yaml_is_dropped_and_reported(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "player.yaml").write_text(
+            "schema_version: 5\nprofile:\n  name: Gregory\n  description: An innkeeper.\n"
+        )
+
+        assert "player.yaml" in migrate_config_files()
+
+        raw = yaml.safe_load((tmp_path / "config" / "player.yaml").read_text())
+        assert "profile" not in raw
+        assert raw["persona_name"] == ""
+        assert load_player().persona_name == ""
+
+    def test_the_dropped_character_is_named_in_the_log(self, tmp_path, caplog):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "player.yaml").write_text(
+            "schema_version: 5\nprofile:\n  name: Gregory\n"
+        )
+        with caplog.at_level("INFO"):
+            migrate_config_files()
+        assert "Gregory" in caplog.text
+
+    def test_an_adopted_persona_survives_a_reload(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "player.yaml").write_text(
+            f"schema_version: {CONFIG_SCHEMA_VERSION}\npersona_name: Luna\n"
+        )
+        assert migrate_config_files() == []
+        assert load_player().persona_name == "Luna"
 
 
 class TestOutOfDateFilesAreRewritten:
@@ -372,6 +394,19 @@ class TestOutOfDateFilesAreRewritten:
         raw = yaml.safe_load((tmp_path / "config" / "chatrooms.yaml").read_text())
         assert raw["schema_version"] == CONFIG_SCHEMA_VERSION
         assert "player_profile" not in raw["chat_rooms"][0]
+
+    def test_a_file_from_a_newer_release_is_left_alone(self, tmp_path):
+        # _apply() refuses to touch it, so rewriting it here only churned
+        # the mtime and reported a migration that never happened.
+        (tmp_path / "config").mkdir()
+        target = tmp_path / "config" / "chatrooms.yaml"
+        target.write_text(
+            f"schema_version: {CONFIG_SCHEMA_VERSION + 5}\nchat_rooms:\n- name: Pub\n"
+        )
+        before = target.read_text()
+
+        assert migrate_config_files() == []
+        assert target.read_text() == before
 
     def test_a_current_file_is_left_alone(self, tmp_path):
         (tmp_path / "config").mkdir()

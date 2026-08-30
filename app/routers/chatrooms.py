@@ -37,7 +37,7 @@ def _to_response(room: ChatRoom) -> ChatRoomResponse:
         name=room.name,
         persona_names=list(room.persona_names),
         typical_length=room.typical_length,
-        require_player_profile=room.require_player_profile,
+        require_player_persona=room.require_player_persona,
     )
 
 
