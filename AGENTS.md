@@ -63,7 +63,9 @@ To force a re-read of all three files, call `app.config.reload_all()`.
 | `tts.js` | TTS synthesis, audio queues, Web Audio playback, audio persistence |
 | `stt.js` | Microphone recording, STT proxy, transcript insertion, audio persistence |
 | `theme.js` | Theme toggle |
-| `utils.js` | Shared helpers |
+| `utils.js` | Shared helpers (incl. `comparePersonasByName()`, the shared case-insensitive persona-name comparator) |
+
+**Persona list ordering**: Anywhere a list of personas is shown to the user (the sidebar, the persona editor modal, the persona picker modal, and anything added in the future), it must be sorted alphabetically and case-insensitively using `comparePersonasByName()` from `utils.js`. The shared `personas` global is pre-sorted in `loadPersonas()` (`app.js`), but each render function sorts its own input list rather than trusting the caller's order. **Do not** rely on `GET /api/personas` returning any particular order — the backend intentionally returns personas in raw YAML/creation order; sorting is a display concern and belongs in the frontend only.
 
 ## Chat flow
 
