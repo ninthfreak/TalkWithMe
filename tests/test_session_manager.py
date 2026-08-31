@@ -402,3 +402,56 @@ class TestContextCharBudget:
             ChatMessage(role="assistant", content="a", persona="P"),
         ]
         assert recent_exchanges(history, max_exchanges=10) == history
+
+
+class TestRoomsWithNoHumanMessage:
+    """Every line put in a persona's mouth, and nobody speaking as themselves.
+
+    Easy to produce now that "speak as" exists: open a room and write a few
+    personas' lines without sending anything yourself. There are no
+    exchanges to count, so the windowing has to fall back to something
+    rather than treating "no exchanges" as "keep the lot".
+    """
+
+    def _lines(self, n, size=50):
+        from app.models import ChatMessage
+        return [
+            ChatMessage(role="assistant", content=str(i) + "x" * size, persona=f"P{i}")
+            for i in range(n)
+        ]
+
+    def test_the_context_setting_still_applies(self):
+        from app.session import recent_exchanges
+
+        history = self._lines(40)
+        window = recent_exchanges(history, max_exchanges=6)
+
+        assert len(window) == 6
+        assert window == history[-6:]      # the newest, not the first six
+
+    def test_a_short_history_is_kept_whole(self):
+        from app.session import recent_exchanges
+
+        history = self._lines(3)
+        assert recent_exchanges(history, max_exchanges=6) == history
+
+    def test_over_budget_it_sheds_the_oldest_end(self):
+        from app.session import recent_exchanges
+
+        history = self._lines(6, size=1000)
+        window = recent_exchanges(history, max_exchanges=50, char_budget=2500)
+
+        assert len(window) < len(history)
+        assert window[-1] is history[-1]   # the newest line survives
+        assert history[0] not in window    # and the stalest one does not
+
+    def test_one_human_message_later_restores_normal_windowing(self):
+        from app.session import recent_exchanges
+        from app.models import ChatMessage
+
+        history = self._lines(3) + [ChatMessage(role="user", content="q")] + self._lines(2)
+        window = recent_exchanges(history, max_exchanges=6)
+
+        # An exchange exists again, so the leading orphans come along as
+        # context rather than being counted.
+        assert window == history

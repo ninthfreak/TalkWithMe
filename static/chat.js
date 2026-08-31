@@ -269,7 +269,6 @@ async function submitSpeakAs(e) {
                 persona: persona,
                 text: text,
                 chat_room: currentChatRoom,
-                message_id: crypto.randomUUID(),
             }),
         });
 

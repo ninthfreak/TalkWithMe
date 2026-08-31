@@ -733,11 +733,20 @@ async def _speak_stream(req: SpeakAsRequest) -> AsyncIterator[str]:
         return
 
     turn_room = session.current_room
+
+    # The room's own cast, the persona the player has adopted included:
+    # speaking as your own character is the player writing, not the LLM.
+    # Restricted to the room for the same reason replies are — a line from
+    # someone the room has never heard of contradicts the roster the next
+    # persona is given ("the only people here are…"), and an unexplained
+    # voice in the transcript is how invented characters start.
+    cast = _resolve_room_personas(req.chat_room, exclude_adopted=False)
     persona = next(
-        (p for p in get_personas().personas if p.name == req.persona), None
+        (p for p in get_personas().personas if p.name == req.persona and p.name in cast),
+        None,
     )
     if persona is None:
-        yield f'data: {json.dumps({"type": "error", "message": f"Persona {req.persona} not found"})}\n\n'
+        yield f'data: {json.dumps({"type": "error", "message": f"{req.persona} is not in this room."})}\n\n'
         yield f'data: {json.dumps({"type": "complete"})}\n\n'
         return
 
