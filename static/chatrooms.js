@@ -95,13 +95,10 @@ function applyChatRoomFilter() {
     // Update dropdown selection
     chatRoomDropdown.value = currentChatRoom;
 
-    // Update echo chamber checkbox state (case-insensitive, matching backend behavior)
-    const roomInfo = allChatRooms.find(r => r.name.toLowerCase() === currentChatRoom.toLowerCase());
-    const echoEnabled = roomInfo ? roomInfo.echo_chamber : false;
-    echoChamberToggle.checked = echoEnabled;
-    echoChamberToggle.disabled = !isActiveRoom;
-
-    applyPlayerProfileControls(isActiveRoom);
+    // Who the player is playing is deliberately untouched here: it is the
+    // player's, not the room's, so a room switch neither loads nor resets
+    // it. Only the "is this room's requirement met?" styling is refreshed.
+    applyPlayingAsControls();
 }
 
 /**
@@ -134,15 +131,13 @@ function setupChatRoomEventListeners() {
     });
 
     // Echo chamber toggle
-    echoChamberToggle.addEventListener("change", () => {
-        updateEchoChamber(currentChatRoom, echoChamberToggle.checked);
-    });
-
     // "Add persona" button in sidebar
     btnAddPersona.addEventListener("click", openPersonaPicker);
 
-    setupPlayerProfileEventListeners();
+    setupPlayingAsEventListeners();
+    setupSpeakAsEventListeners();
     setupRoomEditorEventListeners();
+    loadPlayer();
 
     // Chat rooms editor button in topbar
     document.getElementById("btn-chat-rooms").addEventListener("click", openChatRoomsEditor);
@@ -198,30 +193,6 @@ async function switchChatRoom(roomName) {
 
     // Re-apply filter
     applyChatRoomFilter();
-}
-
-/**
- * Persist echo chamber toggle for the current chat room.
- */
-async function updateEchoChamber(roomName, enabled) {
-    if (roomName === "default") {
-        // Default room cannot be modified
-        echoChamberToggle.checked = false;
-        return;
-    }
-    // Skip no-op to avoid unnecessary PUTs (and handle case-insensitive room matching)
-    const currentRoom = allChatRooms.find(r => r.name.toLowerCase() === roomName.toLowerCase());
-    if (currentRoom && currentRoom.echo_chamber === enabled) {
-        return;
-    }
-    try {
-        await saveRoomSettings(roomName, { echo_chamber: enabled });
-        // Reload from server to sync all state (persona lists, echo flag, etc.)
-        await loadChatRooms();
-    } catch (err) {
-        console.error("Update echo chamber error:", err);
-        echoChamberToggle.checked = !enabled;
-    }
 }
 
 /**
@@ -552,155 +523,171 @@ async function addSelectedPersonasToRoom() {
 }
 
 /* ==========================================================================
-   Player profile — the human's own character in this room
+   Playing as — which persona the human has adopted
 
-   Per room rather than global: you may be a different character in each
-   room, the same way the personas differ between rooms. The "default" room
-   has no config entry, so it supports neither the profile nor the
-   requirement (its controls are hidden).
+   Not a written profile and not room data: the personas already carry a
+   name, a description and a system prompt, so the player picks one of them
+   rather than describing a second, parallel character that could drift
+   from the list. It follows the player between rooms; a room may *require*
+   that one is picked (a property of the room, in the room editor), but it
+   never owns the choice.
    ========================================================================== */
 
 function currentRoomInfo() {
     return roomByName(currentChatRoom);
 }
 
-function emptyProfile() {
-    return { name: "", description: "", appearance: "" };
+/** Who the player is playing, cached from /api/player. */
+let player = { persona_name: "" };
+
+async function loadPlayer() {
+    try {
+        const resp = await fetch("/api/player");
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        player = await resp.json();
+    } catch (err) {
+        console.error("Failed to load who you are playing:", err);
+    }
+    applyPlayingAsControls();
 }
 
 /**
  * The name to show on the human's own messages, or "" for none.
  *
- * Takes a room name so persisted history renders with the character who
- * belongs to *that* room, not whichever room happens to be selected.
+ * Resolved against the loaded persona list, matching what the server does:
+ * the adopted persona can be deleted or renamed, and a dangling name must
+ * degrade to an unlabelled bubble rather than showing a character who no
+ * longer exists.
  */
-function playerDisplayName(roomName) {
-    const name = roomName || currentChatRoom;
-    const room = allChatRooms.find(r => r.name.toLowerCase() === String(name).toLowerCase());
-    return ((room && room.player_profile && room.player_profile.name) || "").trim();
+function playerDisplayName() {
+    const name = (player.persona_name || "").trim();
+    if (!name) return "";
+    return personas.some(p => p.name === name) ? name : "";
 }
 
-function profileIsComplete(profile) {
-    // Must match PlayerProfile.is_complete on the server: appearance stays
-    // optional, so a character can be described without being pictured.
-    return !!(profile && profile.name.trim() && profile.description.trim());
-}
-
-/** True when the current room demands a profile it does not yet have. */
-function profileRequiredButMissing() {
+/** True when the current room demands a character and none is adopted. */
+function personaRequiredButMissing() {
     const room = currentRoomInfo();
-    if (!room || !room.require_player_profile) return false;
-    return !profileIsComplete(room.player_profile);
+    if (!room || !room.require_player_persona) return false;
+    return !playerDisplayName();
 }
 
-/** Reflect the current room's profile state in the left panel. */
-function applyPlayerProfileControls(isActiveRoom) {
-    const room = currentRoomInfo();
-    const profile = (room && room.player_profile) || emptyProfile();
-
-    requireProfileToggle.checked = room ? !!room.require_player_profile : false;
-    requireProfileToggle.disabled = !isActiveRoom;
-    btnPlayerProfile.disabled = !isActiveRoom;
-
-    // Showing the character's name doubles as confirmation it was saved.
-    btnPlayerProfile.textContent = profile.name.trim()
-        ? `Your character: ${profile.name.trim()}`
-        : "Your character…";
-    btnPlayerProfile.classList.toggle("profile-missing", profileRequiredButMissing());
-    playerProfileWrapper.classList.toggle("hidden", !isActiveRoom);
+/** Reflect who the player is playing in the left panel. */
+function applyPlayingAsControls() {
+    const name = playerDisplayName();
+    btnPlayingAs.textContent = name ? `Playing as: ${name}` : "Playing as\u2026";
+    btnPlayingAs.classList.toggle("needs-character", personaRequiredButMissing());
+    refreshRoomEditPlayingAsSummary();
+    // The adopted persona is the player, so their card is marked and their
+    // "speak as" button withdrawn — you speak as them by typing.
+    highlightAdoptedPersona();
 }
-
-// Which room the open profile dialog is editing. Not always the selected
-// room: the room editor can open it for any room.
-let profileRoomName = null;
 
 function roomByName(name) {
     return allChatRooms.find(
         r => r.name.toLowerCase() === String(name).toLowerCase());
 }
 
-function openPlayerProfile(roomName) {
-    const room = roomName ? roomByName(roomName) : currentRoomInfo();
-    if (!room) return;
-    profileRoomName = room.name;
-    const profile = room.player_profile || emptyProfile();
-    ppfName.value = profile.name || "";
-    ppfDescription.value = profile.description || "";
-    ppfAppearance.value = profile.appearance || "";
-    document.getElementById("pp-profile-room").textContent =
-        `This character is used in "${room.name}" only.`;
-    hidePlayerProfileError();
-    playerProfileOverlay.classList.remove("hidden");
-    ppfName.focus();
+function openPlayingAs() {
+    renderPlayingAsList();
+    hidePlayingAsError();
+    playingAsOverlay.classList.remove("hidden");
 }
 
-function closePlayerProfile() {
-    playerProfileOverlay.classList.add("hidden");
+/**
+ * One radio per persona, plus "myself". Rendered from the live persona
+ * list on every open rather than cached, so a persona added or deleted
+ * since the last open is right.
+ */
+function renderPlayingAsList() {
+    const chosen = (player.persona_name || "").trim();
+    paListEl.innerHTML = "";
+
+    const options = [{ name: "", label: "Myself \u2014 no character", desc: "" }].concat(
+        personas.map(p => ({ name: p.name, label: p.name, desc: p.description || "" }))
+    );
+
+    for (const opt of options) {
+        const row = document.createElement("label");
+        row.className = "pa-option";
+
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = "playing_as";
+        radio.value = opt.name;
+        radio.checked = opt.name === chosen;
+
+        const text = document.createElement("span");
+        text.className = "pa-option-text";
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "pa-option-name";
+        nameEl.textContent = opt.label;
+        text.appendChild(nameEl);
+
+        if (opt.desc) {
+            const descEl = document.createElement("span");
+            descEl.className = "pa-option-desc";
+            descEl.textContent = opt.desc;
+            text.appendChild(descEl);
+        }
+
+        row.appendChild(radio);
+        row.appendChild(text);
+        paListEl.appendChild(row);
+    }
+
+    // Nothing matched — the stored name refers to a persona that is gone.
+    // Fall back to "myself" so the dialog always shows a live selection.
+    if (!paListEl.querySelector("input:checked")) {
+        const first = paListEl.querySelector("input");
+        if (first) first.checked = true;
+    }
 }
 
-function showPlayerProfileError(msg) {
-    const el = document.getElementById("pp-profile-error");
+function closePlayingAs() {
+    playingAsOverlay.classList.add("hidden");
+}
+
+function showPlayingAsError(msg) {
+    const el = document.getElementById("pa-error");
     el.textContent = msg;
     el.classList.remove("hidden");
 }
 
-function hidePlayerProfileError() {
-    document.getElementById("pp-profile-error").classList.add("hidden");
+function hidePlayingAsError() {
+    document.getElementById("pa-error").classList.add("hidden");
 }
 
-async function savePlayerProfile(e) {
+async function savePlayingAs(e) {
     if (e) e.preventDefault();
-    const room = profileRoomName ? roomByName(profileRoomName) : currentRoomInfo();
-    if (!room) return;
-
-    const payload = {
-        name: ppfName.value.trim(),
-        description: ppfDescription.value.trim(),
-        appearance: ppfAppearance.value.trim(),
-    };
-    // Allow clearing the profile outright, but not saving a half-filled one
-    // that would leave a "required" room permanently blocked.
-    const clearing = !payload.name && !payload.description && !payload.appearance;
-    if (!clearing && !profileIsComplete(payload)) {
-        showPlayerProfileError("Give your character a name and a description.");
-        return;
-    }
+    const checked = paListEl.querySelector('input[name="playing_as"]:checked');
+    const personaName = checked ? checked.value : "";
 
     try {
-        await saveRoomSettings(room.name, { player_profile: payload });
-        closePlayerProfile();
-        applyPlayerProfileControls(currentChatRoom !== "default");
-        refreshRoomEditProfileSummary();
+        const resp = await fetch("/api/player", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ persona_name: personaName }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        player = await resp.json();
     } catch (err) {
-        console.error("Failed to save player profile:", err);
-        showPlayerProfileError("Could not save. Is the server running?");
+        console.error("Failed to save who you are playing:", err);
+        return showPlayingAsError("Could not save. Is the server running?");
     }
+
+    closePlayingAs();
+    applyPlayingAsControls();
 }
 
-async function updateRequirePlayerProfile(enabled) {
-    const room = currentRoomInfo();
-    if (!room || room.require_player_profile === enabled) return;
-    try {
-        await saveRoomSettings(room.name, { require_player_profile: enabled });
-        applyPlayerProfileControls(true);
-        // Turning the requirement on with nothing filled in should say so
-        // now, rather than at the moment the next message is refused.
-        if (profileRequiredButMissing()) openPlayerProfile();
-    } catch (err) {
-        console.error("Failed to update profile requirement:", err);
-        requireProfileToggle.checked = room.require_player_profile;
-    }
-}
-
-function setupPlayerProfileEventListeners() {
-    btnPlayerProfile.addEventListener("click", openPlayerProfile);
-    requireProfileToggle.addEventListener("change", () =>
-        updateRequirePlayerProfile(requireProfileToggle.checked));
-    document.getElementById("pp-profile-form").addEventListener("submit", savePlayerProfile);
-    document.getElementById("pp-profile-btn-close").addEventListener("click", closePlayerProfile);
-    document.getElementById("pp-profile-btn-cancel").addEventListener("click", closePlayerProfile);
-    playerProfileOverlay.addEventListener("click", (e) => {
-        if (e.target === playerProfileOverlay) closePlayerProfile();
+function setupPlayingAsEventListeners() {
+    btnPlayingAs.addEventListener("click", openPlayingAs);
+    document.getElementById("pa-form").addEventListener("submit", savePlayingAs);
+    document.getElementById("pa-btn-close").addEventListener("click", closePlayingAs);
+    document.getElementById("pa-btn-cancel").addEventListener("click", closePlayingAs);
+    playingAsOverlay.addEventListener("click", (e) => {
+        if (e.target === playingAsOverlay) closePlayingAs();
     });
 }
 
@@ -722,26 +709,26 @@ function openRoomEditor(roomName) {
 
     document.getElementById("re-title").textContent = `Edit “${room.name}”`;
     reTypicalLength.value = room.typical_length || "normal";
-    reEchoChamber.checked = !!room.echo_chamber;
-    reRequireProfile.checked = !!room.require_player_profile;
+    reRequirePersona.checked = !!room.require_player_persona;
     document.getElementById("re-personas").textContent =
         room.persona_names.length
             ? `${room.persona_names.length} assigned: ${room.persona_names.join(", ")}`
             : "No personas assigned yet.";
-    refreshRoomEditProfileSummary();
+    refreshRoomEditPlayingAsSummary();
     hideRoomEditError();
     roomEditOverlay.classList.remove("hidden");
 }
 
-function refreshRoomEditProfileSummary() {
-    const el = document.getElementById("re-profile-summary");
-    if (!el || !editingRoomName) return;
-    const room = allChatRooms.find(
-        r => r.name.toLowerCase() === editingRoomName.toLowerCase());
-    const profile = (room && room.player_profile) || emptyProfile();
-    el.textContent = profile.name.trim()
-        ? `Currently: ${profile.name.trim()}`
-        : "No character set for this room.";
+function refreshRoomEditPlayingAsSummary() {
+    // Read-only: whether a character is adopted decides whether this
+    // room's requirement can be met. Choosing one happens under
+    // "Playing as", because the choice is the player's, not the room's.
+    const el = document.getElementById("re-playing-as-summary");
+    if (!el) return;
+    const name = playerDisplayName();
+    el.textContent = name
+        ? `You are playing as ${name}.`
+        : "You are playing as yourself \u2014 pick a character under \u201cPlaying as\u201d.";
 }
 
 function closeRoomEditor() {
@@ -768,8 +755,7 @@ async function submitRoomEditor(e) {
     // control and the field.
     const patch = {
         typical_length: reTypicalLength.value,
-        echo_chamber: reEchoChamber.checked,
-        require_player_profile: reRequireProfile.checked,
+        require_player_persona: reRequirePersona.checked,
     };
 
     try {
@@ -784,17 +770,15 @@ async function submitRoomEditor(e) {
     // the room list so the new settings take effect immediately.
     await loadChatRooms();
     renderChatRoomList();
+    // "Require a character" may have just turned on or off, which changes
+    // whether the Playing as button reads as unmet.
+    applyPlayingAsControls();
 }
 
 function setupRoomEditorEventListeners() {
     document.getElementById("re-form").addEventListener("submit", submitRoomEditor);
     document.getElementById("re-btn-close").addEventListener("click", closeRoomEditor);
     document.getElementById("re-btn-cancel").addEventListener("click", closeRoomEditor);
-    document.getElementById("re-btn-edit-profile").addEventListener("click", () => {
-        // The profile has its own editor; reuse it rather than duplicating
-        // three fields in a second dialog.
-        openPlayerProfile(editingRoomName);
-    });
     roomEditOverlay.addEventListener("click", (e) => {
         if (e.target === roomEditOverlay) closeRoomEditor();
     });

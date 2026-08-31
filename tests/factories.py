@@ -22,6 +22,7 @@ from app.config import (
     MCPServerConfig,
     Persona,
     PersonasConfig,
+    PlayerConfig,
     STTConfig,
     TTSConfig,
 )
@@ -75,8 +76,13 @@ def make_personas() -> PersonasConfig:
 def make_chatrooms() -> ChatRoomsConfig:
     """One stock chat room containing both personas."""
     return ChatRoomsConfig(
-        chat_rooms=[ChatRoom(name="TNG", persona_names=["Alex", "Luna"], echo_chamber=False)]
+        chat_rooms=[ChatRoom(name="TNG", persona_names=["Alex", "Luna"])]
     )
+
+
+def make_player() -> PlayerConfig:
+    """No character set — the default state for a fresh install."""
+    return PlayerConfig()
 
 
 def make_mcp_server(name: str = "tools-1", url: str = "http://mcp.local:9000") -> MCPServerConfig:

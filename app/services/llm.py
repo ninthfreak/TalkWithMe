@@ -147,7 +147,11 @@ async def chat_completion(
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             body = resp.json()
-            return body["choices"][0]["message"]["content"]
+            # "content" is null, not absent, when the model returns a tool
+            # call or is stopped at zero tokens. Callers here all treat the
+            # result as a string ("".strip(), truthiness), so a None would
+            # crash the router and the suggestion endpoint alike.
+            return body["choices"][0]["message"]["content"] or ""
     except Exception as exc:
         logger.warning("LLM non-streaming call failed: %s", exc)
         return ""

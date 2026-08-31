@@ -150,6 +150,16 @@ class TestChatCompletion:
         assert payload["max_tokens"] == 16
         assert payload["temperature"] == 0.1  # deterministic routing
 
+    def test_a_null_content_comes_back_as_an_empty_string(self, monkeypatch):
+        # "content" is null, not absent, when the model returns a tool call
+        # or is stopped at zero tokens. Every caller treats the result as a
+        # string (.strip(), truthiness), so a None crashed the router and
+        # the suggestion endpoint rather than falling back.
+        resp = json_response(200, {"choices": [{"message": {"content": None}}]})
+        patch_llm_client(monkeypatch, FakeLLMClient([], post_response=resp))
+
+        assert _run(llm.chat_completion([{"role": "user", "content": "pick"}])) == ""
+
     def test_chat_completion_returns_empty_string_on_failure(self, monkeypatch):
         class Down(FakeLLMClient):
             async def post(self, url, json=None):

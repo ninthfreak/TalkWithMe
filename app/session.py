@@ -81,9 +81,22 @@ def recent_exchanges(
 
     # A single exchange still over budget — a wide room answering at length.
     # Shed its oldest replies, never the human message anchoring them.
+    #
+    # Anchored on the exchange start, not index 0: a history that opens with
+    # an assistant message (an orphan reply, which persisted history can
+    # contain) put the human turn at index 1, so deleting index 1 threw away
+    # the very message this function exists to keep.
     dropped_replies = 0
-    while _window_chars(window) > char_budget and len(window) > 2:
-        del window[1]
+    starts = _exchange_starts(window)
+    anchor = starts[0] if starts else 0
+    if anchor:
+        # Replies that precede every exchange are context-free; drop them
+        # before touching anything inside the exchange itself.
+        del window[:anchor]
+        dropped_replies += anchor
+        anchor = 0
+    while _window_chars(window) > char_budget and len(window) > anchor + 2:
+        del window[anchor + 1]
         dropped_replies += 1
 
     logger.info(
@@ -131,7 +144,11 @@ class SessionManager:
 
         Messages are persisted individually as they arrive, so no bulk
         flush is needed here. Just updates the room tracker.
+
+        The name is validated because it becomes a directory name — see
+        persistence.safe_room_name. Raises UnsafeRoomName.
         """
+        room_name = persistence.safe_room_name(room_name)
         if room_name == self._current_room:
             return
         self._current_room = room_name
@@ -150,6 +167,7 @@ class SessionManager:
         Clears any existing in-memory history first, then populates from disk.
         Uses no-persist variants since messages are already on disk.
         """
+        room_name = persistence.safe_room_name(room_name)
         self._history.clear()
         self._current_room = room_name
         persisted = persistence.load_history(room_name)
@@ -171,26 +189,40 @@ class SessionManager:
     def history(self) -> List[ChatMessage]:
         return list(self._history)
 
-    def add_user_message(self, content: str, message_id: str):
-        """Append a user message to history and persist it."""
+    def add_user_message(self, content: str, message_id: str, room: Optional[str] = None):
+        """Append a user message to history and persist it.
+
+        *room* pins the write to the room the turn started in; see
+        add_assistant_message.
+        """
         self._history.append(ChatMessage(role="user", content=content))
-        persistence.persist_message(self._current_room, self._history[-1], message_id)
+        persistence.persist_message(room or self._current_room, self._history[-1], message_id)
 
     def add_assistant_message(
-        self, content: str, persona: str, message_id: str, truncated: bool = False
+        self,
+        content: str,
+        persona: str,
+        message_id: str,
+        truncated: bool = False,
+        room: Optional[str] = None,
     ):
         """Append an assistant message to history and persist it.
 
         *truncated* marks a reply the LLM cut off at max_tokens. It changes
         only what later personas see (see build_llm_messages); the persisted
         text is exactly what the user saw.
+
+        *room* pins the write to the room the turn started in. Reading
+        self._current_room at persist time instead meant that switching
+        rooms (or pressing New Chat) while a reply was still streaming
+        filed that reply in whichever room the user had just moved to.
         """
         self._history.append(
             ChatMessage(
                 role="assistant", content=content, persona=persona, truncated=truncated
             )
         )
-        persistence.persist_message(self._current_room, self._history[-1], message_id)
+        persistence.persist_message(room or self._current_room, self._history[-1], message_id)
 
     def add_user_message_no_persist(self, content: str):
         """Append a user message to history without persisting.

@@ -17,7 +17,7 @@ from app.config import (
     Persona,
     PersonasConfig,
     LengthBias,
-    PlayerProfile,
+    PlayerConfig,
     TypicalLength,
 )
 from tests.factories import (
@@ -327,28 +327,98 @@ class TestMultiPersonaReplies:
 
 
 # ---------------------------------------------------------------------------
-# Echo chamber
+# Speaking as a persona
 # ---------------------------------------------------------------------------
 
-class TestEchoChamber:
-    def test_echoes_user_message_verbatim_without_llm(self, client, monkeypatch):
-        _patch_chatrooms(monkeypatch,
-                         [ChatRoom(name="Echo", persona_names=["Alex"], echo_chamber=True)])
-        _patch_general(monkeypatch, max_persona_replies=4)  # must be overridden to 1
+class TestSpeakAsPersona:
+    """The player writes the line; the persona says it, word for word.
 
+    Replaces the old echo chamber, which got at the same idea sideways: a
+    mode the whole room sat in, bouncing your own message back at you from
+    whichever persona the selection rules happened to pick.
+    """
+
+    def _no_llm(self, monkeypatch):
         def fail(*a, **kw):
-            raise AssertionError("echo chamber must bypass the LLM entirely")
-
+            raise AssertionError("speaking as a persona must not reach the LLM")
         monkeypatch.setattr(chat_router, "stream_chat", fail)
+        monkeypatch.setattr(chat_router, "stream_chat_with_tools", fail)
 
-        events = _chat(client, who_answers="Alex", chat_room="Echo")
+    def _speak(self, client, **overrides):
+        payload = {"persona": "Alex", "text": "Fine, I'll go.", "chat_room": "TNG"}
+        payload.update(overrides)
+        resp = client.post("/api/chat/speak", json=payload)
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        return parse_sse_events(resp.text)
 
-        tokens = sse_events_by_type(events, "token")
-        assert [t["token"] for t in tokens] == ["hello there"]
-        done = sse_events_by_type(events, "done")[0]
-        assert done["text"] == "hello there"
-        # Exactly one persona responds, even though max_persona_replies is 4.
-        assert [e["persona"] for e in sse_events_by_type(events, "start")] == ["Alex"]
+    def test_the_line_is_posted_verbatim_without_the_llm(self, client, monkeypatch):
+        self._no_llm(monkeypatch)
+        events = self._speak(client)
+
+        assert [e["type"] for e in events] == ["start", "token", "done", "complete"]
+        assert [t["token"] for t in sse_events_by_type(events, "token")] == ["Fine, I'll go."]
+        assert sse_events_by_type(events, "done")[0]["text"] == "Fine, I'll go."
+        assert sse_events_by_type(events, "start")[0]["persona"] == "Alex"
+
+    def test_it_is_persisted_as_that_personas_message(self, client, monkeypatch):
+        self._no_llm(monkeypatch)
+        self._speak(client, persona="Luna", text="I disagree.")
+
+        assert [(m.role, m.persona, m.content) for m in session.history] == [
+            ("assistant", "Luna", "I disagree.")
+        ]
+        from app.persistence import load_history
+        stored = load_history("TNG")
+        assert [(m["sender"], m["text"]) for m in stored] == [("Luna", "I disagree.")]
+
+    def test_the_next_persona_sees_it_in_history(self, client, monkeypatch):
+        self._speak(client, persona="Luna", text="I disagree.")
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        transcript = [m["content"] for m in calls[0]["messages"] if m["role"] != "system"]
+        assert "[Luna]: I disagree." in transcript
+
+    def test_max_persona_replies_is_irrelevant(self, client, monkeypatch):
+        # Nobody answers it; the player said one thing as one persona.
+        _patch_general(monkeypatch, max_persona_replies=6)
+        self._no_llm(monkeypatch)
+        events = self._speak(client)
+        assert len(sse_events_by_type(events, "start")) == 1
+
+    def test_it_works_in_the_default_room_too(self, client, monkeypatch):
+        self._no_llm(monkeypatch)
+        events = self._speak(client, chat_room="default")
+        assert sse_events_by_type(events, "done")[0]["text"] == "Fine, I'll go."
+
+    def test_you_can_speak_as_the_persona_you_are_playing(self, client, monkeypatch):
+        # Excluded from *answering*, but not from being spoken as: the
+        # exclusion exists so you are not talking to yourself, and putting
+        # your own character's line in is the player writing, not the LLM.
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name="Alex"))
+        self._no_llm(monkeypatch)
+        assert sse_events_by_type(self._speak(client), "done")
+
+    def test_an_unknown_persona_is_refused(self, client):
+        events = self._speak(client, persona="Nobody")
+        assert [e["type"] for e in events] == ["error", "complete"]
+        assert session.history == []
+
+    def test_an_empty_line_is_refused(self, client):
+        events = self._speak(client, text="   ")
+        assert [e["type"] for e in events] == ["error", "complete"]
+        assert session.history == []
+
+    def test_an_unsafe_room_name_is_refused(self, client):
+        events = self._speak(client, chat_room="../config")
+        assert [e["type"] for e in events] == ["error", "complete"]
+
+    def test_the_message_id_from_the_client_is_kept(self, client):
+        mid = str(uuid.uuid4())
+        events = self._speak(client, message_id=mid)
+        assert sse_events_by_type(events, "start")[0]["message_id"] == mid
+        assert sse_events_by_type(events, "done")[0]["message_id"] == mid
 
 
 # ---------------------------------------------------------------------------
@@ -492,18 +562,6 @@ class TestRoomPreamble:
         _chat(client, who_answers="Luna", chat_room="Solo")
 
         assert "You are the only one here, besides the user." in _system_prompt(calls[0])
-
-    def test_echo_chamber_room_gets_no_preamble_or_llm_call(self, client, monkeypatch):
-        _patch_chatrooms(
-            monkeypatch,
-            [ChatRoom(name="Echo", persona_names=["Alex"], echo_chamber=True)],
-        )
-        calls = _capture(monkeypatch)
-        events = _chat(client, who_answers="Alex", chat_room="Echo")
-
-        assert calls == []  # the LLM is bypassed entirely
-        assert sse_events_by_type(events, "done")[0]["text"] == "hello there"
-
 
 class TestTypicalLength:
     def test_length_line_reflects_the_room_tier(self, client, monkeypatch):
@@ -678,41 +736,55 @@ class TestTruncation:
 
 
 # ---------------------------------------------------------------------------
-# Player profile — the human's own character
+# Playing as a persona — the human adopts one of the cast
 # ---------------------------------------------------------------------------
 
-def _profiled_room(monkeypatch, *, require=False, **profile_fields):
-    profile = PlayerProfile(**profile_fields)
+KIRA = Persona(
+    name="Kira",
+    description="A retired thief who owes everyone money.",
+    system_prompt="You are Kira. You deflect with a joke when cornered.",
+    router_hints="theft, debts",
+)
+
+
+def _played_room(monkeypatch, *, require=False, playing="Kira"):
+    """A room with Kira in the cast, and the player possibly playing her.
+
+    Two separate things: the room only knows whether it *requires* that the
+    player is someone, and who they are playing is the player's, in
+    player.yaml.
+    """
+    _patch_personas(monkeypatch, PersonasConfig(
+        personas=make_personas().personas + [KIRA]
+    ))
+    monkeypatch.setattr(
+        app_config, "_player_cache", PlayerConfig(persona_name=playing or "")
+    )
     _patch_chatrooms(monkeypatch, [
         ChatRoom(
             name="Tavern",
-            persona_names=["Alex", "Luna"],
-            require_player_profile=require,
-            player_profile=profile,
+            persona_names=["Alex", "Luna", "Kira"],
+            require_player_persona=require,
         )
     ])
 
 
-class TestPlayerProfileInPrompt:
-    def test_profile_is_described_to_the_persona(self, client, monkeypatch):
-        _profiled_room(
-            monkeypatch,
-            name="Kira",
-            description="A retired thief who owes everyone money.",
-            appearance="Short, scarred hands, a patched green coat.",
-        )
+class TestAdoptedPersonaInPrompt:
+    def test_the_adopted_persona_is_described_to_the_others(self, client, monkeypatch):
+        _played_room(monkeypatch)
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="Tavern")
 
         system = _system_prompt(calls[0])
         assert "You are talking with Kira." in system
         assert "Who they are: A retired thief who owes everyone money." in system
-        # The "picture", as text.
-        assert "What they look like: Short, scarred hands, a patched green coat." in system
+        # The persona's own system prompt, so there is one description of a
+        # character rather than two that can drift apart.
+        assert "How they are written: You are Kira." in system
         assert "Treat Kira as that character" in system
 
     def test_named_player_replaces_the_user_in_the_preamble(self, client, monkeypatch):
-        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        _played_room(monkeypatch)
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="Tavern")
 
@@ -722,17 +794,29 @@ class TestPlayerProfileInPrompt:
         assert "You are not Kira. Never speak or write as Kira" in system
         assert "the user" not in system
 
-    def test_appearance_is_optional(self, client, monkeypatch):
-        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+    def test_the_adopted_persona_does_not_also_answer(self, client, monkeypatch):
+        # You would be talking to yourself. Kira is in the room's cast but
+        # is the player, so she is not an eligible responder.
+        _patch_general(monkeypatch, max_persona_replies=6)
+        _played_room(monkeypatch)
+        _capture(monkeypatch)
+
+        events = _chat(client, who_answers="Kira", chat_room="Tavern")
+
+        who = [e["persona"] for e in sse_events_by_type(events, "start")]
+        assert who and "Kira" not in who
+
+    def test_the_adopted_persona_is_not_in_the_roster(self, client, monkeypatch):
+        _played_room(monkeypatch)
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="Tavern")
 
-        system = _system_prompt(calls[0])
-        assert "Who they are: A thief." in system
-        assert "What they look like" not in system
+        # She is named as the person being spoken to, never as someone else
+        # in the room to reply to.
+        assert "The only people here are: Luna" in _system_prompt(calls[0])
 
-    def test_empty_profile_leaves_the_preamble_as_it_was(self, client, monkeypatch):
-        _profiled_room(monkeypatch)
+    def test_playing_as_nobody_leaves_the_preamble_as_it_was(self, client, monkeypatch):
+        _played_room(monkeypatch, playing=None)
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="Tavern")
 
@@ -741,30 +825,42 @@ class TestPlayerProfileInPrompt:
         assert "the user's included" in system
         assert "You are not the user. Never speak or write as the user" in system
 
-    def test_default_room_has_no_profile(self, client, monkeypatch):
-        # "default" has no chatrooms.yaml entry to carry one.
+    def test_a_deleted_persona_degrades_to_playing_yourself(self, client, monkeypatch):
+        # Adopted, then deleted from the persona list. Half-applying — a
+        # name in the tags that exists nowhere else — is worse than none.
+        _played_room(monkeypatch)
+        _patch_personas(monkeypatch, make_personas())
         calls = _capture(monkeypatch)
-        _chat(client, who_answers="Alex", chat_room="default")
+        _chat(client, who_answers="Alex", chat_room="Tavern")
 
         assert "You are talking with" not in _system_prompt(calls[0])
 
+    def test_it_applies_in_the_default_room_too(self, client, monkeypatch):
+        # Who you are playing is yours, not the room's, so "default" —
+        # which holds no settings — is not a special case.
+        _played_room(monkeypatch)
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="default")
 
-class TestPlayerProfileGate:
+        assert "You are talking with Kira." in _system_prompt(calls[0])
+
+
+class TestRequirePlayerPersonaGate:
     def test_required_but_missing_refuses_the_message(self, client, monkeypatch):
-        _profiled_room(monkeypatch, require=True)
+        _played_room(monkeypatch, require=True, playing=None)
         calls = _capture(monkeypatch)
 
         events = _chat(client, who_answers="Alex", chat_room="Tavern")
 
         types = [e["type"] for e in events]
         assert types == ["error", "complete"]
-        assert "character profile" in events[0]["message"]
+        assert events[0]["message"] == chat_router.PERSONA_REQUIRED_MESSAGE
         assert calls == []  # the LLM is never reached
 
     def test_refused_message_is_not_recorded(self, client, monkeypatch):
         # Bailing before the user message is added keeps the room's history
         # clean — a refused turn should leave no trace.
-        _profiled_room(monkeypatch, require=True)
+        _played_room(monkeypatch, require=True, playing=None)
         _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="Tavern")
 
@@ -772,15 +868,16 @@ class TestPlayerProfileGate:
         from app.persistence import load_history
         assert load_history("Tavern") == []
 
-    def test_half_filled_profile_still_counts_as_missing(self, client, monkeypatch):
-        # A name with no description says nothing useful about the character.
-        _profiled_room(monkeypatch, require=True, name="Kira")
+    def test_a_dangling_name_still_counts_as_missing(self, client, monkeypatch):
+        # Playing someone who no longer exists is not playing anyone.
+        _played_room(monkeypatch, require=True)
+        _patch_personas(monkeypatch, make_personas())
         events = _chat(client, who_answers="Alex", chat_room="Tavern")
 
         assert [e["type"] for e in events] == ["error", "complete"]
 
-    def test_complete_profile_lets_the_message_through(self, client, monkeypatch):
-        _profiled_room(monkeypatch, require=True, name="Kira", description="A thief.")
+    def test_an_adopted_persona_lets_the_message_through(self, client, monkeypatch):
+        _played_room(monkeypatch, require=True)
         _capture(monkeypatch)
 
         events = _chat(client, who_answers="Alex", chat_room="Tavern")
@@ -788,8 +885,8 @@ class TestPlayerProfileGate:
         assert [e["type"] for e in events][-1] == "complete"
         assert sse_events_by_type(events, "done")
 
-    def test_profile_without_the_requirement_never_blocks(self, client, monkeypatch):
-        _profiled_room(monkeypatch, require=False)
+    def test_without_the_requirement_nothing_blocks(self, client, monkeypatch):
+        _played_room(monkeypatch, require=False, playing=None)
         _capture(monkeypatch)
 
         events = _chat(client, who_answers="Alex", chat_room="Tavern")
@@ -829,7 +926,7 @@ class TestNeverSpeakAsTheUser:
         assert all(c.startswith("[") for c in seen[1])
 
     def test_the_human_is_named_in_the_stop_sequences(self, client, monkeypatch):
-        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        _played_room(monkeypatch)
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="Tavern")
 
@@ -837,7 +934,7 @@ class TestNeverSpeakAsTheUser:
         assert "\n[Kira]:" in calls[0]["stop"]
 
     def test_a_reply_opening_as_the_user_is_cut(self, client, monkeypatch):
-        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        _played_room(monkeypatch)
         _stub_stream(monkeypatch, ["My view.\n", "[Kira]: ", "and here is what I say back"])
 
         events = _chat(client, who_answers="Alex", chat_room="Tavern")
@@ -1059,21 +1156,21 @@ class TestSuggestReply:
 
     def test_the_character_description_is_a_section_of_its_own(self, client, monkeypatch):
         # It carries *what* to say, so it gets the same structural weight as
-        # the voice sample rather than a passing mention.
-        _profiled_room(monkeypatch, name="Kira", description="A retired thief.",
-                       appearance="A patched green coat.")
+        # the voice sample rather than a passing mention. Both halves come
+        # from the adopted persona, so there is one description of Kira.
+        _played_room(monkeypatch)
         seen = self._stub(monkeypatch)
 
         self._suggest(client, room="Tavern")
 
         prompt = seen[0]["messages"][0]["content"]
-        assert "Who you are:\nA retired thief." in prompt
-        assert "What you look like:\nA patched green coat." in prompt
+        assert "Who you are:\nA retired thief who owes everyone money." in prompt
+        assert "How you are written:\nYou are Kira." in prompt
 
     def test_the_description_carries_an_instruction_to_act_on_it(self, client, monkeypatch):
         # Without this the description was decoration: the draft sounded
         # right and behaved like nobody in particular.
-        _profiled_room(monkeypatch, name="Kira", description="A retired thief.")
+        _played_room(monkeypatch)
         seen = self._stub(monkeypatch)
 
         self._suggest(client, room="Tavern")
@@ -1087,11 +1184,10 @@ class TestSuggestReply:
         self._suggest(client)
         assert "Stay in character" not in seen[0]["messages"][0]["content"]
 
-    def test_the_persona_facing_profile_block_is_not_reused(self, client, monkeypatch):
+    def test_the_persona_facing_block_is_not_reused(self, client, monkeypatch):
         # _player_lines() ends "never write their lines for them" — the exact
         # opposite of what is being asked here.
-        _profiled_room(monkeypatch, name="Kira", description="A thief.",
-                       appearance="A green coat.")
+        _played_room(monkeypatch)
         seen = self._stub(monkeypatch)
 
         self._suggest(client, room="Tavern")
@@ -1101,7 +1197,7 @@ class TestSuggestReply:
         assert "You are talking with" not in prompt
 
     def test_it_writes_in_the_second_person_as_the_character(self, client, monkeypatch):
-        _profiled_room(monkeypatch, name="Kira", description="A thief.")
+        _played_room(monkeypatch)
         seen = self._stub(monkeypatch)
 
         self._suggest(client, room="Tavern")

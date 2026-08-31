@@ -46,15 +46,33 @@ _MAX_HOLD = 32
 # case; a bracketed prefix or a known persona name never reaches it.
 _PROSE_LEAD_INS = frozenset(
     {
-        "note", "notes", "warning", "caution", "example", "examples", "answer",
-        "question", "tip", "tips", "summary", "conclusion", "edit", "update",
-        "ps", "aside", "caveat", "disclaimer", "hint", "key", "result",
-        "results", "output", "input", "error", "todo", "step", "steps",
-        "reason", "problem", "solution", "goal", "context", "source",
-        "sources", "reference", "references", "translation", "pros", "cons",
+        # Labels
+        "note", "notes", "warning", "caution", "example", "examples",
+        "answer", "question", "tip", "tips", "summary", "conclusion",
+        "edit", "update", "ps", "aside", "caveat", "disclaimer", "hint",
+        "key", "result", "results", "output", "input", "error", "todo",
+        "step", "steps", "reason", "problem", "solution", "goal",
+        "context", "source", "sources", "reference", "references",
+        "translation", "pros", "cons", "takeaway", "recommendation",
+        "verdict", "thought", "thoughts", "response", "reply", "plan",
+        "approach",
+        # Adverbs and deictics that open a line. None of them is a
+        # plausible character name, and all of them were cutting replies:
+        # a single capitalised word before a colon is exactly the shape of
+        # an invented speaker.
         "first", "second", "third", "finally", "however", "instead",
+        "here", "there", "now", "then", "next", "also", "besides",
+        "meanwhile", "anyway", "overall", "again", "lastly", "otherwise",
+        "therefore", "still",
     }
 )
+
+# The stoplist is consulted for the whole phrase *and* its last word, so a
+# multi-word lead-in ending in one of the above ("Final Answer:",
+# "Executive Summary:", "My Recommendation:") is covered by the tail alone.
+# Only the unbracketed, unknown-name case reaches it; a bracketed prefix or
+# a known persona name never does.
+
 
 # Decisions the buffer can reach.
 _WAIT, _FLUSH, _CUT, _STRIP = "wait", "flush", "cut", "strip"
@@ -74,6 +92,21 @@ def _capitalised_words(text: str, limit: int = 3) -> bool:
     return all(w[:1].isupper() for w in words)
 
 
+def _is_prose_lead_in(text: str) -> bool:
+    """True for a phrase that opens a line in prose rather than naming a speaker.
+
+    Checks the whole phrase *and* its last word, because the stoplist held
+    single words while real lead-ins are often multi-word: "Final Answer:"
+    and "Executive Summary:" both sailed past a bare-word lookup and cut
+    correct replies to nothing.
+    """
+    flat = text.casefold().replace(".", "").strip()
+    if flat in _PROSE_LEAD_INS:
+        return True
+    words = flat.split()
+    return bool(words) and words[-1] in _PROSE_LEAD_INS
+
+
 def _looks_like_a_name(text: str) -> bool:
     """True for 1-3 capitalised words — "Marcus", "Dr. Smith", "Mary Anne".
 
@@ -84,7 +117,7 @@ def _looks_like_a_name(text: str) -> bool:
     words = text.split()
     if not (1 <= len(words) <= 3):
         return False
-    if text.casefold().strip(".") in _PROSE_LEAD_INS:
+    if _is_prose_lead_in(text):
         return False
     return all(w[:1].isupper() for w in words if w)
 
@@ -112,6 +145,11 @@ class ReplyGuard:
         # Set after stripping a self-prefix: the space that followed the
         # colon belongs to the prefix, not to the reply.
         self._skip_ws = False
+        # Inside a fenced code block nothing is a speaker turn, so a YAML
+        # key like "Model:" or an HTTP header must not cut the reply.
+        self._in_code = False
+        # Text emitted on the current line, used only to spot fence markers.
+        self._line = ""
 
     # -- Public API ---------------------------------------------------------
 
@@ -140,7 +178,7 @@ class ReplyGuard:
                     if ch in " \t":
                         continue
                     self._skip_ws = False
-                out.append(ch)
+                self._emit(out, ch)
                 if ch == "\n":
                     self._holding = True
                     self._hold = ""
@@ -152,15 +190,38 @@ class ReplyGuard:
             return ""
         held, self._hold = self._hold, ""
         self._holding = False
-        return held
+        out: List[str] = []
+        self._emit(out, held)
+        return "".join(out)
 
     # -- Internals ----------------------------------------------------------
+
+    def _emit(self, out: List[str], text: str) -> None:
+        """Append emitted text, tracking ``` fences as lines complete.
+
+        Fences are tracked on *output* rather than on the held buffer: a
+        fence line contains a backtick, which is not a name character, so
+        the line is released long before its newline is ever held. And it
+        must happen as each character is emitted, not at the end of feed(),
+        because the cut decision for the next line is taken inside the same
+        call.
+        """
+        if not text:
+            return
+        out.append(text)
+        for ch in text:
+            if ch == "\n":
+                if self._line.lstrip().startswith("```"):
+                    self._in_code = not self._in_code
+                self._line = ""
+            else:
+                self._line += ch
 
     def _feed_held(self, ch: str, out: List[str]) -> None:
         if ch == "\n":
             # The line ended without a colon, so it was never a prefix.
             # Release it and stay at a line start for the next one.
-            out.append(self._hold + ch)
+            self._emit(out, self._hold + ch)
             self._hold = ""
             return
 
@@ -176,12 +237,18 @@ class ReplyGuard:
             # Drop the persona's own prefix, keep whatever followed it.
             self._hold = self._hold[consumed:].lstrip()
             self._skip_ws = True
-        out.append(self._hold)
+        self._emit(out, self._hold)
         self._hold = ""
         self._holding = False
 
     def _decide(self) -> tuple:
         """Classify the buffer. Returns (decision, chars consumed by prefix)."""
+        if self._in_code:
+            # Code, not dialogue. Release it and stop inspecting this line.
+            if len(self._hold) >= 3 or not "```".startswith(self._hold.lstrip()):
+                return _FLUSH, 0
+            return _WAIT, 0
+
         match = _PREFIX_RE.match(self._hold)
         if match:
             bracketed = bool(match.group(1) and match.group(3))

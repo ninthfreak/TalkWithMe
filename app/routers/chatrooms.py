@@ -14,7 +14,6 @@ from fastapi import APIRouter, HTTPException
 from app.config import (
     ChatRoom,
     ChatRoomsConfig,
-    PlayerProfile,
     get_chatrooms,
     get_personas,
     get_settings,
@@ -37,10 +36,8 @@ def _to_response(room: ChatRoom) -> ChatRoomResponse:
     return ChatRoomResponse(
         name=room.name,
         persona_names=list(room.persona_names),
-        echo_chamber=room.echo_chamber,
         typical_length=room.typical_length,
-        require_player_profile=room.require_player_profile,
-        player_profile=room.player_profile,
+        require_player_persona=room.require_player_persona,
     )
 
 
@@ -92,7 +89,6 @@ def list_all_chatrooms():
         ChatRoomResponse(
             name=DEFAULT_ROOM,
             persona_names=all_persona_names,
-            echo_chamber=False,
             typical_length=get_settings().general.typical_length,
         )
     ]
@@ -162,7 +158,6 @@ def get_chatroom(name: str):
         return ChatRoomResponse(
             name=DEFAULT_ROOM,
             persona_names=all_persona_names,
-            echo_chamber=False,
             typical_length=get_settings().general.typical_length,
         )
 
@@ -240,13 +235,6 @@ def update_chatroom(name: str, req: ChatRoomUpdateRequest):
     room = _editable_room_or_400(name)
 
     update = req.model_dump(exclude_none=True)
-    if "player_profile" in update:
-        # Nested model arrives as a plain dict; whitespace-only fields are
-        # the same as empty, so a profile is never "complete" by accident.
-        update["player_profile"] = PlayerProfile(
-            **{k: v.strip() for k, v in update["player_profile"].items()}
-        )
-
     if not update:
         # Nothing to change — report the room as it stands rather than
         # rewriting chatrooms.yaml for no reason.

@@ -1,5 +1,7 @@
 """API tests for app/routers/personas.py — persona CRUD, cascades, clone, avatars."""
 
+import pytest
+
 from tests.factories import make_personas
 
 
@@ -247,7 +249,7 @@ class TestCascadePreservesRoomSettings:
 
     def _configure_room(self, client):
         client.put("/api/chatrooms/TNG", json={
-            "echo_chamber": True, "typical_length": "terse",
+            "typical_length": "terse", "require_player_persona": True,
         })
 
     def test_rename_preserves_room_settings(self, client):
@@ -258,7 +260,6 @@ class TestCascadePreservesRoomSettings:
 
         body = client.get("/api/chatrooms/TNG").json()
         assert body["persona_names"] == ["Alexander", "Luna"]
-        assert body["echo_chamber"] is True
         assert body["typical_length"] == "terse"
 
     def test_delete_preserves_room_settings(self, client):
@@ -267,5 +268,100 @@ class TestCascadePreservesRoomSettings:
 
         body = client.get("/api/chatrooms/TNG").json()
         assert body["persona_names"] == ["Luna"]
-        assert body["echo_chamber"] is True
         assert body["typical_length"] == "terse"
+
+
+# ---------------------------------------------------------------------------
+# Persona names have to survive a round trip
+# ---------------------------------------------------------------------------
+
+class TestPersonaNameValidation:
+    """A name goes into a URL path segment and into a "[Name]: " tag.
+
+    A name containing "/" returned 201 on create and then 404 on every
+    edit, delete and clone: permanently stuck in personas.yaml and still
+    answering. Refusing it up front is the only place that can be fixed.
+    """
+
+    def _payload(self, name):
+        return {
+            "name": name,
+            "description": "d",
+            "system_prompt": "You are someone.",
+            "router_hints": "things",
+        }
+
+    BAD_NAMES = ["a/b", "a\\b", "line\nbreak", "tab\there", "   ", "", "K" * 26]
+
+    @pytest.mark.parametrize("name", BAD_NAMES)
+    def test_create_refuses_a_name_that_cannot_round_trip(self, client, name):
+        assert client.post("/api/personas", json=self._payload(name)).status_code == 422
+        assert [p["name"] for p in client.get("/api/personas").json()] == ["Alex", "Luna"]
+
+    @pytest.mark.parametrize("name", BAD_NAMES)
+    def test_update_refuses_the_same_names(self, client, name):
+        detail = client.get("/api/personas/Alex/detail").json()
+        detail["name"] = name
+        assert client.put("/api/personas/Alex", json=detail).status_code == 422
+        assert client.get("/api/personas/Alex/detail").status_code == 200
+
+    def test_a_name_at_the_limit_is_accepted(self, client):
+        name = "K" * 25
+        assert client.post("/api/personas", json=self._payload(name)).status_code == 201
+        # And it is still reachable by every route that takes a name.
+        assert client.get(f"/api/personas/{name}/detail").status_code == 200
+        assert client.delete(f"/api/personas/{name}").status_code == 204
+
+    def test_surrounding_whitespace_is_trimmed(self, client):
+        assert client.post(
+            "/api/personas", json=self._payload("  Data  ")
+        ).json()["name"] == "Data"
+
+    def test_spaces_and_punctuation_inside_a_name_are_fine(self, client):
+        assert client.post(
+            "/api/personas", json=self._payload("Dr. Mary-Anne O'Neil")
+        ).status_code == 201
+
+
+class TestCloneNameFitsTheLimit:
+    """A clone must be born editable.
+
+    `{name}_{suffix}` on a name already at the cap produced a persona that
+    `PUT /api/personas/{name}` then rejected — saved under a name it would
+    not accept back.
+    """
+
+    def _make(self, client, name):
+        return client.post("/api/personas", json={
+            "name": name, "description": "d",
+            "system_prompt": "You are someone.", "router_hints": "things",
+        })
+
+    def test_a_long_name_is_trimmed_to_fit(self, client):
+        long_name = "K" * 25
+        self._make(client, long_name)
+
+        clone = client.post(f"/api/personas/{long_name}/clone", json={})
+        assert clone.status_code == 201
+        new_name = clone.json()["name"]
+        assert len(new_name) <= 25
+        assert new_name.endswith("_2")
+
+        # The whole point: the clone can now be edited.
+        detail = client.get(f"/api/personas/{new_name}/detail").json()
+        assert client.put(f"/api/personas/{new_name}", json=detail).status_code == 200
+
+    def test_repeated_clones_stay_unique(self, client):
+        long_name = "K" * 25
+        self._make(client, long_name)
+        names = {
+            client.post(f"/api/personas/{long_name}/clone", json={}).json()["name"]
+            for _ in range(3)
+        }
+        assert len(names) == 3
+        assert all(len(n) <= 25 for n in names)
+
+    def test_a_short_name_is_untouched(self, client):
+        assert client.post(
+            "/api/personas/Alex/clone", json={}
+        ).json()["name"] == "Alex_2"

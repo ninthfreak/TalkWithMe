@@ -29,13 +29,19 @@ logger = logging.getLogger(__name__)
 # 2 = personas use length_bias (relative) instead of typical_length
 #     (absolute); rooms gained typical_length / player_profile; the length
 #     scale was recalibrated for chat.
-# 3 = no structural change. A version 3 briefly removed the room-level
-#     echo_chamber flag; that was reverted, so nothing is rewritten. The
-#     number is *not* rolled back to 2, because files stamped 3 by the
-#     short-lived version would otherwise warn "newer than this app
-#     understands" on every load. Rooms that were migrated while it was in
-#     place lost their echo_chamber flag and default to off.
-CONFIG_SCHEMA_VERSION = 3
+# 3 = no structural change (a removal that was reverted; the number is
+#     kept so files stamped by it do not warn on every load).
+# 4 = echo_chamber is not a room attribute. The Echo chamber checkbox under
+#     the chat room selector is client-side UI state, sent with each
+#     message — the room never knew about it.
+# 5 = the player's character profile is not a room attribute either. A room
+#     can *require* one, but the profile itself belongs to the player and
+#     now lives in player.yaml.
+# 6 = the player no longer writes a character; they adopt one of the
+#     configured personas. player.yaml holds a persona_name instead of a
+#     free-text profile, and the room flag is renamed to match
+#     (require_player_profile -> require_player_persona).
+CONFIG_SCHEMA_VERSION = 6
 
 Notes = List[str]
 Step = Callable[[dict], Tuple[dict, Notes]]
@@ -140,6 +146,25 @@ def _personas_v1_to_v2(raw: dict) -> Tuple[dict, Notes]:
 _PERSONA_STEPS: Dict[int, Step] = {1: _personas_v1_to_v2}
 
 
+def _chatrooms_v3_to_v4(raw: dict) -> Tuple[dict, Notes]:
+    """Drop echo_chamber from stored rooms.
+
+    The checkbox stays exactly where it was, under the chat room selector,
+    but it is UI state rather than something the room owns: the left panel
+    holds controls you use *while in* a room, which is not the same as
+    settings that belong *to* the room.
+    """
+    notes: Notes = []
+    for room in raw.get("chat_rooms") or []:
+        if isinstance(room, dict) and "echo_chamber" in room:
+            was = room.pop("echo_chamber")
+            notes.append(
+                f"{room.get('name', '<unknown>')}: dropped 'echo_chamber: {was}' "
+                "— the Echo chamber checkbox is UI state now, not a room setting"
+            )
+    return raw, notes
+
+
 def migrate_personas(raw: dict) -> Tuple[dict, Notes]:
     """Bring a raw personas.yaml dict up to the current schema."""
     return _apply(raw, _PERSONA_STEPS)
@@ -154,9 +179,87 @@ def migrate_personas(raw: dict) -> Tuple[dict, Notes]:
 # go through _apply so the stamp is added and a future step has somewhere
 # to live.
 
+def _chatrooms_v4_to_v5(raw: dict) -> Tuple[dict, Notes]:
+    """Drop player_profile from stored rooms.
+
+    Whether a room demands a character is a property of the room; the
+    character itself is the player's, and interacts with whichever room
+    they are in. Schema 6 goes further and drops written profiles
+    altogether — the player adopts a persona — so the value is discarded
+    here rather than carried anywhere.
+    """
+    notes: Notes = []
+    for room in raw.get("chat_rooms") or []:
+        if isinstance(room, dict) and "player_profile" in room:
+            room.pop("player_profile")
+            notes.append(
+                f"{room.get('name', '<unknown>')}: dropped 'player_profile' "
+                "— who you are playing is yours, not the room's"
+            )
+    return raw, notes
+
+
+def _chatrooms_v5_to_v6(raw: dict) -> Tuple[dict, Notes]:
+    """Rename require_player_profile -> require_player_persona.
+
+    The flag itself is unchanged and still a room property; only what it
+    demands changed. There are no profiles any more, so a field named after
+    one would describe nothing.
+    """
+    notes: Notes = []
+    for room in raw.get("chat_rooms") or []:
+        if not isinstance(room, dict) or "require_player_profile" not in room:
+            continue
+        value = room.pop("require_player_profile")
+        room.setdefault("require_player_persona", bool(value))
+        notes.append(
+            f"{room.get('name', '<unknown>')}: 'require_player_profile' -> "
+            f"'require_player_persona: {bool(value)}'"
+        )
+    return raw, notes
+
+
+_CHATROOM_STEPS: Dict[int, Step] = {
+    3: _chatrooms_v3_to_v4,
+    4: _chatrooms_v4_to_v5,
+    5: _chatrooms_v5_to_v6,
+}
+
+
+def _player_v5_to_v6(raw: dict) -> Tuple[dict, Notes]:
+    """Drop the hand-written profile; the player adopts a persona instead.
+
+    A profile carried a name, a description and an appearance, all invented
+    by the player. Those are exactly the fields a persona already has, so
+    there is nothing to map the old value onto — the persona list is the
+    single place a character is described now. The old value is reported
+    rather than silently discarded, because "my character vanished" with no
+    explanation is worse than a line in the log.
+    """
+    notes: Notes = []
+    profile = raw.pop("profile", None)
+    if isinstance(profile, dict) and str(profile.get("name", "")).strip():
+        notes.append(
+            f"dropped your written character '{profile['name']}' — pick who you "
+            "are playing from the persona list instead (Playing as…)"
+        )
+    elif profile is not None:
+        notes.append("dropped an empty 'profile'")
+    raw.setdefault("persona_name", "")
+    return raw, notes
+
+
+_PLAYER_STEPS: Dict[int, Step] = {5: _player_v5_to_v6}
+
+
+def migrate_player(raw: dict) -> Tuple[dict, Notes]:
+    """Bring a raw player.yaml dict up to the current schema."""
+    return _apply(raw, _PLAYER_STEPS)
+
+
 def migrate_chatrooms(raw: dict) -> Tuple[dict, Notes]:
     """Bring a raw chatrooms.yaml dict up to the current schema."""
-    return _apply(raw, {})
+    return _apply(raw, _CHATROOM_STEPS)
 
 
 def migrate_settings(raw: dict) -> Tuple[dict, Notes]:

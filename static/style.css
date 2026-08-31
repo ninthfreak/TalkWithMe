@@ -11,6 +11,16 @@
     padding: 0;
 }
 
+/* The JS hides things by adding this class to whatever element it is
+   holding. There was no rule for it, only per-element ones
+   (.modal-overlay.hidden and two others), so every element without its own
+   rule stayed visible when hidden — and an id selector setting `display`
+   would beat a plain class anyway. !important is the point of a utility
+   class: "hidden" has to win. */
+.hidden {
+    display: none !important;
+}
+
 :root {
     --bg-primary: #1a1a2e;
     --bg-secondary: #16213e;
@@ -1372,25 +1382,118 @@ html, body {
     padding: 2px 4px;
 }
 
-/* Player profile controls in the left panel. */
-#player-profile-wrapper {
+/* "Playing as" control in the left panel. */
+#playing-as-wrapper {
     display: flex;
     flex-direction: column;
     gap: 6px;
     margin-bottom: 12px;
 }
 
-#player-profile-wrapper .btn-add-persona {
+#playing-as-wrapper .btn-add-persona {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-/* The room wants a character and does not have one yet. */
-#btn-player-profile.profile-missing {
+/* The room wants a character and none is adopted yet. */
+#btn-playing-as.needs-character {
     border-color: var(--accent);
     color: var(--accent);
+}
+
+/* A line of explanation directly under a modal header, outside the body's
+   own padded container — it needs that padding itself. */
+.modal-intro {
+    padding: 12px 20px 0;
+}
+
+/* "Playing as" picker: one row per persona, plus "myself". */
+.pa-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.pa-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.pa-option:hover {
+    background: var(--bg-tertiary);
+}
+
+.pa-option input {
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+
+.pa-option-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.pa-option-name {
+    font-weight: 600;
+}
+
+.pa-option-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* Speak-as button on each persona card. Kept quiet until the card is
+   hovered so the list still reads as a list of people. */
+.persona-speak-btn {
+    background: transparent;
+    border: none;
+    font-size: 0.95rem;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+    flex-shrink: 0;
+    margin-left: auto;
+    opacity: 0;
+    transition: background 0.15s, opacity 0.15s;
+}
+
+.persona-card:hover .persona-speak-btn,
+.persona-speak-btn:focus-visible {
+    opacity: 0.75;
+}
+
+.persona-speak-btn:hover {
+    background: var(--bg-hover);
+    opacity: 1;
+}
+
+/* The persona the player has adopted: they are you, not someone to talk to. */
+.persona-you-badge {
+    display: none;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--accent);
+    color: #fff;
+    vertical-align: middle;
+}
+
+.persona-card.is-you .persona-you-badge {
+    display: inline-block;
 }
 
 /* The human's own name label, matching the persona name labels but on the

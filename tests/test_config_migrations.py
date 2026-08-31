@@ -19,6 +19,7 @@ from app.config import (
     config_path,
     load_chatrooms,
     load_personas,
+    load_player,
     load_settings,
     migrate_config_files,
     save_personas,
@@ -122,10 +123,9 @@ class TestLegacyChatroomsAndSettings:
         target = tmp_path / "chatrooms.yaml"
         target.write_text(LEGACY_CHATROOMS)
         room = load_chatrooms(target).chat_rooms[0]
-        assert room.echo_chamber is True                       # preserved
+        assert room.persona_names == ["Alex", "Luna"]          # preserved
         assert room.typical_length is TypicalLength.NORMAL     # defaulted
-        assert room.require_player_profile is False
-        assert room.player_profile.name == ""
+        assert room.require_player_persona is False
 
     def test_legacy_settings_load_and_keep_their_values(self, tmp_path):
         target = tmp_path / "settings.yaml"
@@ -217,7 +217,9 @@ class TestLocationMigration:
         (config_dir() / "personas.yaml").write_text(
             "personas:\n- name: Mine\n  system_prompt: hi\n"
         )
-        assert "personas.yaml" not in migrate_config_files()
+        migrate_config_files()
+        # It may be schema-stamped in place, but its *content* is never
+        # replaced by the repo-root copy.
         assert [p.name for p in load_personas().personas] == ["Mine"]
 
     def test_migration_is_idempotent(self, tmp_path):
@@ -244,40 +246,183 @@ class TestPathResolution:
         assert [p.name for p in load_personas().personas] == ["Alex", "Luna", "Sam"]
 
 
-class TestEchoChamberSurvives:
-    """echo_chamber is a room setting again after a brief removal.
+class TestEchoChamberIsNotRoomState:
+    """The Echo chamber checkbox stays under the chat room selector, but it
+    is UI state: the left panel holds controls you use *while in* a room,
+    which is not the same as settings belonging *to* the room."""
 
-    A version 3 dropped it; that was reverted. The version number stays at
-    3 so files stamped by the short-lived version do not warn on every
-    load, and no step rewrites rooms, so the flag is carried through.
+    def test_a_room_with_echo_chamber_still_loads(self, tmp_path):
+        target = tmp_path / "chatrooms.yaml"
+        target.write_text(
+            "chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n  echo_chamber: true\n"
+        )
+        room = load_chatrooms(target).chat_rooms[0]
+        assert room.persona_names == ["Alex"]
+        assert not hasattr(room, "echo_chamber")
+
+    @pytest.mark.parametrize("version", [None, 2, 3])
+    def test_the_key_is_dropped_from_any_earlier_version(self, version):
+        raw = {"chat_rooms": [{"name": "TNG", "echo_chamber": True}]}
+        if version is not None:
+            raw["schema_version"] = version
+
+        migrated, notes = migrate_chatrooms(raw)
+
+        assert "echo_chamber" not in migrated["chat_rooms"][0]
+        assert migrated["schema_version"] == CONFIG_SCHEMA_VERSION
+        assert any("echo_chamber" in n for n in notes)
+
+    def test_other_room_settings_are_untouched(self):
+        migrated, _ = migrate_chatrooms({"chat_rooms": [
+            {"name": "TNG", "echo_chamber": True, "typical_length": "brief",
+             "require_player_profile": True},
+        ]})
+        room = migrated["chat_rooms"][0]
+        assert room["typical_length"] == "brief"
+        # Renamed by the v5 -> v6 step, but the value survives.
+        assert room["require_player_persona"] is True
+
+    def test_rooms_without_the_key_produce_no_notes(self):
+        _, notes = migrate_chatrooms({"chat_rooms": [{"name": "TNG"}]})
+        assert notes == []
+
+
+class TestWrittenProfilesBecomeAnAdoptedPersona:
+    """Profiles were per room, then the player's, and now do not exist.
+
+    The player adopts one of the configured personas instead, so there is
+    one description of a character rather than two that can drift. Nothing
+    maps a written profile onto a persona, so the old value is dropped —
+    but visibly, in the log, because "my character vanished" with no
+    explanation is worse than a line saying so.
     """
 
-    @pytest.mark.parametrize("header", ["", "schema_version: 2\n"])
-    def test_the_flag_is_preserved_however_the_file_is_stamped(self, tmp_path, header):
-        target = tmp_path / "chatrooms.yaml"
+    ROOMS_WITH_PROFILES = """\
+chat_rooms:
+- name: Pub
+  persona_names: [Alex]
+  require_player_profile: true
+  player_profile: {name: Gregory, description: An innkeeper., appearance: Greying.}
+- name: Docks
+  persona_names: [Luna]
+  player_profile: {name: Sal, description: A dockhand., appearance: ''}
+"""
+
+    def _upgrade(self, tmp_path):
+        (tmp_path / "chatrooms.yaml").write_text(self.ROOMS_WITH_PROFILES)
+        return migrate_config_files()
+
+    def test_the_rooms_keep_their_requirement_but_lose_the_profile(self, tmp_path):
+        self._upgrade(tmp_path)
+        rooms = {r.name: r for r in load_chatrooms().chat_rooms}
+        assert rooms["Pub"].require_player_persona is True
+        assert not hasattr(rooms["Pub"], "player_profile")
+
+    def test_no_player_file_is_invented_from_the_rooms(self, tmp_path):
+        # There is nothing in a written profile that names a persona, so
+        # guessing one would put words in the player's mouth.
+        assert "player.yaml" not in self._upgrade(tmp_path)
+        assert load_player().persona_name == ""
+
+    def test_a_room_key_alone_is_dropped_by_the_schema_step(self):
+        migrated, notes = migrate_chatrooms({"chat_rooms": [
+            {"name": "TNG", "require_player_profile": True,
+             "player_profile": {"name": "Kira"}},
+        ]})
+        room = migrated["chat_rooms"][0]
+        assert "player_profile" not in room
+        assert room["require_player_persona"] is True
+        assert any("player_profile" in n for n in notes)
+
+    def test_the_room_flag_is_renamed_not_reset(self):
+        migrated, notes = migrate_chatrooms({
+            "schema_version": 5,
+            "chat_rooms": [{"name": "TNG", "require_player_profile": True}],
+        })
+        room = migrated["chat_rooms"][0]
+        assert "require_player_profile" not in room
+        assert room["require_player_persona"] is True
+        assert any("require_player_persona" in n for n in notes)
+
+    def test_a_written_profile_in_player_yaml_is_dropped_and_reported(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "player.yaml").write_text(
+            "schema_version: 5\nprofile:\n  name: Gregory\n  description: An innkeeper.\n"
+        )
+
+        assert "player.yaml" in migrate_config_files()
+
+        raw = yaml.safe_load((tmp_path / "config" / "player.yaml").read_text())
+        assert "profile" not in raw
+        assert raw["persona_name"] == ""
+        assert load_player().persona_name == ""
+
+    def test_the_dropped_character_is_named_in_the_log(self, tmp_path, caplog):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "player.yaml").write_text(
+            "schema_version: 5\nprofile:\n  name: Gregory\n"
+        )
+        with caplog.at_level("INFO"):
+            migrate_config_files()
+        assert "Gregory" in caplog.text
+
+    def test_an_adopted_persona_survives_a_reload(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "player.yaml").write_text(
+            f"schema_version: {CONFIG_SCHEMA_VERSION}\npersona_name: Luna\n"
+        )
+        assert migrate_config_files() == []
+        assert load_player().persona_name == "Luna"
+
+
+class TestOutOfDateFilesAreRewritten:
+    """Loading migrates in memory; nothing rewrote the file until a save.
+
+    A stale key could therefore sit on disk indefinitely, so what the app
+    reads and what the file says drifted apart.
+    """
+
+    def test_an_existing_config_file_is_brought_up_to_date(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "chatrooms.yaml").write_text(
+            "chat_rooms:\n- name: Pub\n  persona_names: [Alex]\n"
+            "  player_profile: {name: Gregory, description: An innkeeper.}\n"
+        )
+
+        assert "chatrooms.yaml" in migrate_config_files()
+
+        raw = yaml.safe_load((tmp_path / "config" / "chatrooms.yaml").read_text())
+        assert raw["schema_version"] == CONFIG_SCHEMA_VERSION
+        assert "player_profile" not in raw["chat_rooms"][0]
+
+    def test_a_file_from_a_newer_release_is_left_alone(self, tmp_path):
+        # _apply() refuses to touch it, so rewriting it here only churned
+        # the mtime and reported a migration that never happened.
+        (tmp_path / "config").mkdir()
+        target = tmp_path / "config" / "chatrooms.yaml"
         target.write_text(
-            header + "chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n"
-            "  echo_chamber: true\n"
+            f"schema_version: {CONFIG_SCHEMA_VERSION + 5}\nchat_rooms:\n- name: Pub\n"
         )
-        assert load_chatrooms(target).chat_rooms[0].echo_chamber is True
+        before = target.read_text()
 
-    def test_a_file_stamped_by_the_reverted_version_loads_without_warning(
-        self, tmp_path, caplog
-    ):
-        target = tmp_path / "chatrooms.yaml"
+        assert migrate_config_files() == []
+        assert target.read_text() == before
+
+    def test_a_current_file_is_left_alone(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        target = tmp_path / "config" / "chatrooms.yaml"
         target.write_text(
-            "schema_version: 3\nchat_rooms:\n- name: TNG\n  persona_names: [Alex]\n"
+            f"schema_version: {CONFIG_SCHEMA_VERSION}\nchat_rooms:\n- name: Pub\n"
         )
-        with caplog.at_level("WARNING"):
-            room = load_chatrooms(target).chat_rooms[0]
+        before = target.read_text()
 
-        assert room.name == "TNG"
-        assert room.echo_chamber is False   # the removal dropped it; defaults off
-        assert "newer than this app understands" not in caplog.text
+        assert migrate_config_files() == []
+        assert target.read_text() == before
 
-    def test_no_chatroom_migration_rewrites_rooms(self):
-        raw, notes = migrate_chatrooms(
-            {"chat_rooms": [{"name": "TNG", "echo_chamber": True}]}
+    def test_it_is_idempotent(self, tmp_path):
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "personas.yaml").write_text(
+            "personas:\n- name: Alex\n  system_prompt: hi\n  typical_length: terse\n"
         )
-        assert raw["chat_rooms"][0]["echo_chamber"] is True
-        assert notes == []
+        assert "personas.yaml" in migrate_config_files()
+        assert migrate_config_files() == []

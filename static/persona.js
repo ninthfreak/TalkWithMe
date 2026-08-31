@@ -60,6 +60,13 @@ function renderPersonaList(list, showRemoveButtons) {
         nameEl.className = "persona-name";
         nameEl.textContent = p.name;
 
+        // Shown only on the persona the player has adopted (CSS keys off
+        // .persona-card.is-you), so the list says which one is you.
+        const youBadge = document.createElement("span");
+        youBadge.className = "persona-you-badge";
+        youBadge.textContent = "you";
+        nameEl.appendChild(youBadge);
+
         const descEl = document.createElement("div");
         descEl.className = "persona-desc";
         descEl.textContent = p.description;
@@ -84,6 +91,20 @@ function renderPersonaList(list, showRemoveButtons) {
             }
         });
 
+        // Speak-as button: the player writes a line and this persona says
+        // it verbatim. Withdrawn from whoever the player has adopted —
+        // speaking as yourself is just typing.
+        const speakBtn = document.createElement("button");
+        speakBtn.className = "persona-speak-btn";
+        speakBtn.type = "button";
+        speakBtn.textContent = "\u{1F5E3}";  // 🗣
+        speakBtn.title = `Say something as ${p.name}`;
+        speakBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openSpeakAs(p.name);
+        });
+        card.appendChild(speakBtn);
+
         // Remove button (only for non-default rooms)
         if (showRemove) {
             const removeBtn = document.createElement("button");
@@ -99,11 +120,31 @@ function renderPersonaList(list, showRemoveButtons) {
 
         personaListEl.appendChild(card);
     }
+
+    // The cards were just rebuilt, so re-apply who the player is.
+    highlightAdoptedPersona();
 }
 
 function highlightSelectedPersona() {
     document.querySelectorAll(".persona-card").forEach(card => {
         card.classList.toggle("selected", card.dataset.name === selectedPersona);
+    });
+}
+
+/**
+ * Mark the persona the player has adopted and withdraw its speak-as button.
+ *
+ * Applied to the rendered cards rather than folded into renderPersonaList,
+ * because adopting someone must take effect immediately without re-fetching
+ * and re-rendering the whole list.
+ */
+function highlightAdoptedPersona() {
+    const you = playerDisplayName();
+    document.querySelectorAll(".persona-card").forEach(card => {
+        const isYou = !!you && card.dataset.name === you;
+        card.classList.toggle("is-you", isYou);
+        const speak = card.querySelector(".persona-speak-btn");
+        if (speak) speak.classList.toggle("hidden", isYou);
     });
 }
 

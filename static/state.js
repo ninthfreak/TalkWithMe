@@ -71,7 +71,6 @@ const themeSelectEl = document.getElementById("theme-select");
 
 // Chat room selector (used by chatrooms.js)
 const chatRoomDropdown = document.getElementById("chat-room-dropdown");
-const echoChamberToggle = document.getElementById("echo-chamber-toggle");
 const btnAddPersona = document.getElementById("btn-add-persona");
 
 // Persona Editor (used by persona.js)
@@ -99,18 +98,19 @@ const pfAllowToolCalls = document.getElementById("pf-allow-tool-calls");
 const pfLengthBias = document.getElementById("pf-length-bias");
 const gsfTypicalLength = document.getElementById("gsf-typical-length");
 
-// Player profile (the human's character in the current room)
-const requireProfileToggle = document.getElementById("require-profile-toggle");
-const btnPlayerProfile = document.getElementById("btn-player-profile");
-const playerProfileWrapper = document.getElementById("player-profile-wrapper");
+// Who the player is playing — one of the personas, or nobody
+const btnPlayingAs = document.getElementById("btn-playing-as");
+const playingAsOverlay = document.getElementById("playing-as-overlay");
+const paListEl = document.getElementById("pa-list");
+
+// Room editor (used by chatrooms.js)
 const roomEditOverlay = document.getElementById("room-edit-overlay");
 const reTypicalLength = document.getElementById("re-typical-length");
-const reEchoChamber = document.getElementById("re-echo-chamber");
-const reRequireProfile = document.getElementById("re-require-profile");
-const playerProfileOverlay = document.getElementById("player-profile-overlay");
-const ppfName = document.getElementById("ppf-name");
-const ppfDescription = document.getElementById("ppf-description");
-const ppfAppearance = document.getElementById("ppf-appearance");
+const reRequirePersona = document.getElementById("re-require-persona");
+
+// "Speak as" — the player writes a line and a persona says it verbatim
+const speakAsOverlay = document.getElementById("speak-as-overlay");
+const saTextEl = document.getElementById("sa-text");
 
 // Persona editor editing state
 let peEditingName = null;

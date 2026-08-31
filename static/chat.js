@@ -73,12 +73,12 @@ async function sendMessage() {
         return;
     }
 
-    // A room can require the player to have a character before chatting.
-    // The server enforces this too; stopping here keeps the typed message
-    // in the box so it is not lost behind the modal.
-    if (profileRequiredButMissing()) {
-        appendErrorBubble("This room needs your character profile before you can chat.");
-        openPlayerProfile();
+    // A room can require the player to be playing as someone before
+    // chatting. The server enforces this too; stopping here keeps the typed
+    // message in the box so it is not lost behind the modal.
+    if (personaRequiredButMissing()) {
+        appendErrorBubble("This room needs you to be playing as someone. Pick a character first.");
+        openPlayingAs();
         return;
     }
 
@@ -141,31 +141,7 @@ async function sendMessage() {
             return;
         }
 
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop(); // Keep incomplete line in buffer
-
-            for (const line of lines) {
-                if (!line.startsWith("data: ")) continue;
-                const json = line.slice(6);
-                if (!json.trim()) continue;
-
-                try {
-                    const event = JSON.parse(json);
-                    handleSSEEvent(event);
-                } catch (e) {
-                    console.warn("Failed to parse SSE event:", json, e);
-                }
-            }
-        }
+        await consumeSSE(resp);
     } catch (err) {
         console.error("Chat error:", err);
         handleSSEEvent({ type: "error", message: "Connection failed. Is the LLM server running?" });
@@ -222,8 +198,151 @@ async function suggestMessage() {
 }
 
 /* ==========================================================================
+   Speaking as a persona
+
+   The player writes a line and a persona says it, verbatim. No LLM is
+   involved — this is the player's text, attributed to whoever they picked.
+
+   It replaces the old "echo chamber", which got at the same idea sideways:
+   a room-wide mode that bounced your own message back at you, applied to
+   whichever persona the selection rules happened to land on, and stayed on
+   until you remembered to switch it off. Here you say who speaks and what
+   they say, one line at a time, and nothing else in the room changes.
+   ========================================================================== */
+
+let speakAsPersona = null;
+
+function openSpeakAs(personaName) {
+    if (isStreaming) return;
+    speakAsPersona = personaName;
+    document.getElementById("sa-title").textContent = `Speak as ${personaName}`;
+    saTextEl.value = "";
+    hideSpeakAsError();
+    speakAsOverlay.classList.remove("hidden");
+    saTextEl.focus();
+}
+
+function closeSpeakAs() {
+    speakAsOverlay.classList.add("hidden");
+    speakAsPersona = null;
+}
+
+function showSpeakAsError(msg) {
+    const el = document.getElementById("sa-error");
+    el.textContent = msg;
+    el.classList.remove("hidden");
+}
+
+function hideSpeakAsError() {
+    document.getElementById("sa-error").classList.add("hidden");
+}
+
+async function submitSpeakAs(e) {
+    if (e) e.preventDefault();
+    if (!speakAsPersona || isStreaming) return;
+
+    const text = saTextEl.value.trim();
+    if (!text) return showSpeakAsError("Give them something to say.");
+
+    const persona = speakAsPersona;
+    closeSpeakAs();
+
+    // Clear empty state if present
+    if (messagesEl.querySelector(".empty-state")) {
+        messagesEl.innerHTML = "";
+    }
+
+    isStreaming = true;
+    sendBtn.disabled = true;
+
+    // Same placeholder bubble a real reply gets: the response stream is
+    // identical, so "start" fills in the avatar and name exactly as usual.
+    currentAssistantRow = createAssistantBubble(persona);
+    messagesEl.appendChild(currentAssistantRow);
+    scrollToBottom();
+
+    try {
+        const resp = await fetch("/api/chat/speak", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                persona: persona,
+                text: text,
+                chat_room: currentChatRoom,
+                message_id: crypto.randomUUID(),
+            }),
+        });
+
+        if (!resp.ok || !resp.body) {
+            handleSSEEvent({ type: "error", message: `Could not post that (HTTP ${resp.status}).` });
+            return;
+        }
+
+        await consumeSSE(resp);
+    } catch (err) {
+        console.error("Speak-as error:", err);
+        handleSSEEvent({ type: "error", message: "Connection failed. Is the server running?" });
+    } finally {
+        isStreaming = false;
+        sendBtn.disabled = false;
+        inputEl.focus();
+    }
+}
+
+function setupSpeakAsEventListeners() {
+    document.getElementById("sa-form").addEventListener("submit", submitSpeakAs);
+    document.getElementById("sa-btn-close").addEventListener("click", closeSpeakAs);
+    document.getElementById("sa-btn-cancel").addEventListener("click", closeSpeakAs);
+    speakAsOverlay.addEventListener("click", (e) => {
+        if (e.target === speakAsOverlay) closeSpeakAs();
+    });
+    // Ctrl/Cmd+Enter sends, matching the main input box.
+    saTextEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            submitSpeakAs(e);
+        }
+    });
+}
+
+/* ==========================================================================
    SSE event handling
    ========================================================================== */
+
+/**
+ * Read an SSE response to completion, dispatching each event.
+ *
+ * Shared by sending a message and by speaking as a persona: both return
+ * the same event shapes, so the bubble, the persistence and the TTS
+ * handling are identical and neither needs a special case.
+ */
+async function consumeSSE(resp) {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); // Keep incomplete line in buffer
+
+        for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const json = line.slice(6);
+            if (!json.trim()) continue;
+
+            try {
+                handleSSEEvent(JSON.parse(json));
+            } catch (e) {
+                console.warn("Failed to parse SSE event:", json, e);
+            }
+        }
+    }
+}
+
 
 function handleSSEEvent(event) {
     switch (event.type) {
@@ -337,11 +456,11 @@ function handleSSEEvent(event) {
 
 /**
  * Label the human's own bubble with their character name, matching how
- * persona bubbles are labelled. Nothing is added when the room has no
- * character, so an ordinary chat looks exactly as it did.
+ * persona bubbles are labelled. Nothing is added when no character is
+ * set, so an ordinary chat looks exactly as it did.
  */
-function addUserNameLabel(wrapper, roomName) {
-    const name = playerDisplayName(roomName);
+function addUserNameLabel(wrapper) {
+    const name = playerDisplayName();
     if (!name) return;
     const nameEl = document.createElement("div");
     nameEl.className = "bubble-name";
@@ -540,7 +659,7 @@ function appendPersistedUserBubble(msg, roomName) {
     const wrapper = document.createElement("div");
     wrapper.className = "user-message-content";
 
-    addUserNameLabel(wrapper, roomName);
+    addUserNameLabel(wrapper);
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";

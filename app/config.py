@@ -6,6 +6,7 @@ Caches parsed config so we're not hitting disk on every request.
 
 import logging
 import math
+import os
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
@@ -17,6 +18,7 @@ from app.config_migrations import (
     CONFIG_SCHEMA_VERSION,
     migrate_chatrooms,
     migrate_personas,
+    migrate_player,
     migrate_settings,
 )
 
@@ -152,7 +154,7 @@ class TTSConfig(BaseModel):
     enabled: bool = True
     base_url: Optional[str] = None
     num_steps: int = 10
-    guidance_scale: float = 3.0
+    guidance_scale: float = 1.5
     seed: Optional[int] = None
     timeout: float = 60.0
     streaming: bool = False
@@ -276,40 +278,45 @@ class PersonasConfig(BaseModel):
 # Chat Rooms
 # ---------------------------------------------------------------------------
 
-class PlayerProfile(BaseModel):
-    """The human user's own character in a room.
+class PlayerConfig(BaseModel):
+    """Which persona the human is playing, if any.
 
-    Personas are told who they are talking to, so the user can be a
-    character in the room's fiction rather than an anonymous prompt.
+    The player adopts one of the configured personas rather than writing a
+    character of their own: the personas already carry a name, a
+    description and a system prompt, so a second, parallel way to describe
+    a character was redundant and could drift from them.
 
-    *appearance* is the "picture": deliberately text, not an image. The
-    LLM is the audience for this field, and it reads a description; an
-    uploaded image would have to be captioned before it was any use.
+    Stored in its own file beside personas.yaml. It is not room data — a
+    room can *require* that the player has adopted someone, which is a
+    property of the room, but who they are playing belongs to the player
+    and applies in whichever room they are in.
+
+    An empty string means "playing as themselves".
     """
 
-    name: str = Field(default="", max_length=40)
-    description: str = Field(default="", max_length=2000)
-    appearance: str = Field(default="", max_length=1000)
+    persona_name: str = ""
 
-    @property
-    def is_complete(self) -> bool:
-        """True once the profile says who the player is.
+    def adopted(self, known_names) -> str:
+        """The adopted persona's name, or "" if none/unknown.
 
-        Appearance stays optional — a character can be described without
-        being pictured.
+        Resolved against the live persona list on every read rather than
+        trusted from disk: a persona can be deleted or renamed after the
+        player adopted it, and a dangling reference must degrade to
+        "playing as themselves" rather than half-applying.
         """
-        return bool(self.name.strip() and self.description.strip())
+        name = self.persona_name.strip()
+        return name if name and name in known_names else ""
 
 
 class ChatRoom(BaseModel):
     """A named grouping of personas."""
     name: str
     persona_names: List[str] = Field(default_factory=list)
-    echo_chamber: bool = False
     typical_length: TypicalLength = TypicalLength.NORMAL
-    # When true, the room refuses messages until player_profile is complete.
-    require_player_profile: bool = False
-    player_profile: PlayerProfile = Field(default_factory=PlayerProfile)
+    # A property of the room: whether it insists on knowing who you are
+    # before you can chat. *Who* you are playing is not the room's —
+    # that lives in player.yaml.
+    require_player_persona: bool = False
 
 
 class ChatRoomsConfig(BaseModel):
@@ -362,10 +369,12 @@ _CONFIG_DIR_NAME = "config"
 SETTINGS_FILE = "settings.yaml"
 PERSONAS_FILE = "personas.yaml"
 CHATROOMS_FILE = "chatrooms.yaml"
+PLAYER_FILE = "player.yaml"
 
 _settings_cache: Optional[AppSettings] = None
 _personas_cache: Optional[PersonasConfig] = None
 _chatrooms_cache: Optional[ChatRoomsConfig] = None
+_player_cache: Optional[PlayerConfig] = None
 
 
 def config_dir() -> Path:
@@ -393,7 +402,9 @@ def config_path(filename: str) -> Path:
 
 
 def _read_raw(target: Path) -> dict:
-    with open(target) as f:
+    # encoding is explicit: the platform default is cp1252 on Windows, which
+    # raises on a CJK character or emoji in a system prompt.
+    with open(target, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 
@@ -411,8 +422,19 @@ def _write_raw(target: Path, raw: dict) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     ordered = {"schema_version": CONFIG_SCHEMA_VERSION}
     ordered.update({k: v for k, v in raw.items() if k != "schema_version"})
-    with open(target, "w") as f:
-        yaml.dump(ordered, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    # Write-then-rename: opening the real file "w" truncates it before the
+    # dump runs, so an encoding error, a full disk or a kill mid-write left
+    # a half-written config behind while the in-memory cache kept serving
+    # the whole thing — the loss only surfaced on the next restart.
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            yaml.dump(ordered, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def load_settings(path: Optional[Path] = None) -> AppSettings:
@@ -464,6 +486,33 @@ def load_chatrooms(path: Optional[Path] = None) -> ChatRoomsConfig:
         chat_rooms=[ChatRoom(**cr) for cr in raw.get("chat_rooms", [])]
     )
     return _chatrooms_cache
+
+
+def load_player(path: Optional[Path] = None) -> PlayerConfig:
+    """Parse player.yaml. Returns an empty profile if the file is missing."""
+    global _player_cache
+    target = path or config_path(PLAYER_FILE)
+    if not target.exists():
+        return PlayerConfig()
+    raw, notes = migrate_player(_read_raw(target))
+    _log_notes(PLAYER_FILE, notes)
+    _player_cache = PlayerConfig(persona_name=str(raw.get("persona_name", "") or ""))
+    return _player_cache
+
+
+def get_player() -> PlayerConfig:
+    """Return the cached player config, loading if necessary."""
+    if _player_cache is None:
+        return load_player()
+    return _player_cache
+
+
+def save_player(config: PlayerConfig, path: Optional[Path] = None) -> None:
+    """Write player.yaml into config/ and update the in-memory cache."""
+    global _player_cache
+    target = path or config_dir() / PLAYER_FILE
+    _write_raw(target, {"persona_name": config.persona_name})
+    _player_cache = config
 
 
 def get_settings() -> AppSettings:
@@ -535,10 +584,12 @@ def migrate_config_files() -> list:
     Returns the list of filenames that were migrated, for logging.
     """
     migrated = []
+
     for filename, migrate in (
         (SETTINGS_FILE, migrate_settings),
         (PERSONAS_FILE, migrate_personas),
         (CHATROOMS_FILE, migrate_chatrooms),
+        (PLAYER_FILE, migrate_player),
     ):
         live = config_dir() / filename
         legacy = legacy_path(filename)
@@ -548,15 +599,46 @@ def migrate_config_files() -> list:
         _log_notes(filename, notes)
         _write_raw(live, raw)
         migrated.append(filename)
+
+    # Files already in config/ are migrated in memory on every load, but
+    # nothing rewrites them until the next save, so a stale key can sit on
+    # disk indefinitely. Bring any out-of-date file up to the current
+    # schema here, once, so what is on disk matches what the app reads.
+    for filename, migrate in (
+        (SETTINGS_FILE, migrate_settings),
+        (PERSONAS_FILE, migrate_personas),
+        (CHATROOMS_FILE, migrate_chatrooms),
+        (PLAYER_FILE, migrate_player),
+    ):
+        live = config_dir() / filename
+        if filename in migrated or not live.exists():
+            continue
+        raw = _read_raw(live)
+        try:
+            on_disk = int(raw.get("schema_version", 1))
+        except (TypeError, ValueError):
+            on_disk = 1
+        if on_disk >= CONFIG_SCHEMA_VERSION:
+            # Ahead of us means a newer release wrote it. _apply() refuses
+            # to touch such a file, so rewriting it here only churned the
+            # mtime and reported a migration that never happened.
+            continue
+        migrated_raw, notes = migrate(raw)
+        _log_notes(filename, notes)
+        _write_raw(live, migrated_raw)
+        migrated.append(filename)
+
     return migrated
 
 
 def reload_all():
     """Force-reload all config files. Useful for dev hot-reload."""
-    global _settings_cache, _personas_cache, _chatrooms_cache
+    global _settings_cache, _personas_cache, _chatrooms_cache, _player_cache
     _settings_cache = None
     _personas_cache = None
     _chatrooms_cache = None
+    _player_cache = None
     load_settings()
     load_personas()
     load_chatrooms()
+    load_player()

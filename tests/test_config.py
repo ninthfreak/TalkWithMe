@@ -18,7 +18,7 @@ from app.config import (
     LENGTH_SCALE,
     TYPICAL_LENGTH_SPECS,
     LengthBias,
-    PlayerProfile,
+    PlayerConfig,
     STTConfig,
     TTSConfig,
     TypicalLength,
@@ -213,11 +213,13 @@ personas:
 chat_rooms:
   - name: TNG
     persona_names: [Alex]
-    echo_chamber: true
+    typical_length: brief
 """
         )
         cfg = app_config.load_chatrooms(path)
-        assert cfg.chat_rooms[0] == ChatRoom(name="TNG", persona_names=["Alex"], echo_chamber=True)
+        assert cfg.chat_rooms[0] == ChatRoom(
+            name="TNG", persona_names=["Alex"], typical_length=TypicalLength.BRIEF
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -451,42 +453,84 @@ class TestTypicalLengthPersistence:
         assert "typical_length: detailed" in caplog.text
 
 
-class TestPlayerProfile:
-    def test_room_defaults_to_no_profile_and_no_requirement(self):
-        room = ChatRoom(name="R")
-        assert room.require_player_profile is False
-        assert room.player_profile.is_complete is False
+class TestPlayingAsAPersona:
+    """The player adopts a persona; the room only says whether one is required."""
 
-    @pytest.mark.parametrize("fields, complete", [
-        ({"name": "Kira", "description": "A thief."}, True),
-        ({"name": "Kira"}, False),                      # nothing said about them
-        ({"description": "A thief."}, False),           # nothing to call them
-        ({"name": "  ", "description": "A thief."}, False),
-        ({"name": "Kira", "description": "A thief.", "appearance": ""}, True),
-    ])
-    def test_is_complete_needs_a_name_and_a_description(self, fields, complete):
-        # Appearance stays optional: a character can be described without
-        # being pictured.
-        assert PlayerProfile(**fields).is_complete is complete
+    def test_a_room_defaults_to_not_requiring_a_character(self):
+        assert ChatRoom(name="R").require_player_persona is False
 
-    def test_absent_keys_load_as_an_empty_profile(self, tmp_path):
+    def test_a_room_holds_no_character_of_its_own(self):
+        # The requirement is the room's; who you play is the player's.
+        assert not hasattr(ChatRoom(name="R"), "player_profile")
+
+    def test_absent_keys_load_as_no_requirement(self, tmp_path):
         target = tmp_path / "chatrooms.yaml"
         target.write_text("chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n")
-        room = load_chatrooms(target).chat_rooms[0]
-        assert room.require_player_profile is False
-        assert room.player_profile.name == ""
+        assert load_chatrooms(target).chat_rooms[0].require_player_persona is False
 
-    def test_profile_round_trips_through_yaml(self, tmp_path):
+    def test_the_requirement_round_trips_through_yaml(self, tmp_path):
         target = tmp_path / "chatrooms.yaml"
-        save_chatrooms(ChatRoomsConfig(chat_rooms=[ChatRoom(
-            name="TNG",
-            require_player_profile=True,
-            player_profile=PlayerProfile(
-                name="Kira", description="A thief.", appearance="Green coat."
-            ),
-        )]), target)
+        save_chatrooms(ChatRoomsConfig(chat_rooms=[
+            ChatRoom(name="TNG", require_player_persona=True)
+        ]), target)
+        assert load_chatrooms(target).chat_rooms[0].require_player_persona is True
 
-        room = load_chatrooms(target).chat_rooms[0]
-        assert room.require_player_profile is True
-        assert room.player_profile.name == "Kira"
-        assert room.player_profile.appearance == "Green coat."
+    def test_the_adopted_persona_round_trips_in_its_own_file(self, tmp_path):
+        from app.config import load_player, save_player
+
+        target = tmp_path / "player.yaml"
+        save_player(PlayerConfig(persona_name="Kira"), target)
+        assert load_player(target).persona_name == "Kira"
+
+    def test_a_missing_player_file_means_playing_as_yourself(self, tmp_path):
+        from app.config import load_player
+        assert load_player(tmp_path / "nope.yaml").persona_name == ""
+
+    @pytest.mark.parametrize("stored, known, expected", [
+        ("Kira", {"Kira", "Alex"}, "Kira"),
+        ("  Kira  ", {"Kira"}, "Kira"),          # whitespace is not a name
+        ("Kira", {"Alex"}, ""),                  # deleted since it was adopted
+        ("kira", {"Kira"}, ""),                  # renamed: match is exact
+        ("", {"Kira"}, ""),
+    ])
+    def test_adopted_resolves_against_the_live_persona_list(self, stored, known, expected):
+        # A dangling reference must degrade to "playing as yourself" rather
+        # than half-applying: the name reaches the prompt, the stop list and
+        # the reply guard, and a persona that no longer exists in any of
+        # them is worse than none.
+        assert PlayerConfig(persona_name=stored).adopted(known) == expected
+
+
+class TestConfigWritesAreAtomic:
+    """A half-written YAML file is worse than no file.
+
+    Writing in place means an interrupted save (a crash, a full disk, a
+    kill mid-write) leaves a truncated file that the loader then rejects or
+    misreads — every persona in it gone. The write goes to a sibling
+    temp file and is renamed over the target, which is atomic on the same
+    filesystem.
+    """
+
+    def test_no_temp_file_is_left_behind(self, tmp_path):
+        target = tmp_path / "personas.yaml"
+        save_personas(PersonasConfig(personas=[Persona(name="A", system_prompt="x")]), target)
+        assert target.exists()
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_a_failed_write_leaves_the_previous_file_intact(self, tmp_path, monkeypatch):
+        target = tmp_path / "personas.yaml"
+        save_personas(PersonasConfig(personas=[Persona(name="A", system_prompt="x")]), target)
+        before = target.read_text()
+
+        def boom(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(app_config.os, "replace", boom)
+        with pytest.raises(OSError):
+            save_personas(
+                PersonasConfig(personas=[Persona(name="B", system_prompt="y")]), target
+            )
+
+        # The old content is still readable — nothing was truncated.
+        assert target.read_text() == before
+        assert [p.name for p in load_personas(target).personas] == ["A"]

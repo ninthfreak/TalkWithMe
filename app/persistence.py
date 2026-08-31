@@ -16,6 +16,7 @@ atomic, and readers never observe a half-written file.
 
 import base64
 import json
+import re
 import locale
 import logging
 import os
@@ -53,9 +54,43 @@ _HISTORY_LOCK = threading.Lock()
 _pending_audio: Dict[Tuple[str, str], List[str]] = {}
 
 
+# Room names become directory names, so anything that could escape the
+# persistence root is refused here as well as at the API boundary. Without
+# this, POST /api/chat with chat_room "../config" wrote outside the root and
+# the next "New Chat" deleted every file in that directory.
+_SAFE_ROOM_NAME = re.compile(r"^[A-Za-z0-9 _-]+$")
+
+
+class UnsafeRoomName(ValueError):
+    """A room name that cannot be used as a directory name."""
+
+
+def safe_room_name(room_name: str) -> str:
+    """Validate a room name for filesystem use, or raise UnsafeRoomName.
+
+    Checked at the last moment before any path is built, not only at the
+    API edge: every write and delete in this module funnels through
+    _room_dir(), so this is the one place that cannot be bypassed by a new
+    caller forgetting to validate.
+    """
+    name = (room_name or "").strip()
+    if not name or not _SAFE_ROOM_NAME.match(name):
+        raise UnsafeRoomName(
+            f"Room name {room_name!r} may only contain letters, numbers, "
+            "spaces, hyphens and underscores."
+        )
+    return name
+
+
 def _room_dir(room_name: str) -> Path:
     """Return the path to a chat room's persistence subdirectory."""
-    return _PERSISTENCE_ROOT / room_name
+    root = _PERSISTENCE_ROOT.resolve()
+    target = (root / safe_room_name(room_name)).resolve()
+    # Belt and braces: even with the charset check, assert the result really
+    # is inside the root before anything mkdirs or unlinks it.
+    if target.parent != root:
+        raise UnsafeRoomName(f"Room name {room_name!r} escapes the persistence root.")
+    return target
 
 
 def _history_path(room_name: str) -> Path:
