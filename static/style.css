@@ -393,8 +393,17 @@ html, body {
 }
 
 .persona-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-weight: 600;
     font-size: 0.9rem;
+    min-width: 0;
+}
+
+/* Only the name ellipsises. Trimming the row as a whole took the "you"
+   badge out of view for any name long enough to need trimming. */
+.persona-name-text {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1463,13 +1472,16 @@ html, body {
     line-height: 1;
     flex-shrink: 0;
     margin-left: auto;
-    opacity: 0;
+    /* Faint rather than invisible. At opacity 0 it was still a live click
+       target you could not see, and on anything without hover — a touch
+       screen — the only way to reach it was the keyboard. */
+    opacity: 0.4;
     transition: background 0.15s, opacity 0.15s;
 }
 
 .persona-card:hover .persona-speak-btn,
 .persona-speak-btn:focus-visible {
-    opacity: 0.75;
+    opacity: 0.9;
 }
 
 .persona-speak-btn:hover {
@@ -1480,7 +1492,7 @@ html, body {
 /* The persona the player has adopted: they are you, not someone to talk to. */
 .persona-you-badge {
     display: none;
-    margin-left: 6px;
+    flex-shrink: 0;
     padding: 1px 6px;
     border-radius: 999px;
     font-size: 0.7rem;

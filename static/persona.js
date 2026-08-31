@@ -58,7 +58,13 @@ function renderPersonaList(list, showRemoveButtons) {
 
         const nameEl = document.createElement("div");
         nameEl.className = "persona-name";
-        nameEl.textContent = p.name;
+
+        // The name goes in its own span so it can ellipsise without taking
+        // the badge beside it out of view: .persona-name is a flex row.
+        const nameText = document.createElement("span");
+        nameText.className = "persona-name-text";
+        nameText.textContent = p.name;
+        nameEl.appendChild(nameText);
 
         // Shown only on the persona the player has adopted (CSS keys off
         // .persona-card.is-you), so the list says which one is you.

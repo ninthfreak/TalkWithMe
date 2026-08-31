@@ -400,6 +400,22 @@ class TestSpeakAsPersona:
         self._no_llm(monkeypatch)
         assert sse_events_by_type(self._speak(client), "done")
 
+    def test_a_persona_from_outside_the_room_is_refused(self, client, monkeypatch):
+        # The next responder is told "the only people here are…". A line
+        # from someone not on that list contradicts the roster, and an
+        # unexplained voice in the transcript is how invented characters
+        # start — the same reason replies are restricted to the room.
+        _patch_chatrooms(monkeypatch, [ChatRoom(name="Solo", persona_names=["Luna"])])
+        events = self._speak(client, persona="Alex", chat_room="Solo")
+
+        assert [e["type"] for e in events] == ["error", "complete"]
+        assert "not in this room" in events[0]["message"]
+        assert session.history == []
+
+    def test_the_default_room_admits_everyone(self, client, monkeypatch):
+        _patch_chatrooms(monkeypatch, [ChatRoom(name="Solo", persona_names=["Luna"])])
+        assert sse_events_by_type(self._speak(client, chat_room="default"), "done")
+
     def test_an_unknown_persona_is_refused(self, client):
         events = self._speak(client, persona="Nobody")
         assert [e["type"] for e in events] == ["error", "complete"]

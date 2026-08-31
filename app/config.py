@@ -489,11 +489,16 @@ def load_chatrooms(path: Optional[Path] = None) -> ChatRoomsConfig:
 
 
 def load_player(path: Optional[Path] = None) -> PlayerConfig:
-    """Parse player.yaml. Returns an empty profile if the file is missing."""
+    """Parse player.yaml. Playing as yourself if the file is missing."""
     global _player_cache
     target = path or config_path(PLAYER_FILE)
     if not target.exists():
-        return PlayerConfig()
+        # The miss is cached too. get_player() is called several times per
+        # persona per turn (eligibility, then the preamble), so on the
+        # common "playing as yourself" install — no player.yaml at all —
+        # every one of those calls was stat-ing the disk twice.
+        _player_cache = PlayerConfig()
+        return _player_cache
     raw, notes = migrate_player(_read_raw(target))
     _log_notes(PLAYER_FILE, notes)
     _player_cache = PlayerConfig(persona_name=str(raw.get("persona_name", "") or ""))

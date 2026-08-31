@@ -58,13 +58,18 @@ def recent_exchanges(
         window = list(history)
     else:
         starts = _exchange_starts(history)
-        # Fewer exchanges than asked for: keep everything, including any
-        # replies that precede the first human message.
-        window = (
-            list(history[starts[-max_exchanges]:])
-            if len(starts) > max_exchanges
-            else list(history)
-        )
+        if len(starts) > max_exchanges:
+            window = list(history[starts[-max_exchanges]:])
+        elif starts:
+            # Fewer exchanges than asked for: keep everything, including any
+            # replies that precede the first human message.
+            window = list(history)
+        else:
+            # Nobody has spoken as themselves — every line in this room was
+            # put in a persona's mouth. There are no exchanges to count, so
+            # fall back to a tail of messages: "keep everything" ignored the
+            # setting outright, which is the failure it exists to prevent.
+            window = list(history[-max_exchanges:])
 
     if _window_chars(window) <= char_budget:
         return window
@@ -88,16 +93,22 @@ def recent_exchanges(
     # the very message this function exists to keep.
     dropped_replies = 0
     starts = _exchange_starts(window)
-    anchor = starts[0] if starts else 0
-    if anchor:
-        # Replies that precede every exchange are context-free; drop them
-        # before touching anything inside the exchange itself.
-        del window[:anchor]
-        dropped_replies += anchor
-        anchor = 0
-    while _window_chars(window) > char_budget and len(window) > anchor + 2:
-        del window[anchor + 1]
-        dropped_replies += 1
+    if starts:
+        if starts[0]:
+            # Replies that precede every exchange are context-free; drop
+            # them before touching anything inside the exchange itself.
+            dropped_replies += starts[0]
+            del window[:starts[0]]
+        while _window_chars(window) > char_budget and len(window) > 2:
+            del window[1]
+            dropped_replies += 1
+    else:
+        # No human message to anchor on, so nothing here has to be kept.
+        # Shed from the oldest end, which leaves the newest lines standing
+        # — deleting from index 1 preserved the stalest message instead.
+        while _window_chars(window) > char_budget and len(window) > 1:
+            del window[0]
+            dropped_replies += 1
 
     logger.info(
         "Context over %d chars: dropped %d older exchange(s) and %d reply/replies",
