@@ -670,7 +670,10 @@ class TestTypicalLength:
 
         # The human is a speaker too: a persona answering *as the user* is
         # the same failure as answering as another persona.
-        assert calls[0]["stop"] == ["\nLuna:", "\n[Luna]:", "\nUser:", "\n[User]:"]
+        assert calls[0]["stop"] == [
+            "\nLuna:", "\n[Luna]:", "\n**Luna:", "\n**Luna**:",
+            "\nUser:", "\n[User]:", "\n**User:", "\n**User**:",
+        ]
 
 
 class TestReplyGuardIntegration:

@@ -118,6 +118,146 @@ class TestForeignSpeakerCut:
         assert guard.flush() == ""
 
 
+class TestDecoratedSpeakerTags:
+    """The shapes a model actually writes, all of which used to stream through.
+
+    Reported from a live room: one persona wrote three others' turns in a
+    single reply, and each of those personas then answered again for
+    themselves. Every tag was markdown — "**Luna:**" — and the guard only
+    knew the bare "Luna:" form, so it cut nothing.
+    """
+
+    # Chunked several ways because the decision is taken mid-stream: a tag
+    # arriving one character at a time takes a different path through the
+    # buffer than one arriving whole.
+    CHUNKS = (1, 2, 3, 7, 500)
+
+    def _cut(self, text, persona="Alex", known=("Alex", "Luna", "Marcus")):
+        results = []
+        for size in self.CHUNKS:
+            guard = ReplyGuard(persona, known)
+            out = []
+            for i in range(0, len(text), size):
+                out.append(guard.feed(text[i:i + size]))
+                if guard.stopped:
+                    break
+            out.append(guard.flush())
+            results.append(("".join(out), guard.stopped))
+        first = results[0]
+        assert all(r == first for r in results), f"chunking changed the result: {results}"
+        return first
+
+    @pytest.mark.parametrize("tag", [
+        "Luna: ",           # the bare form, the only one ever caught
+        "**Luna:** ",       # emphasis around the whole tag
+        "**Luna**: ",       # emphasis around the name only
+        "*Luna:* ",
+        "__Luna:__ ",
+        "- Luna: ",         # a list item
+        "* Luna: ",
+        "1. Luna: ",
+        "> Luna: ",         # a blockquote
+        "[Luna]: ",
+        "[Luna] ",          # brackets alone are enough
+        "(Luna): ",
+        "Luna — ",          # a dash instead of a colon
+        "Luna -- ",
+    ])
+    def test_a_known_speakers_tag_cuts_whatever_dresses_it(self, tag):
+        text, stopped = self._cut(f"That is my view.\n{tag}I disagree.")
+        assert stopped is True
+        assert "Luna" not in text
+        assert "I disagree" not in text
+        assert text.startswith("That is my view.")
+
+    @pytest.mark.parametrize("tag", ["### Luna", "**Luna**", "[Luna]"])
+    def test_a_name_alone_on_a_line_is_a_turn_header(self, tag):
+        text, stopped = self._cut(f"That is my view.\n{tag}\nI disagree.")
+        assert stopped is True
+        assert "Luna" not in text
+
+    def test_a_bare_name_alone_on_a_line_is_left_alone(self):
+        # Undecorated, it is a plausible one-word answer ("Who said so?"
+        # "Luna"), and cutting would delete the whole reply.
+        text, stopped = self._cut("Who told you?\nLuna")
+        assert stopped is False
+        assert text == "Who told you?\nLuna"
+
+    def test_a_tag_mid_line_after_a_sentence_end_cuts(self):
+        text, stopped = self._cut("That settles it. Luna: I disagree.")
+        assert stopped is True
+        assert text == "That settles it. "
+
+    def test_a_name_with_a_colon_inside_a_sentence_does_not_cut(self):
+        # The other half of the mid-line rule: only a sentence boundary
+        # arms it, so this is prose, not a turn.
+        text, stopped = self._cut("I would ask Luna: what do you think?")
+        assert stopped is False
+        assert text == "I would ask Luna: what do you think?"
+
+    def test_an_unknown_name_never_cuts_mid_line(self):
+        # Mid-line is only safe for names we know belong to speakers.
+        text, stopped = self._cut("It is done. Whatever: we move on.")
+        assert stopped is False
+
+    def test_an_invented_character_still_cuts_when_decorated(self):
+        text, stopped = self._cut("Fine.\n**Silas:** And who am I?")
+        assert stopped is True
+        assert "Silas" not in text
+
+    def test_the_whole_run_of_impostor_turns_goes(self):
+        text, stopped = self._cut(
+            "Fine by me.\n"
+            "**Luna:** Not by me.\n"
+            "**Marcus:** Nor me.\n"
+            "**Harold:** Agreed."
+        )
+        assert stopped is True
+        assert text == "Fine by me.\n"
+
+    @pytest.mark.parametrize("tag", ["Alex: ", "**Alex:** ", "**Alex**: ", "[Alex]: ", "alex: "])
+    def test_the_speakers_own_tag_is_stripped_not_cut(self, tag):
+        text, stopped = self._cut(f"{tag}Hello there")
+        assert stopped is False
+        assert text == "Hello there"
+
+    def test_the_speakers_own_name_as_a_heading_is_dropped(self):
+        text, stopped = self._cut("### Alex\nHello there")
+        assert stopped is False
+        assert text == "Hello there"
+
+    def test_emphasis_in_the_body_survives_a_stripped_tag(self):
+        # Only the emphasis that dressed the tag is skipped.
+        assert self._cut("Alex: **listen** to me.") == ("**listen** to me.", False)
+        assert self._cut("**Alex:** **listen** to me.") == ("**listen** to me.", False)
+
+
+class TestMarkdownThatIsNotASpeaker:
+    """The other side of the same change: decoration is everywhere in
+    ordinary replies, and none of it may cut."""
+
+    @pytest.mark.parametrize("text", [
+        "**Bold opening** and then some prose.",
+        "Done. **Bold** start of a sentence.",
+        "1. First point\n2. Second point",
+        "- a plain bullet\n- another bullet",
+        "> A quoted line of prose.",
+        "### A heading of my own\nBody text.",
+        "Two options:\n- keep it\n- drop it",
+        "Luna and Marcus both agree with me.",
+        "Ask her. Marcus and I already did.",
+        "I said no. She said yes.",
+        "Wait. What?",
+        "**Note:** this is worth remembering.",
+        "- Final Answer: 42.",
+    ])
+    def test_ordinary_markdown_streams_untouched(self, text):
+        guard = ReplyGuard("Alex", ("Alex", "Luna", "Marcus"))
+        out = "".join(guard.feed(ch) for ch in text) + guard.flush()
+        assert guard.stopped is False
+        assert out == text
+
+
 class TestNoFalsePositives:
     """Cases that must NOT cut — a wrong cut truncates a real reply."""
 
@@ -232,15 +372,32 @@ class TestBuffering:
 
 
 class TestStopSequences:
-    def test_covers_other_personas_in_both_forms(self):
-        assert stop_sequences("Alex", ["Alex", "Luna"]) == ["\nLuna:", "\n[Luna]:"]
+    def test_covers_the_shapes_a_tag_actually_takes(self):
+        # Bare "Name:" is the form instruct-tuned models use least — they
+        # reach for markdown — so the markdown forms have to be here too.
+        assert stop_sequences("Alex", ["Alex", "Luna"]) == [
+            "\nLuna:", "\n[Luna]:", "\n**Luna:", "\n**Luna**:",
+        ]
+
+    def test_every_entry_ends_at_a_colon(self):
+        # A looser stop like "\n**Luna" would fire on a reply that merely
+        # opens a line by mentioning her in bold, truncating it server-side
+        # where the guard cannot see it happen.
+        assert all(s.endswith(":") for s in stop_sequences("Alex", ["Luna", "Marcus"]))
 
     def test_excludes_the_speaker(self):
         assert all("Alex" not in s for s in stop_sequences("Alex", ["Alex", "Luna"]))
 
+    def test_a_full_room_plus_the_human_fits_under_the_cap(self):
+        # Five other personas and the user — the widest ordinary room.
+        voices = ["Alex", "Luna", "Marcus", "Harold", "Gregory", "Ada", "User"]
+        stops = stop_sequences("Alex", voices)
+        assert len(stops) == 24
+        assert all(any(n in s for s in stops) for n in voices if n != "Alex")
+
     def test_capped_for_backends_that_reject_long_lists(self):
         names = [f"P{i}" for i in range(20)]
-        assert len(stop_sequences("Alex", names)) == 8
+        assert len(stop_sequences("Alex", names)) == 24
 
     def test_empty_when_alone_in_the_room(self):
         assert stop_sequences("Alex", ["Alex"]) == []

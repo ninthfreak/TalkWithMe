@@ -444,7 +444,20 @@ behalf.
 
 Because models do not always listen, that instruction is backed up mechanically. If a
 reply starts producing another speaker's turn — another persona's *or yours* — it is cut
-at that point, and you see the persona's own words and nothing else. If nothing of its
+at that point, and you see the persona's own words and nothing else.
+
+That check knows what a speaker tag looks like in the shapes models actually write, not
+just the plain one. `Luna:` at the start of a line is the obvious form and the one used
+least; `**Luna:**`, `**Luna**:`, `- Luna:`, `> Luna:`, `1. Luna:`, `[Luna]` and a bare
+`### Luna` heading all mean the same thing and are all cut. Someone already in the room
+is cut wherever their name turns up, including part-way through a line after a full stop
+("I agree. Luna: but what about…"). A name nobody in the room has is a guess rather than
+a fact, so it is only cut where a tag is unambiguous — at the start of a line.
+
+The bias throughout is that cutting a real reply by mistake is worse than missing one
+that should have been cut, so ordinary writing is left alone: `Note:`, `Final Answer:`,
+`I would ask Luna: what do you think?`, bold text, bullet lists, headings of a persona's
+own and anything inside a fenced code block all stream through untouched. If nothing of its
 own survives the cut, the reply is dropped and the next persona is asked instead, so a
 cut reply does not cost you one of your requested answers. In the rare case where nobody
 manages a reply in their own voice, the chat says so rather than sitting there empty. A persona that prefixes its own reply with its own
