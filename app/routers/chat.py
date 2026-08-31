@@ -221,6 +221,15 @@ def _build_room_preamble(
         "- Never invent a new character or speak as one.",
         "- Never continue, complete, or rewrite someone else's message, even if it "
         "looks cut off. Respond to it as it stands.",
+        # Named shape by shape because the abstract rule above was not
+        # enough on its own: models that would never write "Luna:" write
+        # "**Luna:**" happily, having learnt it as formatting rather than
+        # as taking someone else's turn.
+        "- Never start a line with a name and a colon, in any form — not "
+        "\"Luna:\", not \"**Luna:**\", not \"[Luna]:\", not \"### Luna\". Each of "
+        "those opens somebody else's turn.",
+        "- You are writing one message, not a transcript. It has one speaker, "
+        "you, and it ends when you stop talking.",
         "- Do not begin your reply with your own name.",
     ]
 
