@@ -283,6 +283,8 @@ Each persona has a `memory_size` property, which is a limit (in bytes) to the si
 
 Because the limit is also checked every time a persona's memories are loaded into the LLM's context, if you (or any other process) edit `memories.txt` directly while the app is running, the change is picked up on the persona's next reply. If the file is over the limit at that point, the oldest memories are purged first — both before they are shown to the LLM and on disk — so an over-limit file is never handed to the LLM verbatim.
 
+If a persona never saves memories even though the conditions above are met, see the [Logging](#logging) section: a short debug-logging run will show whether the `add_memory` tool is being offered to the LLM at all.
+
 ### 1. Configure your MCP server(s)
 
 Edit the `mcp` section of `settings.yaml` directly (there is no UI for this yet):
@@ -344,6 +346,38 @@ will play the respective sentence:
 Enabling the "echo chamber" option in a chat room will cause the responding persona to simply echo back
 whatever you type or speak, verbatim. This is useful with TTS servers, if you want to hear a persona
 speak a specific line of dialogue. This option is disabled by default.
+
+## Logging
+
+TalkWithMe logs to the console — the terminal where uvicorn is running. By default it runs at
+**INFO** level, which shows startup information (personas loaded, MCP tools discovered), warnings,
+and errors. Most people will never need to change this.
+
+If you are troubleshooting something — for example, a persona that never calls a tool even though
+tool calls and persona memories are both enabled — you can turn on **DEBUG** logging for the run
+with the `TALKWITHME_LOG_LEVEL` environment variable:
+
+```bash
+# Level names are case-insensitive: debug, info, warning, error, critical
+TALKWITHME_LOG_LEVEL=debug uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+At DEBUG level, each reply logs the tool decision trail: the persona's `allow_tool_calls`,
+`memory_size`, and `enable_persona_memories` values as the app sees them, the exact tool list
+offered to the LLM on every round, and the result of each built-in tool invocation (such as
+`add_memory`). The lines are prefixed `Persona memory:`, so you can filter them out of the rest
+of the console with `grep "Persona memory"`. That trail tells you quickly whether the tool was
+never offered to the LLM at all, or was offered but the model chose not to call it (which is
+often a model/prompt issue rather than an app issue).
+
+### Notes and gotchas
+
+- `uvicorn --log-level debug` does **not** enable the app's debug logging. That flag only changes
+  uvicorn's own loggers; the app's lines would stay at INFO. `TALKWITHME_LOG_LEVEL` is the
+  supported way to change the app's level.
+- Invalid values (e.g. `TALKWITHME_LOG_LEVEL=verbose`) log a warning at startup and fall back to
+  INFO — a typo never prevents the app from starting.
+- The variable is unset or blank means INFO.
 
 ## Detailed setup guide
 

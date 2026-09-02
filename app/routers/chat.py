@@ -153,6 +153,11 @@ def _system_prompt_with_memories(persona, settings) -> str:
     than being handed to the LLM verbatim.
     """
     if not (settings.general.enable_persona_memories and persona.memory_size > 0):
+        logger.debug(
+            "Persona memory: NOT injecting saved memories for '%s' "
+            "(enable_persona_memories=%s, memory_size=%d)",
+            persona.name, settings.general.enable_persona_memories, persona.memory_size,
+        )
         return persona.system_prompt
     if persona.persona_dir is None:
         return persona.system_prompt
@@ -163,6 +168,11 @@ def _system_prompt_with_memories(persona, settings) -> str:
     memories = persona_store.read_memories(persona.persona_dir)
     if not memories.strip():
         return persona.system_prompt
+    memory_lines = [line for line in memories.splitlines() if line.strip()]
+    logger.debug(
+        "Persona memory: injecting %d saved memory line(s) into the system prompt of '%s'",
+        len(memory_lines), persona.name,
+    )
     return (
         persona.system_prompt
         + "\n\nYou have the following memories related to the user:\n"
@@ -212,6 +222,11 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
     # Multiple identical echoes from different personas would be pointless noise.
     if echo_enabled:
         max_replies = 1
+        logger.debug(
+            "Persona memory: room '%s' has the echo chamber enabled — the LLM is "
+            "bypassed entirely, so NO tool calls (add_memory included) can happen",
+            req.chat_room,
+        )
 
     replied_personas: list[str] = []
 
@@ -230,6 +245,15 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
             return
 
         replied_personas.append(persona_name)
+
+        # Diagnostic trail (DEBUG): the three inputs the add_memory feature
+        # gates on, exactly as the runtime sees them (post-cache, post-parse).
+        logger.debug(
+            "Persona memory: persona '%s' decision inputs: allow_tool_calls=%s, "
+            "memory_size=%d, enable_persona_memories=%s, persona_dir=%s",
+            persona_name, persona.allow_tool_calls, persona.memory_size,
+            settings.general.enable_persona_memories, persona.persona_dir,
+        )
 
         # Generate the assistant message ID BEFORE emitting "start". The
         # frontend stamps it onto every TTS item enqueued during this
@@ -262,6 +286,11 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
                     # regardless of show_tool_calls; that flag only controls
                     # whether tool_call SSE events are emitted.
                     tools = get_all_tools() + builtin.get_builtin_tools_for(persona, settings)
+                    logger.debug(
+                        "Persona memory: persona '%s' — agentic path, %d tool(s) supplied to LLM: %s",
+                        persona_name, len(tools),
+                        [t["function"]["name"] for t in tools],
+                    )
                     async for event in stream_chat_with_tools(messages, tools, persona):
                         if event["type"] == "token":
                             full_text += event["token"]
@@ -269,6 +298,11 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
                         elif event["type"] == "tool_call" and settings.general.show_tool_calls:
                             yield f'data: {json.dumps({"type": "tool_call", "persona": persona_name, "tool_name": event["tool_name"], "arguments": event["arguments"], "result": event["result"], "failed": event["failed"]})}\n\n'
                 else:
+                    logger.debug(
+                        "Persona memory: persona '%s' — allow_tool_calls is False, "
+                        "plain streaming path taken; NO tools of any kind supplied to LLM",
+                        persona_name,
+                    )
                     async for token in stream_chat(messages):
                         full_text += token
                         yield f'data: {json.dumps({"type": "token", "persona": persona_name, "token": token})}\n\n'

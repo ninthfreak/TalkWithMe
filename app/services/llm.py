@@ -208,6 +208,19 @@ async def stream_chat_with_tools(
         payload = _base_payload(conversation)
         if tool_list and not is_final_round:
             payload["tools"] = tool_list
+        if is_final_round and tool_list:
+            logger.debug(
+                "Persona memory: LLM round %d/%d for persona '%s': FINAL round — "
+                "tools withheld to force a text answer",
+                round_num + 1, max_iterations + 1, persona.name,
+            )
+        else:
+            offered = payload.get("tools", [])
+            logger.debug(
+                "Persona memory: LLM round %d/%d for persona '%s': %d tool(s) in payload: %s",
+                round_num + 1, max_iterations + 1, persona.name,
+                len(offered), [t["function"]["name"] for t in offered],
+            )
 
         content_parts: List[str] = []
         pending_tool_calls: Dict[int, dict] = {}
@@ -225,6 +238,14 @@ async def stream_chat_with_tools(
                 finish_reason = choice["finish_reason"]
 
         if not pending_tool_calls:
+            # Key diagnostic line: if the round above shows add_memory in
+            # the payload but THIS line follows, the wiring is intact and
+            # the model simply chose not to call the tool (a prompt/model
+            # issue, not an app issue).
+            logger.debug(
+                "Persona memory: persona '%s' answered with plain text on round %d (no tool calls)",
+                persona.name, round_num + 1,
+            )
             return  # Plain text response — the loop is done.
 
         # Pathological case: the model emitted tool calls even though no
