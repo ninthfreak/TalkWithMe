@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import LengthBias, TypicalLength
 
+from app.config import DEFAULT_MEMORY_SIZE, MAX_MEMORY_SIZE
+
 
 # ---------------------------------------------------------------------------
 # Request models
@@ -110,6 +112,12 @@ class PersonaDetailResponse(BaseModel):
     reference_audio_language: str
     allow_tool_calls: bool = False
     length_bias: LengthBias = LengthBias.MATCH
+    memory_size: int = Field(
+        default=DEFAULT_MEMORY_SIZE,
+        ge=0,
+        le=MAX_MEMORY_SIZE,
+        description="Size budget (bytes) for the persona's memories.txt; 0 disables memory saving",
+    )
     tts_capable: bool = False
 
 
@@ -225,6 +233,7 @@ class GeneralSettingsRequest(BaseModel):
     max_turns_for_context: Optional[int] = Field(default=None, ge=1, le=50)
     show_tool_calls: Optional[bool] = None
     typical_length: Optional[TypicalLength] = None
+    enable_persona_memories: Optional[bool] = None
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -268,6 +277,7 @@ class GeneralSettingsResponse(BaseModel):
     max_turns_for_context: int
     show_tool_calls: bool
     typical_length: TypicalLength
+    enable_persona_memories: bool
 
 
 class SettingsResponse(BaseModel):

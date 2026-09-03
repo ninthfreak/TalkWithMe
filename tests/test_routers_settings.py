@@ -45,6 +45,7 @@ class TestGetSettings:
             "max_turns_for_context": 6,
             "show_tool_calls": True,
             "typical_length": "normal",
+            "enable_persona_memories": True,
         }
 
 
@@ -85,13 +86,14 @@ class TestUpdateSettings:
     # -- partial-update semantics for the general section -------------------
 
     def test_partial_general_update_preserves_omitted_fields(self, client, monkeypatch):
-        """Send ONLY show_tool_calls; the other three general fields must keep
+        """Send ONLY show_tool_calls; the other general fields must keep
         their current (non-default) values."""
         current = make_settings()
         current.general.persona_name_mentions = False
         current.general.max_persona_replies = 3
         current.general.max_turns_for_context = 12
         current.general.show_tool_calls = True
+        current.general.enable_persona_memories = False  # non-default: preserved?
         monkeypatch.setattr(app_config, "_settings_cache", current)
 
         resp = client.put("/api/settings", json=base_update(
@@ -104,6 +106,7 @@ class TestUpdateSettings:
             "max_turns_for_context": 12,      # preserved
             "show_tool_calls": False,         # updated
             "typical_length": "normal",       # preserved
+            "enable_persona_memories": False, # preserved
         }
 
     def test_missing_general_section_preserves_everything(self, client, monkeypatch):
@@ -114,6 +117,7 @@ class TestUpdateSettings:
         current.general.max_persona_replies = 4
         current.general.max_turns_for_context = 9
         current.general.show_tool_calls = False
+        current.general.enable_persona_memories = False  # must not reset to True
         monkeypatch.setattr(app_config, "_settings_cache", current)
 
         payload = base_update()
@@ -128,7 +132,19 @@ class TestUpdateSettings:
             "max_turns_for_context": 9,
             "show_tool_calls": False,
             "typical_length": "normal",
+            "enable_persona_memories": False,
         }
+
+    def test_enable_persona_memories_round_trip(self, client):
+        """The General settings dialog sends the whole general section:
+        turning the feature off must stick across a re-read."""
+        resp = client.put("/api/settings", json=base_update(
+            general={"enable_persona_memories": False}))
+        assert resp.status_code == 200
+        assert resp.json()["general"]["enable_persona_memories"] is False
+
+        # And it persisted to settings.yaml (redirected to tmp by the fixture).
+        assert client.get("/api/settings").json()["general"]["enable_persona_memories"] is False
 
     def test_mcp_section_carried_over_from_current_config(self, client, monkeypatch):
         """The mcp: section is yaml-only. A UI save must not wipe it."""

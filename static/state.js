@@ -116,6 +116,8 @@ const reRequirePersona = document.getElementById("re-require-persona");
 // "Speak as" — the player writes a line and a persona says it verbatim
 const speakAsOverlay = document.getElementById("speak-as-overlay");
 const saTextEl = document.getElementById("sa-text");
+const pfMemorySize = document.getElementById("pf-memory-size");
+const pfMemoriesClearBtn = document.getElementById("pf-memories-clear");
 
 // Persona editor editing state
 let peEditingName = null;
@@ -170,3 +172,4 @@ const gsfMaxPersonaReplies = document.getElementById("gsf-max-persona-replies");
 const gsfPersonaNameMentions = document.getElementById("gsf-persona-name-mentions");
 const gsfMaxTurnsForContext = document.getElementById("gsf-max-turns-for-context");
 const gsfShowToolCalls = document.getElementById("gsf-show-tool-calls");
+const gsfEnablePersonaMemories = document.getElementById("gsf-enable-persona-memories");
