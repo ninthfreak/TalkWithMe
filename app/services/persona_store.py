@@ -288,6 +288,18 @@ def load_persona_from_dir(persona_dir: Path) -> Persona:
                 name, TRANSCRIPT_FILENAME,
             )
 
+    allow_tool_calls = bool(frontmatter.get("allow_tool_calls") or False)
+    memory_size = parse_memory_size(frontmatter.get("memory_size"), name)
+    # Diagnostic trail (DEBUG): shows exactly what the runtime parsed out
+    # of the frontmatter (raw value AND sanitized value), so a stale/
+    # mis-parsed prompt.md is diagnosable instead of surfacing as a silent
+    # "no tools".
+    logger.debug(
+        "Persona memory: loaded '%s' from %s: allow_tool_calls=%s, memory_size=%d "
+        "(raw frontmatter: allow_tool_calls=%r, memory_size=%r)",
+        name, persona_dir, allow_tool_calls, memory_size,
+        frontmatter.get("allow_tool_calls"), frontmatter.get("memory_size"),
+    )
     return Persona(
         name=name,
         description=str(frontmatter.get("description") or ""),
@@ -298,9 +310,9 @@ def load_persona_from_dir(persona_dir: Path) -> Persona:
         reference_audio=reference_audio,
         reference_audio_transcript=reference_transcript,
         reference_audio_language=read_language_file(persona_dir, name),
-        allow_tool_calls=bool(frontmatter.get("allow_tool_calls") or False),
+        allow_tool_calls=allow_tool_calls,
         length_bias=_read_length_bias(frontmatter, name),
-        memory_size=parse_memory_size(frontmatter.get("memory_size"), name),
+        memory_size=memory_size,
         persona_dir=persona_dir,
     )
 

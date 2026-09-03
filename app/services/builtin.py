@@ -69,11 +69,20 @@ def get_builtin_tools_for(persona: Persona, settings: AppSettings) -> List[dict]
     persona.allow_tool_calls — no tools of any kind are offered to a
     persona that may not call tools.
     """
-    return [
-        tool.spec
-        for tool in _BUILTIN_TOOLS.values()
-        if tool.is_available is None or tool.is_available(persona, settings)
-    ]
+    available: List[dict] = []
+    for tool in _BUILTIN_TOOLS.values():
+        if tool.is_available is None or tool.is_available(persona, settings):
+            available.append(tool.spec)
+        else:
+            # The gate inputs (enable_persona_memories, memory_size) are
+            # logged by the chat router for the same request, so a generic
+            # "gate failed" line here keeps this module tool-agnostic.
+            logger.debug(
+                "Persona memory: built-in tool '%s' NOT offered to persona '%s' "
+                "(per-request availability gate failed)",
+                tool.spec["function"]["name"], persona.name,
+            )
+    return available
 
 
 def call_builtin_tool(persona: Persona, tool_name: str, arguments: dict) -> str:
@@ -88,6 +97,10 @@ def call_builtin_tool(persona: Persona, tool_name: str, arguments: dict) -> str:
     if tool is None:
         available = ", ".join(sorted(_BUILTIN_TOOLS)) or "none"
         return f"Error: unknown tool '{tool_name}'. Available built-in tools: {available}"
+    logger.debug(
+        "Persona memory: built-in tool '%s' invoked for persona '%s' with arguments: %r",
+        tool_name, persona.name, arguments,
+    )
     try:
         result = tool.handler(persona, arguments)
     except Exception as exc:  # noqa: BLE001 - a handler bug must not kill the stream
@@ -96,6 +109,10 @@ def call_builtin_tool(persona: Persona, tool_name: str, arguments: dict) -> str:
     if not isinstance(result, str):
         logger.error("Built-in tool '%s' returned a non-string result: %r", tool_name, result)
         return "Error: the built-in tool returned an invalid result"
+    logger.debug(
+        "Persona memory: built-in tool '%s' result for persona '%s': %s",
+        tool_name, persona.name, result,
+    )
     return result
 
 
@@ -118,17 +135,13 @@ ADD_MEMORY_SPEC = {
             "user has revealed something interesting about themselves (ambitions, "
             "hopes, dreams, fears, strong emotions, personal anecdotes) or has "
             "explicitly asked you to remember something. It is NOT a requirement to "
-            "submit a memory on every turn, and do not store mundanities (e.g. "
-            "'The user told me hello' is not interesting). Each memory must be a "
+            "submit a memory on every turn - ignore the tool if nothing noteworthy was said. Each memory must be a "
             "SINGLE LINE of text of at most 1024 characters, and must begin with "
             "'The user told me' (always refer to the user as 'the user' when saving memories). "
             "Do not add a memory that is redundant with or very similar to one you have already "
-            "saved. Do not mention to the user that you are using this tool, unless "
-            "the user specifically asks you to remember something (e.g. 'Call me Tom "
-            "from now on' -> 'Okay, I'll make a note of that.'; the response can be "
-            "adjusted to be in-character). Errors from this tool are not fatal - it "
-            "is an optional feature, so proceed with your reply if the memory was "
-            "not saved. Example memory: 'The user told me they prefer cats over "
+            "saved. Do not mention to the user that you are using this tool. Do NOT output text when invoking this "
+            "tool. Only output text when the tool returns. Ignore errors from this tool. "
+            "Example memory: 'The user told me they prefer cats over "
             "dogs.' Example memory: 'The user told me they'd like to take singing "
             "lessons one day.'"
         ),
