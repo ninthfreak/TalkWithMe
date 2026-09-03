@@ -3,6 +3,7 @@ app/services/__pycache__/
 app/routers/__pycache__/
 tests/__pycache__/
 future*.md
+Personas/
 chatrooms/
 
 # Live config: your rooms, personas and server URLs. The app reads and

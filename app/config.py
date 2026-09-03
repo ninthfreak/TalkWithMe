@@ -1,7 +1,11 @@
 """Configuration loading and validation.
 
-Loads settings.yaml and personas.yaml from the project root.
+Loads settings.yaml and the Personas directory from the project root.
 Caches parsed config so we're not hitting disk on every request.
+
+Personas are stored as per-persona subdirectories (see
+app/services/persona_store.py). The legacy personas.yaml file is read
+only for the one-time startup migration — never for anything else.
 """
 
 import logging
@@ -207,6 +211,12 @@ class GeneralConfig(BaseModel):
     # Fallback tier, and the only one the implicit "default" room can use
     # (it has no chatrooms.yaml entry to carry an override).
     typical_length: TypicalLength = TypicalLength.NORMAL
+    # Where persona subdirectories live. Absolute, or relative to the
+    # project root; None/empty falls back to <project root>/Personas.
+    # yaml-only for now (no UI) — like the mcp: section, changes need a
+    # restart, because the directory is resolved at startup and by the
+    # persona router from this cache.
+    personas_directory: Optional[str] = None
 
 
 class MCPServerConfig(BaseModel):
@@ -263,6 +273,9 @@ class Persona(BaseModel):
     # Relative to the room, never absolute: this nudges the persona a step
     # or two along the room's own scale. See LengthBias.
     length_bias: LengthBias = LengthBias.MATCH
+    # Where this persona's files live on disk (set by the directory scan;
+    # None for personas assembled outside of it, e.g. in tests).
+    persona_dir: Optional[Path] = None
 
     @property
     def tts_capable(self) -> bool:
@@ -455,23 +468,91 @@ def load_settings(path: Optional[Path] = None) -> AppSettings:
     return _settings_cache
 
 
-def load_personas(path: Optional[Path] = None) -> PersonasConfig:
-    """Parse personas.yaml. Returns an empty list if the file is missing.
+def get_personas_directory() -> Path:
+    """Resolve the configured Personas directory.
 
-    Legacy keys are rewritten in the raw dict first (see
-    app/config_migrations.py), so a file from any earlier release loads
-    without hand-editing.
+    ``general.personas_directory`` may be absolute or relative to the
+    project root; missing/empty falls back to <project root>/Personas.
+    """
+    configured = (get_settings().general.personas_directory or "").strip()
+    if not configured:
+        return _PROJECT_ROOT / "Personas"
+    path = Path(configured).expanduser()
+    return path if path.is_absolute() else _PROJECT_ROOT / path
+
+
+def load_personas() -> PersonasConfig:
+    """Load personas from the configured Personas directory and cache them.
+
+    Startup decision matrix (docs/feature_persona_autodiscovery.md):
+
+    * ``personas.yaml`` AND a populated Personas directory -> warn
+      loudly; the directory wins and the YAML is left in place (it is
+      IGNORED — not renamed, not deleted).
+    * ``personas.yaml`` only -> one-time automatic migration into the
+      directory; the YAML is renamed to personas.yaml.bak on success.
+    * Neither -> log "No personas found!", create the (empty) directory,
+      and start with zero personas.
+
+    Raises on fatal errors (uncreatable directory, failed migration):
+    the app must not run while unsure where its personas live.
     """
     global _personas_cache
-    target = path or config_path(PERSONAS_FILE)
-    if not target.exists():
-        return PersonasConfig()
-    raw, notes = migrate_personas(_read_raw(target))
-    _log_notes(PERSONAS_FILE, notes)
-    _personas_cache = PersonasConfig(
-        personas=[Persona(**p) for p in raw.get("personas", [])]
-    )
+    # Imported lazily: persona_store imports the Persona models from this
+    # module, so a top-level import would be circular.
+    from app.services import persona_store
+
+    root = get_personas_directory()
+    # config/, not the repo root. The root personas.yaml is tracked by
+    # git and deliberately inert (see migrate_config_files); renaming it
+    # to .bak is exactly the churn that makes `git pull` fail. The live
+    # copy migrate_config_files() puts in config/ is the real one, and
+    # it is the one that gets consumed and renamed.
+    legacy_yaml = config_dir() / PERSONAS_FILE
+
+    if legacy_yaml.is_file():
+        if _personas_directory_populated(root):
+            logger.warning(
+                "Both personas.yaml and the Personas directory (%s) exist. "
+                "The directory takes precedence and personas.yaml is IGNORED. "
+                "Delete or rename personas.yaml to silence this warning.",
+                root,
+            )
+        else:
+            persona_store.migrate_from_legacy_yaml(legacy_yaml, root)
+    elif not root.is_dir():
+        logger.error("No personas found!")
+        logger.error("Persona directory: %s", root)
+        try:
+            root.mkdir(parents=True)
+        except OSError as exc:
+            logger.error("Cannot create the Personas directory %s: %s — aborting startup.", root, exc)
+            raise persona_store.PersonaStorageError(
+                f"cannot create personas directory {root}: {exc}"
+            ) from exc
+        logger.info("Created empty Personas directory: %s", root)
+
+    _personas_cache = PersonasConfig(personas=persona_store.scan_personas_directory(root))
     return _personas_cache
+
+
+def _personas_directory_populated(root: Path) -> bool:
+    """True when the directory exists and holds at least one persona subdirectory."""
+    if not root.is_dir():
+        return False
+    return any(entry.is_dir() for entry in root.iterdir())
+
+
+def set_personas_cache(config: PersonasConfig) -> None:
+    """Replace the in-memory persona cache without touching the disk.
+
+    The persona router calls this after every directory mutation; the
+    directory on disk is the source of truth, so there is nothing to
+    persist here. Skipping this step is how the UI ends up stale until
+    the next restart — it has happened before.
+    """
+    global _personas_cache
+    _personas_cache = config
 
 
 def load_chatrooms(path: Optional[Path] = None) -> ChatRoomsConfig:
@@ -541,18 +622,6 @@ def get_chatrooms() -> ChatRoomsConfig:
     return _chatrooms_cache
 
 
-def save_personas(config: PersonasConfig, path: Optional[Path] = None) -> None:
-    """Write personas.yaml into config/ and update the in-memory cache."""
-    global _personas_cache
-    target = path or config_dir() / PERSONAS_FILE
-    # mode="json" keeps enums as plain strings; a bare model_dump() would
-    # write a Python object tag into the YAML.
-    _write_raw(target, {
-        "personas": [p.model_dump(mode="json", exclude_none=False) for p in config.personas]
-    })
-    _personas_cache = config
-
-
 def save_settings(config: AppSettings, path: Optional[Path] = None) -> None:
     """Write settings.yaml into config/ and update the in-memory cache."""
     global _settings_cache
@@ -590,12 +659,21 @@ def migrate_config_files() -> list:
     """
     migrated = []
 
-    for filename, migrate in (
+    # personas.yaml is a *source* for the one-time directory migration now,
+    # not a live file. Once Personas/ holds anything, copying the tracked
+    # root copy back into config/ would hand load_personas() a legacy file
+    # to migrate all over again — and it would warn about the conflict on
+    # every single startup.
+    files = [
         (SETTINGS_FILE, migrate_settings),
         (PERSONAS_FILE, migrate_personas),
         (CHATROOMS_FILE, migrate_chatrooms),
         (PLAYER_FILE, migrate_player),
-    ):
+    ]
+    if _personas_directory_populated(get_personas_directory()):
+        files = [f for f in files if f[0] != PERSONAS_FILE]
+
+    for filename, migrate in files:
         live = config_dir() / filename
         legacy = legacy_path(filename)
         if live.exists() or not legacy.exists():
@@ -609,12 +687,7 @@ def migrate_config_files() -> list:
     # nothing rewrites them until the next save, so a stale key can sit on
     # disk indefinitely. Bring any out-of-date file up to the current
     # schema here, once, so what is on disk matches what the app reads.
-    for filename, migrate in (
-        (SETTINGS_FILE, migrate_settings),
-        (PERSONAS_FILE, migrate_personas),
-        (CHATROOMS_FILE, migrate_chatrooms),
-        (PLAYER_FILE, migrate_player),
-    ):
+    for filename, migrate in files:
         live = config_dir() / filename
         if filename in migrated or not live.exists():
             continue

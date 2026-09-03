@@ -1,9 +1,13 @@
 """Tests for app/config.py — model validation and YAML load/save behaviour."""
 
+import logging
+
 import yaml
 
 import pytest
 from pydantic import ValidationError
+
+from app.services import persona_store
 
 from app import config as app_config
 from app.config import (
@@ -27,7 +31,6 @@ from app.config import (
     load_personas,
     resolve_typical_length,
     save_chatrooms,
-    save_personas,
 )
 from tests.factories import make_chatrooms, make_personas, make_settings
 
@@ -126,6 +129,97 @@ class TestPersona:
 
 
 # ---------------------------------------------------------------------------
+# Personas directory resolution
+# ---------------------------------------------------------------------------
+
+class TestGetPersonasDirectory:
+    def test_defaults_to_project_root_personas(self, tmp_project_root):
+        # The autouse settings cache has no personas_directory configured.
+        assert app_config.get_personas_directory() == tmp_project_root / "Personas"
+
+    def test_relative_path_resolves_against_project_root(self, tmp_project_root, monkeypatch):
+        monkeypatch.setattr(
+            app_config, "_settings_cache",
+            make_settings(general=GeneralConfig(personas_directory="custom/personas")),
+        )
+        assert app_config.get_personas_directory() == tmp_project_root / "custom/personas"
+
+    def test_absolute_path_used_verbatim(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            app_config, "_settings_cache",
+            make_settings(general=GeneralConfig(personas_directory=str(tmp_path / "elsewhere"))),
+        )
+        assert app_config.get_personas_directory() == tmp_path / "elsewhere"
+
+
+# ---------------------------------------------------------------------------
+# load_personas() startup decision matrix
+# ---------------------------------------------------------------------------
+
+class TestLoadPersonasDecisionMatrix:
+    """personas.yaml vs the Personas directory: which one wins, when?
+
+    The legacy YAML is read from ``config/``, not the repo root as upstream
+    does. The root copy is tracked by git and deliberately never written
+    to; renaming it to .bak is exactly the churn that breaks `git pull`.
+    """
+
+    def _legacy(self, tmp_config_dir, body):
+        tmp_config_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_config_dir / "personas.yaml").write_text(body)
+
+    def test_legacy_yaml_only_is_migrated_once(self, tmp_project_root, tmp_config_dir):
+        self._legacy(tmp_config_dir, "personas:\n  - name: Fresh\n    system_prompt: p\n")
+        cfg = app_config.load_personas()
+        assert [p.name for p in cfg.personas] == ["Fresh"]
+        # The YAML is renamed (never deleted) so the migration runs once.
+        assert not (tmp_config_dir / "personas.yaml").exists()
+        assert (tmp_config_dir / "personas.yaml.bak").exists()
+        assert (tmp_project_root / "Personas" / "Fresh" / "prompt.md").exists()
+
+    def test_the_tracked_root_copy_is_never_touched(self, tmp_project_root, tmp_config_dir):
+        # The whole reason the source moved: a .bak rename at the repo root
+        # would leave a tracked file deleted in the working tree.
+        (tmp_project_root / "personas.yaml").write_text(
+            "personas:\n  - name: Shipped\n    system_prompt: p\n"
+        )
+        self._legacy(tmp_config_dir, "personas:\n  - name: Mine\n    system_prompt: p\n")
+
+        cfg = app_config.load_personas()
+
+        assert [p.name for p in cfg.personas] == ["Mine"]   # not the shipped default
+        assert (tmp_project_root / "personas.yaml").exists()
+        assert not (tmp_project_root / "personas.yaml.bak").exists()
+
+    def test_directory_and_yaml_prefers_directory_and_warns(
+        self, tmp_project_root, tmp_config_dir, caplog
+    ):
+        self._legacy(tmp_config_dir, "personas:\n  - name: Stale\n    system_prompt: p\n")
+        persona_dir = tmp_project_root / "Personas" / "Fresh"
+        persona_dir.mkdir(parents=True)
+        persona_dir.joinpath("prompt.md").write_text(
+            "---\ndescription: fresh\nrouter_hints: h\navatar_color: '#888888'\n"
+            "allow_tool_calls: false\n---\n\nYou are Fresh.\n"
+        )
+        with caplog.at_level(logging.WARNING):
+            cfg = app_config.load_personas()
+        assert [p.name for p in cfg.personas] == ["Fresh"]
+        # The YAML is IGNORED, not renamed or deleted.
+        assert (tmp_config_dir / "personas.yaml").exists()
+        assert not (tmp_config_dir / "personas.yaml.bak").exists()
+        assert "IGNORED" in caplog.text
+
+    def test_malformed_legacy_yaml_aborts_startup(self, tmp_project_root, tmp_config_dir):
+        self._legacy(tmp_config_dir, "personas: [\n")
+        with pytest.raises(persona_store.PersonaMigrationError):
+            app_config.load_personas()
+        # The YAML survives for the next attempt.
+        assert (tmp_config_dir / "personas.yaml").exists()
+        # And no partial directory is left behind.
+        assert not (tmp_project_root / "Personas").exists()
+
+
+# ---------------------------------------------------------------------------
 # Loading: missing files fall back to defaults
 # ---------------------------------------------------------------------------
 
@@ -135,9 +229,12 @@ class TestLoadingFallbacks:
         assert settings.llm.base_url == "http://localhost:8080"
         assert settings.mcp.servers == []
 
-    def test_load_personas_missing_file_returns_empty(self, tmp_path):
-        cfg = app_config.load_personas(tmp_path / "nope.yaml")
+    def test_load_personas_no_yaml_no_directory_creates_empty_dir(self, tmp_project_root):
+        # Neither personas.yaml nor a Personas directory exists: the app must
+        # not crash — it logs an error, creates the directory, and starts empty.
+        cfg = app_config.load_personas()
         assert cfg.personas == []
+        assert (tmp_project_root / "Personas").is_dir()
 
     def test_load_chatrooms_missing_file_returns_empty(self, tmp_path):
         cfg = app_config.load_chatrooms(tmp_path / "nope.yaml")
@@ -178,34 +275,6 @@ mcp:
         assert settings.general.show_tool_calls is False
         assert settings.mcp.servers[0].name == "my-server"
 
-    def test_load_personas_migrates_legacy_language_key(self, tmp_path):
-        path = tmp_path / "personas.yaml"
-        path.write_text(
-            """
-personas:
-  - name: Alex
-    system_prompt: You are Alex.
-    language: de
-"""
-        )
-        cfg = app_config.load_personas(path)
-        assert cfg.personas[0].reference_audio_language == "de"
-
-    def test_load_personas_keeps_explicit_reference_audio_language(self, tmp_path):
-        # If both keys exist, the new key wins and the legacy one is ignored.
-        path = tmp_path / "personas.yaml"
-        path.write_text(
-            """
-personas:
-  - name: Alex
-    system_prompt: You are Alex.
-    language: de
-    reference_audio_language: es
-"""
-        )
-        cfg = app_config.load_personas(path)
-        assert cfg.personas[0].reference_audio_language == "es"
-
     def test_load_chatrooms_parses_rooms(self, tmp_path):
         path = tmp_path / "chatrooms.yaml"
         path.write_text(
@@ -238,14 +307,6 @@ class TestSaveLoadRoundTrip:
         assert reloaded["general"]["max_persona_replies"] == 3
         assert reloaded["general"]["show_tool_calls"] is False
 
-    def test_save_personas_round_trip(self, tmp_path):
-        path = tmp_path / "personas.yaml"
-        cfg = make_personas()
-        app_config.save_personas(cfg, path)
-        reloaded = app_config.load_personas(path)
-        assert [p.name for p in reloaded.personas] == ["Alex", "Luna"]
-        assert reloaded.personas[1].reference_audio == "reference/luna.wav"
-
     def test_save_chatrooms_round_trip(self, tmp_path):
         path = tmp_path / "chatrooms.yaml"
         cfg = make_chatrooms()
@@ -276,7 +337,10 @@ class TestCaching:
         # Point the module's project root at tmp so reload_all reads tmp files.
         monkeypatch.setattr(app_config, "_PROJECT_ROOT", tmp_path)
         (tmp_path / "settings.yaml").write_text("llm:\n  base_url: http://reloaded:1\n")
-        (tmp_path / "personas.yaml").write_text(
+        # Personas come from config/personas.yaml (migrated into Personas/
+        # on the way), not from the tracked root copy.
+        (tmp_path / "config").mkdir(exist_ok=True)
+        (tmp_path / "config" / "personas.yaml").write_text(
             "personas:\n  - name: Fresh\n    system_prompt: p\n"
         )
         (tmp_path / "chatrooms.yaml").write_text(
@@ -412,10 +476,10 @@ class TestTypicalLengthPersistence:
         (tmp_path / "chatrooms.yaml").write_text(
             "chat_rooms:\n- name: TNG\n  persona_names: [Alex]\n"
         )
-        personas = load_personas(tmp_path / "personas.yaml")
+        personas = persona_store.load_personas_yaml(tmp_path / "personas.yaml")
         rooms = load_chatrooms(tmp_path / "chatrooms.yaml")
 
-        assert personas.personas[0].length_bias is LengthBias.MATCH
+        assert personas[0].length_bias is LengthBias.MATCH
         assert rooms.chat_rooms[0].typical_length is TypicalLength.NORMAL
 
     def test_round_trips_as_a_plain_string(self, tmp_path):
@@ -430,14 +494,6 @@ class TestTypicalLengthPersistence:
         assert "typical_length: terse" in target.read_text()
         assert load_chatrooms(target).chat_rooms[0].typical_length is TypicalLength.TERSE
 
-    def test_bias_round_trips_as_a_plain_string(self, tmp_path):
-        target = tmp_path / "personas.yaml"
-        save_personas(PersonasConfig(personas=[
-            Persona(name="Alex", system_prompt="hi", length_bias=LengthBias.MUCH_SHORTER)
-        ]), target)
-        assert "length_bias: much_shorter" in target.read_text()
-        assert load_personas(target).personas[0].length_bias is LengthBias.MUCH_SHORTER
-
     def test_legacy_persona_typical_length_becomes_a_bias(self, tmp_path, caplog):
         # The absolute per-persona tier is gone, but it encoded an intent
         # ("longer than usual"), so that intent carries over rather than
@@ -447,7 +503,7 @@ class TestTypicalLengthPersistence:
             "personas:\n- name: Alex\n  system_prompt: hi\n  typical_length: detailed\n"
         )
         with caplog.at_level("INFO"):
-            persona = load_personas(target).personas[0]
+            persona = persona_store.load_personas_yaml(target)[0]
 
         assert persona.length_bias is LengthBias.LONGER
         assert "typical_length: detailed" in caplog.text
@@ -512,14 +568,14 @@ class TestConfigWritesAreAtomic:
     """
 
     def test_no_temp_file_is_left_behind(self, tmp_path):
-        target = tmp_path / "personas.yaml"
-        save_personas(PersonasConfig(personas=[Persona(name="A", system_prompt="x")]), target)
+        target = tmp_path / "chatrooms.yaml"
+        save_chatrooms(ChatRoomsConfig(chat_rooms=[ChatRoom(name="A")]), target)
         assert target.exists()
         assert list(tmp_path.glob("*.tmp")) == []
 
     def test_a_failed_write_leaves_the_previous_file_intact(self, tmp_path, monkeypatch):
-        target = tmp_path / "personas.yaml"
-        save_personas(PersonasConfig(personas=[Persona(name="A", system_prompt="x")]), target)
+        target = tmp_path / "chatrooms.yaml"
+        save_chatrooms(ChatRoomsConfig(chat_rooms=[ChatRoom(name="A")]), target)
         before = target.read_text()
 
         def boom(*args, **kwargs):
@@ -527,10 +583,8 @@ class TestConfigWritesAreAtomic:
 
         monkeypatch.setattr(app_config.os, "replace", boom)
         with pytest.raises(OSError):
-            save_personas(
-                PersonasConfig(personas=[Persona(name="B", system_prompt="y")]), target
-            )
+            save_chatrooms(ChatRoomsConfig(chat_rooms=[ChatRoom(name="B")]), target)
 
         # The old content is still readable — nothing was truncated.
         assert target.read_text() == before
-        assert [p.name for p in load_personas(target).personas] == ["A"]
+        assert [r.name for r in load_chatrooms(target).chat_rooms] == ["A"]

@@ -18,24 +18,62 @@ python3 -m pytest        # from the project root; config in pytest.ini
 ```
 
 - **No servers needed.** The suite is hermetic: every external HTTP endpoint (LLM, TTS, STT, MCP) is faked via `tests/factories.py` (fake `httpx.AsyncClient`s, config factories, SSE helpers). It must run — and pass — with nothing but Python installed.
-- **Isolation**: `tests/conftest.py` has an autouse fixture that points every module-level global at per-test `tmp_path` state: the config caches in `app/config.py`, `_PERSISTENCE_ROOT` (in both `app/persistence.py` and `app/routers/persistence.py` — the router imported it *by value*, so it needs its own patch), the `session` singleton, and the MCP tool registry. Real `settings.yaml` / `personas.yaml` / `chatrooms.yaml` / `chatrooms/` data is never read or written. **If you add a new module-level global to the app, add it to that fixture.**
+- **Isolation**: `tests/conftest.py` has an autouse fixture that points every module-level global at per-test `tmp_path` state: the config caches in `app/config.py`, `_PERSISTENCE_ROOT` (in both `app/persistence.py` and `app/routers/persistence.py` — the router imported it *by value*, so it needs its own patch), the `session` singleton, and the MCP tool registry. Real `settings.yaml` / `Personas/` / `chatrooms.yaml` / `chatrooms/` data is never read or written. **If you add a new module-level global to the app, add it to that fixture.**
 - **Lifespan**: the `client` fixture uses `TestClient` *without* the startup lifespan, because the lifespan re-reads the real YAML files (clobbering test caches) and attempts MCP discovery. Tests that exercise the lifespan do so explicitly with a local `TestClient` in a `with` block and monkeypatched `load_*`/`load_tools` (see `tests/test_main.py`).
-- **Coverage map**: `test_config.py` (config models + YAML load/save), `test_models.py` (API request/response models), `test_persistence.py` (disk persistence + audio staging), `test_session_manager.py`, `test_llm.py` (SSE parsing + agentic tool loop), `test_mcp_client.py`, `test_tool_registry.py`, `test_tts_stt_clients.py`, `test_chat_sse.py` (the `/api/chat` SSE endpoints — LLM stubbed, selection/persistence/speak-as/tool events for real), `test_main.py`, `test_docs.py` (the AGENTS.md API endpoints table must match the routes actually registered on the app — run it after adding/removing endpoints and update the table), and one `test_routers_*.py` per API router.
+- **Coverage map**: `test_config.py` (config models + YAML load/save), `test_persona_store.py` (persona directory discovery: frontmatter, file ops, language/avatar helpers, YAML→dir migration), `test_models.py` (API request/response models), `test_persistence.py` (disk persistence + audio staging), `test_session_manager.py`, `test_llm.py` (SSE parsing + agentic tool loop), `test_mcp_client.py`, `test_tool_registry.py`, `test_tts_stt_clients.py`, `test_chat_sse.py` (the `/api/chat` SSE endpoints — LLM stubbed, selection/persistence/speak-as/tool events for real), `test_reply_guard.py` (the persona-containment state machine), `test_config_migrations.py` (old config files keep loading and keep their meaning), `test_main.py`, `test_docs.py` (the AGENTS.md API endpoints table must match the routes actually registered on the app — run it after adding/removing endpoints and update the table), one `test_routers_*.py` per API router, and `test_persona_form.js` (plain Node, **not** part of pytest — see below: the persona editor form logic in `static/persona.js`).
+- **Frontend tests (Node)**: `tests/test_persona_form.js` runs with plain Node 20+ — no npm packages, no network: `node tests/test_persona_form.js`. It evaluates the real `static/utils.js` + `state.js` + `persona.js` in a fresh `vm.Context` per test against a minimal DOM stub, stubs `fetch` to capture the multipart `FormData`, and drives the real `openPersonaForm()`, Remove-button listeners, file-input change handlers, and `submitPersonaForm()`. It exists to lock in the invariant that `remove_avatar_image` / `remove_reference_audio` are sent **only** after an explicit "Remove" click — never derived from server-side file presence (that bug silently deleted a persona's avatar and reference audio on every plain text save). It is kept out of the pytest suite on purpose: pytest must stay runnable with nothing but Python installed.
 - **Rules**:
-  - Every code change must be followed by a clean run: `python3 -m pytest`, all green. No exceptions, no skipped tests.
+  - Every code change must be followed by a clean run: `python3 -m pytest`, all green. No exceptions, no skipped tests. Changes to `static/persona.js` (or anything else covered by the Node tests) additionally require `node tests/test_persona_form.js` all green.
   - New functionality or API endpoints require new tests in the matching `test_*.py` file before the change is complete.
   - API tests use the `client` fixture + config caches (re-point `app.config._settings_cache` / `_personas_cache` / `_chatrooms_cache` via `monkeypatch`); router-level stubs are applied at the router's import site (e.g. `app.routers.chat.stream_chat`), since routers import service functions by name.
   - `httpx` version pin matters: with httpx 0.24, `response.url` / `raise_for_status()` raise `RuntimeError` if no `request` is attached to a `Response`, and the `.request` *getter* itself raises when unset (check `response._request` instead). All fake responses in `tests/factories.py` attach a request for this reason.
 
-## Config — four YAML files, cached at startup
+## Config — YAML files + a persona directory, cached at startup
 
-**Two locations, one of them inert.** The app reads and writes `config/settings.yaml`, `config/personas.yaml`, `config/chatrooms.yaml` and `config/player.yaml` (gitignored). The identically-named files at the **repo root are tracked shipped defaults and are never written to.** Do not "tidy this up" by untracking the root copies: `git rm --cached` on them makes the next `git pull` try to delete files users have edited locally, and git aborts the merge with *"Your local changes to the following files would be overwritten by merge"*. That is the bug this layout exists to prevent.
+| Source | Purpose |
+|--------|---------|
+| `config/settings.yaml` | LLM, TTS, STT endpoints and parameters, general chat parameters, MCP server list. `general.personas_directory` (default `Personas`) says where personas live |
+| `Personas/` (one directory per persona) | Persona definitions — the single source of truth. See **Persona storage** below |
+| `config/chatrooms.yaml` | Chat room groupings, and each room's settings |
+| `config/player.yaml` | Which persona the human is playing |
+| `config/personas.yaml` | **Legacy only.** Migrated into `Personas/` once at startup, then renamed `personas.yaml.bak` |
+
+**Two locations, one of them inert.** The app reads and writes the `config/` copies (gitignored). The identically-named files at the **repo root are tracked shipped defaults and are never written to.** Do not "tidy this up" by untracking the root copies: `git rm --cached` on them makes the next `git pull` try to delete files users have edited locally, and git aborts the merge with *"Your local changes to the following files would be overwritten by merge"*. That is the bug this layout exists to prevent.
+
+That invariant is also why the persona migration reads `config/personas.yaml` rather than the repo-root copy upstream uses: the `.bak` rename has to land on a gitignored file. `migrate_config_files()` skips `personas.yaml` entirely once `Personas/` holds anything, or it would copy the root default back into `config/` after every migration and warn about the conflict on every startup.
 
 `config_path()` in `app/config.py` prefers `config/` and falls back to the root copy, so the very first run after an upgrade still sees the user's existing settings. `migrate_config_files()` (called from the `app/main.py` lifespan, before any load) **copies** root → `config/`, upgrading the schema on the way; it never moves or deletes, and never replaces the contents of an existing `config/` file. It then brings any already-present `config/` file whose `schema_version` is behind up to date **on disk** — loading migrates in memory, but nothing rewrote the file until the next save, so a stale key could sit there indefinitely while the app read something else. `save_*()` always writes to `config/`. All path helpers read `_PROJECT_ROOT` at call time so `tests/conftest.py` can repoint them at `tmp_path`.
 
 **Schema versioning.** Every written file starts with `schema_version` (`CONFIG_SCHEMA_VERSION` in `app/config_migrations.py`); files predating it are version 1. `load_*()` runs the raw dict through `migrate_personas` / `migrate_chatrooms` / `migrate_settings` **before Pydantic sees it** — that ordering is load-bearing, since once a model has parsed or dropped a legacy key the information needed to migrate it is gone. Migrations return `(raw, notes)` and the notes are logged, so an upgrade is visible. A file from a *newer* schema loads with a warning rather than failing. To add a migration: bump the version, add a step to the relevant chain, and cover it in `tests/test_config_migrations.py` with a real old-format file.
 
 Migrations translate rather than drop wherever intent can be preserved — a persona's old absolute `typical_length` becomes the equivalent relative `length_bias` (its offset from the old `normal`), so a laconic persona stays laconic instead of being silently flattened to the default.
+
+## Persona storage
+
+Personas live in `Personas/<Name>/` (directory = `sanitize_persona_dirname(name)`; name may differ, e.g. `O'Brien` → `OBrien`). All file I/O lives in `app/services/persona_store.py` (framework-agnostic; routers and config import from there).
+
+Per-persona files:
+
+| File | Content | Notes |
+|------|---------|-------|
+| `prompt.md` | YAML frontmatter (`description`, `router_hints`, `avatar_color`, `allow_tool_calls`) + system prompt body | `name` is stored only when it differs from the directory name; parsed/serialized by `parse_frontmatter()` / `build_prompt_md()`. Malformed frontmatter degrades the whole file to the prompt body with a warning — never a crash |
+| `language.txt` | Single line: reference-audio language code | Absent → `en` (with warning) |
+| `ref.wav` | TTS reference audio | Fixed filename — never user-chosen |
+| `ref.txt` | Transcript of `ref.wav` | A persona is TTS-capable only when **both** are present (and non-blank) |
+| `image.<ext>` | Avatar (png/jpg/jpeg/gif/webp) | One per persona; the editor's "replace image" uploads a new file and deletes the old one |
+
+Startup decision matrix in `app/config.py::load_personas()` (lazy-imports `persona_store` to dodge a cycle):
+
+| `personas.yaml` | `Personas/` dir | Behaviour |
+|-----------------|-----------------|-----------|
+| no | no | Create the (empty) dir, warn once; empty persona list |
+| no | yes | Scan |
+| yes | no | **Migrate** (see below) |
+| yes | yes | Skip the YAML with a warning (dir wins); both sources kept on disk |
+
+**Migration** (`persona_store.migrate_from_legacy_yaml()`): converts the old schema to per-persona directories. Each persona gets a `prompt.md` (frontmatter + system prompt) and `language.txt`, and the files referenced by its `avatar_image` / `reference_audio` / `reference_audio_transcript` **paths** are copied in as `image<ext>` / `ref.wav` / `ref.txt`. Success → the YAML is renamed to `personas.yaml.bak` so it never re-migrates. **Fatal** error (malformed YAML, unwritable directory, disk full) → raise `PersonaMigrationError` with the YAML left **untouched** and the partially created `Personas/` directory removed best-effort, so the next startup retries cleanly. **Minor** error (a referenced file missing, unreadable, or the wrong format — e.g. a non-wav `reference_audio`) → logged, that file skipped, migration continues. The YAML is the source of truth until the rename succeeds.
+
+**Directory is never renamed.** A persona *name* change (editor) writes a new `prompt.md` `name:` field but keeps the directory; deleting a persona deletes the directory. `GET /api/personas` returns personas in raw directory/creation order — sorting is a frontend concern (see **Persona list ordering**).
 
 ## Architecture
 
@@ -62,7 +100,7 @@ Migrations translate rather than drop wherever intent can be preserved — a per
 | `theme.js` | Theme toggle |
 | `utils.js` | Shared helpers (incl. `comparePersonasByName()`, the shared case-insensitive persona-name comparator) |
 
-**Persona list ordering**: Anywhere a list of personas is shown to the user (the sidebar, the persona editor modal, the persona picker modal, and anything added in the future), it must be sorted alphabetically and case-insensitively using `comparePersonasByName()` from `utils.js`. The shared `personas` global is pre-sorted in `loadPersonas()` (`app.js`), but each render function sorts its own input list rather than trusting the caller's order. **Do not** rely on `GET /api/personas` returning any particular order — the backend intentionally returns personas in raw YAML/creation order; sorting is a display concern and belongs in the frontend only.
+**Persona list ordering**: Anywhere a list of personas is shown to the user (the sidebar, the persona editor modal, the persona picker modal, and anything added in the future), it must be sorted alphabetically and case-insensitively using `comparePersonasByName()` from `utils.js`. The shared `personas` global is pre-sorted in `loadPersonas()` (`app.js`), but each render function sorts its own input list rather than trusting the caller's order. **Do not** rely on `GET /api/personas` returning any particular order — the backend intentionally returns personas in raw directory/creation order; sorting is a display concern and belongs in the frontend only.
 
 ## Chat flow
 
@@ -172,11 +210,12 @@ Chat rooms are stored in `chatrooms.yaml` and managed via `get_chatrooms()` / `s
 |--------|------|-------------|
 | `GET` | `/api/personas` | List all personas (summary) |
 | `GET` | `/api/personas/{name}/detail` | Full persona detail |
-| `POST` | `/api/personas` | Create a new persona |
-| `PUT` | `/api/personas/{name}` | Update a persona (rename cascades to chat rooms) |
-| `DELETE` | `/api/personas/{name}` | Delete a persona (cascades to chat rooms) |
+| `POST` | `/api/personas` | Create a new persona (multipart form: text fields + optional avatar/reference audio files) |
+| `PUT` | `/api/personas/{name}` | Update a persona (multipart form; rename cascades to chat rooms, directory is never renamed) |
+| `DELETE` | `/api/personas/{name}` | Delete a persona and its directory (cascades to chat rooms) |
 | `POST` | `/api/personas/{name}/clone` | Clone a persona with a numeric suffix (`Name_2`, `Name_3`, …) |
 | `GET` | `/api/personas/{name}/avatar` | Serve a persona's avatar image file |
+| `GET` | `/api/personas/{name}/reference-audio` | Serve a persona's reference audio file (`ref.wav`) |
 | `GET` | `/api/chatrooms` | List all chat rooms (excluding implicit "default") |
 | `GET` | `/api/chatrooms/all` | List all chat rooms including "default" (feeds the frontend dropdown) |
 | `GET` | `/api/chatrooms/{name}` | Get a single chat room (including "default") |
@@ -205,7 +244,7 @@ Chat rooms are stored in `chatrooms.yaml` and managed via `get_chatrooms()` / `s
 
 ## Persona CRUD cascades
 
-Renaming or deleting a persona cascades to `chatrooms.yaml` via `_cascade_persona_rename()` / `_cascade_persona_delete()` in `app/routers/personas.py`. Keep this in sync if data models change.
+Renaming or deleting a persona cascades to `chatrooms.yaml` via `_cascade_persona_rename()` / `_cascade_persona_delete()` in `app/routers/personas.py`. Keep this in sync if data models change. Persona create/update/delete/clone are **multipart** (`POST`/`PUT` with `Form` text fields + optional `UploadFile` avatar / reference audio); there is no JSON request model for them — the `PersonaResponse`/`PersonaDetailResponse` in `app/models.py` are the only persona request/response shapes, and they carry file *contents* and boolean capability flags rather than paths.
 
 ## Pydantic models
 

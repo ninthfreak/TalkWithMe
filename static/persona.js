@@ -4,7 +4,36 @@
  * Handles:
  *  - Rendering the persona cards in the sidebar
  *  - The persona editor modal: list, create, edit, clone, delete
+ *
+ * The editor form is multipart/form-data: text fields plus file uploads
+ * (avatar image, reference audio) are submitted together, so the server
+ * stores everything in the persona's directory in one request.
  */
+
+/* ==========================================================================
+    Persona Editor — form-private state
+    ========================================================================== */
+
+// Whether the persona being edited has an avatar / reference audio on the
+// server when the form opens. Drives the previews and Remove-button
+// visibility (see renderPersonaAvatarPreview / updatePersonaAudioControls).
+let peAvatarOnServer = false;
+let peAudioOnServer = false;
+
+// Whether the user has explicitly clicked "Remove" for the avatar /
+// reference audio since the form opened (or since the last file selection).
+// This is the ONLY thing that may set the remove_* flags on submit. They
+// must never be derived from peAvatarOnServer / peAudioOnServer: that would
+// silently delete a persona's avatar / reference audio on every plain text
+// save (the original bug behind the remove-requested split).
+let peAvatarRemoveRequested = false;
+let peAudioRemoveRequested = false;
+
+// Object URLs + Audio element for the in-form previews. Reused across
+// plays; revoked and stopped when the form closes.
+let peAvatarObjectUrl = null;
+let peAudioObjectUrl = null;
+let pePreviewAudio = null;
 
 /* ==========================================================================
    Sidebar persona list rendering
@@ -166,6 +195,11 @@ document.getElementById("pe-btn-new").addEventListener("click", () => openPerson
 document.getElementById("pe-form-btn-cancel").addEventListener("click", showPersonaList);
 document.getElementById("pe-form-btn-cancel2").addEventListener("click", showPersonaList);
 peForm.addEventListener("submit", submitPersonaForm);
+pfAvatarImage.addEventListener("change", onPersonaAvatarFileSelected);
+pfAvatarRemoveBtn.addEventListener("click", () => resetPersonaAvatarField());
+pfReferenceAudio.addEventListener("change", onPersonaAudioFileSelected);
+pfAudioRemoveBtn.addEventListener("click", () => resetPersonaAudioField());
+pfAudioPlayBtn.addEventListener("click", playPersonaReferenceAudio);
 document.getElementById("pe-confirm-cancel").addEventListener("click", () => {
     peConfirmOverlay.classList.add("hidden");
 });
@@ -188,10 +222,14 @@ function openPersonaEditor() {
 }
 
 function closePersonaEditor() {
+    stopPersonaPreviewAudio();
+    stopPersonaAvatarPreview();
     personaEditorOverlay.classList.add("hidden");
 }
 
 function showPersonaList() {
+    stopPersonaPreviewAudio();
+    stopPersonaAvatarPreview();
     peListView.classList.remove("hidden");
     peFormView.classList.add("hidden");
     renderPersonaEditorList();
@@ -267,6 +305,18 @@ async function openPersonaForm(name) {
     peFormError.classList.add("hidden");
     peFormError.textContent = "";
 
+    // Always start from a clean slate: stop any preview playback, release
+    // any leftover preview object URLs, and clear the file inputs (setting
+    // value="" is the only way to reset them).
+    stopPersonaPreviewAudio();
+    stopPersonaAvatarPreview();
+    pfAvatarImage.value = "";
+    pfReferenceAudio.value = "";
+    peAvatarOnServer = false;
+    peAudioOnServer = false;
+    peAvatarRemoveRequested = false;
+    peAudioRemoveRequested = false;
+
     if (name) {
         peFormTitle.textContent = `Edit Persona: ${name}`;
         try {
@@ -282,12 +332,14 @@ async function openPersonaForm(name) {
             pfRouterHints.value       = p.router_hints;
             pfAvatarColor.value       = p.avatar_color || "#FF0000";
             pfReferenceAudioLanguage.value = p.reference_audio_language || "en";
-            pfAvatarImage.value       = p.avatar_image || "";
-            pfReferenceAudio.value    = p.reference_audio || "";
             pfReferenceAudioTx.value  = p.reference_audio_transcript || "";
             pfAllowToolCalls.checked  = p.allow_tool_calls ?? false;
             // Relative to the room; "match" means simply follow it.
             pfLengthBias.value        = p.length_bias || "match";
+            // avatar_image / reference_audio are now presence flags; the
+            // actual files are previewed via their dedicated endpoints.
+            peAvatarOnServer = !!p.avatar_image;
+            peAudioOnServer  = !!p.reference_audio;
         } catch (err) {
             showPersonaFormError("Failed to load persona details.");
             return;
@@ -300,16 +352,181 @@ async function openPersonaForm(name) {
         pfRouterHints.value       = "";
         pfAvatarColor.value       = "#FF0000";
         pfReferenceAudioLanguage.value = "en";
-        pfAvatarImage.value       = "";
-        pfReferenceAudio.value    = "";
         pfReferenceAudioTx.value  = "";
         pfAllowToolCalls.checked  = false;
         pfLengthBias.value        = "match";
     }
 
+    renderPersonaAvatarPreview();
+    updatePersonaAudioControls();
+
     peListView.classList.add("hidden");
     peFormView.classList.remove("hidden");
     pfName.focus();
+}
+
+/* ==========================================================================
+    Persona Editor — file fields (avatar image, reference audio)
+    ========================================================================== */
+
+/**
+ * Rebuild the avatar preview circle: the selected file's object URL if
+ * one is chosen, the server's avatar otherwise, or the initial as a
+ * fallback.
+ */
+function renderPersonaAvatarPreview() {
+    stopPersonaAvatarPreview();
+    const file = pfAvatarImage.files[0];
+    if (file) {
+        peAvatarObjectUrl = URL.createObjectURL(file);
+        pfAvatarPreview.innerHTML = "";
+        const img = document.createElement("img");
+        img.src = peAvatarObjectUrl;
+        img.alt = "Avatar preview";
+        pfAvatarPreview.appendChild(img);
+    } else if (peAvatarOnServer && !peAvatarRemoveRequested) {
+        const img = document.createElement("img");
+        img.src = `/api/personas/${encodeURIComponent(peEditingName)}/avatar`;
+        img.alt = "Current avatar";
+        img.onerror = () => {
+            pfAvatarPreview.innerHTML = "";
+            pfAvatarPreview.textContent = peEditingName.charAt(0).toUpperCase();
+        };
+        pfAvatarPreview.innerHTML = "";
+        pfAvatarPreview.appendChild(img);
+    } else {
+        pfAvatarPreview.innerHTML = "";
+        pfAvatarPreview.textContent = (peEditingName || "?").charAt(0).toUpperCase();
+    }
+    // Remove makes sense when there is anything left to remove: a selected
+    // file, or a server file that has not been marked for removal. (Once a
+    // removal is pending there is nothing left to remove — the preview
+    // already shows the post-save state.)
+    pfAvatarRemoveBtn.classList.toggle(
+        "hidden",
+        !file && !(peAvatarOnServer && !peAvatarRemoveRequested)
+    );
+}
+
+/**
+ * Revoke the object URL backing the avatar preview. Called whenever the
+ * form closes or resets: the preview <img> dies with the form, so the URL
+ * (and the in-memory File it pins) must go with it. Deliberately NOT part
+ * of stopPersonaPreviewAudio() — that also runs on an audio-field-only
+ * reset, where the avatar preview is still on screen.
+ */
+function stopPersonaAvatarPreview() {
+    if (peAvatarObjectUrl) {
+        URL.revokeObjectURL(peAvatarObjectUrl);
+        peAvatarObjectUrl = null;
+    }
+}
+
+function onPersonaAvatarFileSelected() {
+    // Picking a file supersedes any pending removal request.
+    peAvatarRemoveRequested = false;
+    renderPersonaAvatarPreview();
+}
+
+function resetPersonaAvatarField() {
+    pfAvatarImage.value = "";
+    peAvatarRemoveRequested = true;
+    renderPersonaAvatarPreview();
+}
+
+/**
+ * Refresh the status text and Play/Remove visibility for the reference
+ * audio field based on what is currently selected / on the server.
+ */
+function updatePersonaAudioControls() {
+    const file = pfReferenceAudio.files[0];
+    // A file marked for removal is no longer "current" — show the post-save
+    // state so the UI never lies about what will happen on submit.
+    const audioOnServerKept = peAudioOnServer && !peAudioRemoveRequested;
+    if (file) {
+        pfAudioStatus.textContent = `New file: ${file.name}`;
+    } else if (audioOnServerKept) {
+        pfAudioStatus.textContent = "Current file on server";
+    } else {
+        pfAudioStatus.textContent = "None";
+    }
+    // Same rule as the avatar Remove button: only show controls when there
+    // is something left to play / remove.
+    pfAudioPlayBtn.classList.toggle("hidden", !file && !audioOnServerKept);
+    pfAudioRemoveBtn.classList.toggle("hidden", !file && !audioOnServerKept);
+}
+
+function onPersonaAudioFileSelected() {
+    // Picking a file supersedes any pending removal request.
+    peAudioRemoveRequested = false;
+    updatePersonaAudioControls();
+}
+
+function resetPersonaAudioField() {
+    pfReferenceAudio.value = "";
+    peAudioRemoveRequested = true;
+    stopPersonaPreviewAudio();
+    updatePersonaAudioControls();
+}
+
+/**
+ * Play the reference audio: the freshly selected file if there is one,
+ * otherwise the file currently on the server. A single Audio element is
+ * reused so starting a new playback stops the previous one.
+ */
+async function playPersonaReferenceAudio() {
+    stopPersonaPreviewAudio();
+    const file = pfReferenceAudio.files[0];
+    if (file) {
+        peAudioObjectUrl = URL.createObjectURL(file);
+        const audio = new Audio(peAudioObjectUrl);
+        audio.onended = () => stopPersonaPreviewAudio();
+        audio.onerror = () => {
+            pfAudioStatus.textContent = "Playback failed";
+            stopPersonaPreviewAudio();
+        };
+        await audio.play().catch(() => {
+            pfAudioStatus.textContent = "Playback failed";
+            stopPersonaPreviewAudio();
+        });
+        pePreviewAudio = audio;
+        return;
+    }
+    if (!peAudioOnServer) return;
+    try {
+        const resp = await fetch(`/api/personas/${encodeURIComponent(peEditingName)}/reference-audio`);
+        if (!resp.ok) {
+            pfAudioStatus.textContent = "Playback failed";
+            return;
+        }
+        const blob = await resp.blob();
+        peAudioObjectUrl = URL.createObjectURL(blob);
+        const audio = new Audio(peAudioObjectUrl);
+        audio.onended = () => stopPersonaPreviewAudio();
+        audio.onerror = () => {
+            pfAudioStatus.textContent = "Playback failed";
+            stopPersonaPreviewAudio();
+        };
+        await audio.play().catch(() => {
+            pfAudioStatus.textContent = "Playback failed";
+            stopPersonaPreviewAudio();
+        });
+        pePreviewAudio = audio;
+    } catch (err) {
+        console.error("Failed to fetch reference audio:", err);
+        pfAudioStatus.textContent = "Playback failed";
+    }
+}
+
+function stopPersonaPreviewAudio() {
+    if (pePreviewAudio) {
+        pePreviewAudio.pause();
+        pePreviewAudio = null;
+    }
+    if (peAudioObjectUrl) {
+        URL.revokeObjectURL(peAudioObjectUrl);
+        peAudioObjectUrl = null;
+    }
 }
 
 async function submitPersonaForm(e) {
@@ -322,9 +539,6 @@ async function submitPersonaForm(e) {
     const routerHints  = pfRouterHints.value.trim();
     const avatarColor  = pfAvatarColor.value;
     const referenceAudioLanguage = pfReferenceAudioLanguage.value.trim();
-    const avatarImage  = pfAvatarImage.value.trim();
-    const refAudio     = pfReferenceAudio.value.trim();
-    const refAudioTx   = pfReferenceAudioTx.value.trim();
 
     if (!name) return showPersonaFormError("Name is required.");
     if (name.toLowerCase() === "user") return showPersonaFormError("'user' is a reserved name and cannot be used.");
@@ -332,42 +546,57 @@ async function submitPersonaForm(e) {
     if (!routerHints) return showPersonaFormError("Router hints are required.");
     if (referenceAudioLanguage.length !== 2) return showPersonaFormError("Reference audio language must be a 2-letter code.");
 
-    const payload = {
-        name,
-        description,
-        system_prompt: systemPrompt,
-        router_hints: routerHints,
-        avatar_color: avatarColor,
-        reference_audio_language: referenceAudioLanguage,
-        avatar_image: avatarImage || null,
-        reference_audio: refAudio || null,
-        reference_audio_transcript: refAudioTx || null,
-        allow_tool_calls: pfAllowToolCalls.checked,
-        length_bias: pfLengthBias.value || "match",
-    };
+    // Multipart: text fields + the chosen files in one request. The remove_*
+    // flags are sent ONLY for an explicit "Remove" click (see the
+    // peAvatarRemoveRequested / peAudioRemoveRequested flags) — never just
+    // because a file exists on the server. That is what made every plain
+    // text save silently delete the persona's avatar and reference audio.
+    const form = new FormData();
+    form.append("name", name);
+    form.append("description", description);
+    form.append("system_prompt", systemPrompt);
+    form.append("router_hints", routerHints);
+    form.append("avatar_color", avatarColor);
+    form.append("reference_audio_language", referenceAudioLanguage);
+    form.append("allow_tool_calls", String(pfAllowToolCalls.checked));
+    form.append("length_bias", pfLengthBias.value || "match");
+    form.append("reference_audio_transcript", pfReferenceAudioTx.value.trim());
+
+    const avatarFile = pfAvatarImage.files[0];
+    if (avatarFile) {
+        form.append("avatar_image", avatarFile);
+    } else if (peAvatarRemoveRequested) {
+        form.append("remove_avatar_image", "true");
+    }
+
+    const audioFile = pfReferenceAudio.files[0];
+    if (audioFile) {
+        form.append("reference_audio", audioFile);
+    } else if (peAudioRemoveRequested) {
+        form.append("remove_reference_audio", "true");
+    }
 
     try {
         let resp;
         if (peEditingName) {
             resp = await fetch(`/api/personas/${encodeURIComponent(peEditingName)}`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
+                body: form,
             });
         } else {
             resp = await fetch("/api/personas", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
+                body: form,
             });
         }
 
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            return showPersonaFormError(extractApiErrorMessage(err, resp.status));
+            showPersonaFormError(extractApiErrorMessage(err, resp.status));
+            return;
         }
 
-        // Refresh sidebar persona list
+        // Refresh sidebar persona list (showPersonaList stops previews too)
         await loadPersonas();
         showPersonaList();
     } catch (err) {

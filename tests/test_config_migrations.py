@@ -7,10 +7,15 @@ public loaders.
 """
 
 import pytest
+
+from app.services import persona_store
 import yaml
 
 from app.config import (
     CONFIG_SCHEMA_VERSION,
+    ChatRoom,
+    ChatRoomsConfig,
+    save_chatrooms,
     LengthBias,
     Persona,
     PersonasConfig,
@@ -22,7 +27,6 @@ from app.config import (
     load_player,
     load_settings,
     migrate_config_files,
-    save_personas,
 )
 from app.config_migrations import migrate_chatrooms, migrate_personas, migrate_settings
 
@@ -69,12 +73,12 @@ class TestLegacyPersonas:
     def test_legacy_file_loads_without_error(self, tmp_path):
         target = tmp_path / "personas.yaml"
         target.write_text(LEGACY_PERSONAS)
-        assert [p.name for p in load_personas(target).personas] == ["Alex", "Luna", "Sam"]
+        assert [p.name for p in persona_store.load_personas_yaml(target)] == ["Alex", "Luna", "Sam"]
 
     def test_language_key_is_renamed(self, tmp_path):
         target = tmp_path / "personas.yaml"
         target.write_text(LEGACY_PERSONAS)
-        assert load_personas(target).personas[0].reference_audio_language == "fr"
+        assert persona_store.load_personas_yaml(target)[0].reference_audio_language == "fr"
 
     @pytest.mark.parametrize("legacy, expected", [
         ("terse", LengthBias.MUCH_SHORTER),
@@ -95,12 +99,12 @@ class TestLegacyPersonas:
         target.write_text(
             f"personas:\n- name: Alex\n  system_prompt: hi\n  typical_length: {legacy}\n"
         )
-        assert load_personas(target).personas[0].length_bias is expected
+        assert persona_store.load_personas_yaml(target)[0].length_bias is expected
 
     def test_personas_without_the_legacy_keys_are_untouched(self, tmp_path):
         target = tmp_path / "personas.yaml"
         target.write_text(LEGACY_PERSONAS)
-        sam = load_personas(target).personas[2]
+        sam = persona_store.load_personas_yaml(target)[2]
         assert sam.length_bias is LengthBias.MATCH
         assert sam.reference_audio_language == "en"
 
@@ -165,8 +169,8 @@ class TestSchemaVersioning:
         assert raw["schema_version"] == CONFIG_SCHEMA_VERSION
 
     def test_saved_files_carry_the_version_first(self, tmp_path):
-        target = tmp_path / "personas.yaml"
-        save_personas(PersonasConfig(personas=[Persona(name="A", system_prompt="x")]), target)
+        target = tmp_path / "chatrooms.yaml"
+        save_chatrooms(ChatRoomsConfig(chat_rooms=[ChatRoom(name="A")]), target)
         assert target.read_text().startswith(f"schema_version: {CONFIG_SCHEMA_VERSION}")
 
 
@@ -243,7 +247,13 @@ class TestPathResolution:
         # the app must still come up with the user's existing settings.
         (tmp_path / "personas.yaml").write_text(LEGACY_PERSONAS)
         assert config_path("personas.yaml") == tmp_path / "personas.yaml"
+        # migrate_config_files() copies it across, and only then does the
+        # persona directory migration read it — from config/, so the
+        # tracked root copy is never renamed.
+        assert "personas.yaml" in migrate_config_files()
         assert [p.name for p in load_personas().personas] == ["Alex", "Luna", "Sam"]
+        assert (tmp_path / "personas.yaml").exists()
+        assert (tmp_path / "config" / "personas.yaml.bak").exists()
 
 
 class TestEchoChamberIsNotRoomState:
