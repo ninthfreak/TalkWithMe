@@ -458,6 +458,66 @@ ceiling: TalkWithMe derives a per-reply cap from the tier that sits roughly four
 above the target, so it acts as a runaway guard and never as the thing shaping your
 replies. Leaving `max_tokens` low will keep cutting personas off mid-sentence.
 
+## Making personas actually different
+
+The commonest disappointment with this app is a room full of characters who all
+sound the same. There are two causes, and they compound.
+
+**The first is what gets written into a persona.** Most personas are written as a
+*topic* ("philosophy, art, emotions") and a *pile of adjectives* ("thoughtful, curious,
+friendly"). Neither changes what a model does with a turn — the first routes a question,
+the second reads to every model as "helpful assistant". Two characters that differ only
+in subject matter produce the same sentences about different nouns.
+
+What does change behaviour, roughly in order of effect:
+
+| Lever | What it means |
+|-------|---------------|
+| What they do with a turn | Assert, ask, deflect, correct, tell an anecdote, negotiate. The biggest one, and almost nobody writes it down. |
+| How the sentences are built | Length, vocabulary, contractions, jargon, whether they finish their thoughts. |
+| A verbal tic | One repeatable construction — how they open, a word they overuse. |
+| What they want | What they are pushing for or defending. A character with a stake argues; one without comments. |
+| What they never do | Refusals and avoidances. Negative space differentiates hardest, because it cuts off the generic reply. |
+| What they think of the others | A named opinion about another persona gives the model something to play. |
+| Where they are wrong | A blind spot or an out-of-date belief. Perfect characters converge on the assistant voice. |
+| The mood they arrive in | Impatient, delighted, wary, bored — before anything is said to them. |
+
+**The second cause is arithmetic.** Every persona's system prompt is its own text
+followed by the room preamble — the roster, the tagging convention, the containment
+rules, the length line. That preamble is around 255 words and is nearly identical for
+everyone in the room. A 13-word persona prompt was therefore about **5%** of what the
+model read, sitting as far from the point of generation as it is possible to be. Your
+personas were being outvoted by their own instructions.
+
+Two things address it. The preamble now ends by repeating the persona's own words, so
+the voice occupies the recency position as well as the opening — that alone takes a stock
+persona from 5% to 9%. And writing a persona with real substance does the rest: a
+genuine 60-word voice lands at **31%**. Prompts of 80–150 words that spend every
+sentence on one of the levers above are the target.
+
+## Drafting a persona with the LLM
+
+**Draft with AI…** at the top of the persona editor takes a line or two — "a suspicious
+harbourmaster who thinks everyone is smuggling" — and fills in every field.
+
+The brief is only half the input. Your existing cast goes to the model too, with the
+opening of each persona's prompt, and it is asked for someone unmistakably unlike them.
+A harbourmaster drafted in isolation is a generic harbourmaster; drafted against the
+three characters you already have, it comes back deliberately not-those.
+
+Each draft explains itself. **How this one differs** is a sentence on where it sits
+against your cast. **What the draft did** names which levers it used and which ones your
+brief already supplied — so you can see what a good brief contains and write the next one
+by hand. **Worth a look** flags the failures the model is the wrong judge of: generic
+assistant vocabulary, a prompt too short to outweigh the room preamble, no negative space.
+
+**Try it before you keep it** asks the draft a question and shows the answer beside a
+persona you already have answering the same one. This is the part worth using every
+time: a draft read on its own always sounds distinctive, and read beside its neighbour it
+often doesn't.
+
+Nothing is saved until you press Save. The draft lands in the form to be argued with.
+
 ## Keeping personas in their own voice
 
 Three things personas do in a group chat that they should not:

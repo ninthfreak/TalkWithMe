@@ -1587,3 +1587,118 @@ html, body {
     color: var(--text-primary);
     background: var(--bg-hover);
 }
+
+
+/* --------------------------------------------------------------------------
+   Persona drafting dialog
+   -------------------------------------------------------------------------- */
+
+/* The draft entry point, above the persona form. */
+.pf-draft-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px 0;
+    flex-wrap: wrap;
+}
+
+.pf-draft-bar .field-hint {
+    flex: 1;
+    min-width: 200px;
+}
+
+/* Wider than a standard modal: the draft, its notes and two sample
+   replies are a lot to read in a narrow column. */
+.modal-box-wide {
+    max-width: 760px;
+    width: 100%;
+}
+
+/* The teaching block. Collapsed by default so it does not shout at
+   someone who already knows, one click away for someone who does not. */
+.pd-levers {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+}
+
+.pd-levers summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.pd-levers dl {
+    margin: 10px 0 0;
+}
+
+.pd-levers dt {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-top: 8px;
+}
+
+.pd-levers dd {
+    margin: 2px 0 0;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.pd-section-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.pd-contrast {
+    font-size: 0.9rem;
+    font-style: italic;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.pd-notes {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.pd-notes li {
+    margin-bottom: 4px;
+}
+
+/* Warnings are advice, not errors — the draft is still usable. Coloured
+   to be noticed without reading as a failure. */
+.pd-warnings li {
+    color: var(--accent);
+}
+
+/* Sample replies, side by side where there is room: the comparison is
+   the whole point, and stacking them hides it. */
+.pd-replies {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.pd-reply {
+    flex: 1 1 260px;
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+}
+
+.pd-reply-who {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+}
+
+.pd-reply-text {
+    font-size: 0.88rem;
+    white-space: pre-wrap;
+    color: var(--text-secondary);
+}

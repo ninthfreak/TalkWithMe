@@ -111,6 +111,10 @@
                     <button id="pe-form-btn-cancel" class="btn-icon-close" title="Cancel">&#10005;</button>
                 </div>
                 <div id="pe-form-error" class="pe-form-error hidden"></div>
+                <div class="pf-draft-bar">
+                    <button type="button" id="pf-btn-draft" class="btn-secondary">&#10022; Draft with AI&hellip;</button>
+                    <span class="field-hint">Describe the character in a line and let the LLM fill the fields &mdash; written to be unlike the personas you already have.</span>
+                </div>
                 <form id="pe-form" novalidate>
                     <div class="form-row">
                         <label for="pf-name">Name <span class="required">*</span></label>
@@ -199,6 +203,73 @@
                         <button type="submit" id="pe-form-btn-save" class="btn-accent">Save</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Persona drafting -->
+    <div id="pd-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pd-title">
+        <div class="modal-box modal-box-wide">
+            <div class="modal-header">
+                <h2 id="pd-title">Draft a persona</h2>
+                <button id="pd-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
+            </div>
+            <div class="modal-intro field-hint">One or two lines is enough. The draft is written against the personas you already have, so it comes back deliberately unlike them.</div>
+            <div id="pd-error" class="pe-form-error hidden"></div>
+            <div class="settings-body">
+                <div class="form-row">
+                    <label for="pd-brief">The brief</label>
+                    <textarea id="pd-brief" maxlength="2000" rows="3" placeholder="A suspicious harbourmaster who thinks everyone is smuggling something"></textarea>
+                </div>
+
+                <details id="pd-levers" class="pd-levers">
+                    <summary>What actually makes personas behave differently</summary>
+                    <p class="field-hint">Mention any of these in the brief and the draft will use them; leave them out and it will invent them. They work just as well when you write a persona by hand.</p>
+                    <dl id="pd-lever-list">
+                        {% for lever in persona_levers %}
+                        <dt>{{ lever.title }}</dt>
+                        <dd>{{ lever.hint }}</dd>
+                        {% endfor %}
+                    </dl>
+                    <p class="field-hint">Things that feel like they should work and do not: {% for a in persona_anti_patterns %}{{ a }}{% if not loop.last %}; {% endif %}{% endfor %}.</p>
+                </details>
+
+                <div id="pd-result" class="hidden">
+                    <div class="form-row">
+                        <span class="pd-section-label">How this one differs</span>
+                        <p id="pd-contrast" class="pd-contrast"></p>
+                    </div>
+                    <div class="form-row">
+                        <span class="pd-section-label">What the draft did</span>
+                        <ul id="pd-notes" class="pd-notes"></ul>
+                    </div>
+                    <div class="form-row hidden" id="pd-warnings-row">
+                        <span class="pd-section-label">Worth a look</span>
+                        <ul id="pd-warnings" class="pd-notes pd-warnings"></ul>
+                    </div>
+
+                    <fieldset class="settings-section">
+                        <legend>Try it before you keep it</legend>
+                        <div class="form-row">
+                            <label for="pd-question">Ask them something</label>
+                            <input id="pd-question" type="text" maxlength="2000" value="Is the boat seaworthy?">
+                        </div>
+                        <div class="form-row">
+                            <label for="pd-compare">Compare against</label>
+                            <select id="pd-compare"></select>
+                            <span class="field-hint">The same question, answered by someone you already have. If the two answers sound alike, the draft needs more work.</span>
+                        </div>
+                        <div class="form-row">
+                            <button type="button" id="pd-btn-try" class="btn-secondary">Run it</button>
+                        </div>
+                        <div id="pd-replies" class="pd-replies hidden"></div>
+                    </fieldset>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="button" id="pd-btn-cancel" class="btn-secondary">Cancel</button>
+                <button type="button" id="pd-btn-draft" class="btn-accent">Draft it</button>
+                <button type="button" id="pd-btn-use" class="btn-accent hidden">Use this draft</button>
             </div>
         </div>
     </div>
@@ -563,6 +634,7 @@
     <script src="/static/stt.js"></script>
     <script src="/static/chat.js"></script>
     <script src="/static/persona.js"></script>
+    <script src="/static/persona-draft.js"></script>
     <script src="/static/chatrooms.js"></script>
     <script src="/static/settings.js"></script>
     <script src="/static/gen-settings.js"></script>

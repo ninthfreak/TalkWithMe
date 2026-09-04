@@ -119,6 +119,22 @@ const saTextEl = document.getElementById("sa-text");
 const pfMemorySize = document.getElementById("pf-memory-size");
 const pfMemoriesClearBtn = document.getElementById("pf-memories-clear");
 
+// Persona drafting (used by persona-draft.js)
+const pdOverlay = document.getElementById("pd-overlay");
+const pdBrief = document.getElementById("pd-brief");
+const pdErrorEl = document.getElementById("pd-error");
+const pdResult = document.getElementById("pd-result");
+const pdContrastEl = document.getElementById("pd-contrast");
+const pdNotesEl = document.getElementById("pd-notes");
+const pdWarningsEl = document.getElementById("pd-warnings");
+const pdWarningsRow = document.getElementById("pd-warnings-row");
+const pdQuestionEl = document.getElementById("pd-question");
+const pdCompareEl = document.getElementById("pd-compare");
+const pdRepliesEl = document.getElementById("pd-replies");
+const pdDraftBtn = document.getElementById("pd-btn-draft");
+const pdTryBtn = document.getElementById("pd-btn-try");
+const pdUseBtn = document.getElementById("pd-btn-use");
+
 // Persona editor editing state
 let peEditingName = null;
 

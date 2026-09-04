@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from app import config as app_config
 from app.routers import chat, chatrooms, personas, persistence, player, session as session_router, settings, stt, tts
 from app.session import session
+from app.services import persona_draft
 from app.services.tool_registry import get_all_tools, load_tools
 
 # uvicorn configures its own loggers but leaves the root logger at the
@@ -141,5 +142,16 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """Serve the main chat UI."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    """Serve the main chat UI.
+
+    The persona-differentiation levers are rendered from the same list the
+    drafting prompt is built from (app/services/persona_draft.py). Kept
+    server-side on purpose: the dialog teaches the user what to write, and
+    a hand-copied list in the JS would drift away from what the model is
+    actually told within a release or two.
+    """
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "persona_levers": persona_draft.LEVERS,
+        "persona_anti_patterns": persona_draft.ANTI_PATTERNS,
+    })

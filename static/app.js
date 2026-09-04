@@ -22,6 +22,7 @@ async function init() {
     await loadGeneralSettings();
     setupEventListeners();
     setupChatRoomEventListeners();
+    setupPersonaDraftEventListeners();
 
     // Load persisted history for the current room
     const history = await loadPersistedHistory(currentChatRoom);
