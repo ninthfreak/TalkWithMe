@@ -1331,10 +1331,66 @@ class TestNeverSpeakAsTheUser:
         _chat(client, who_answers="Alex", chat_room="TNG")
 
         # A late responder has no assistant turn in context to anchor its
-        # own voice, so the system message says whose turn it is outright.
-        assert _system_prompt(calls[0]).rstrip().endswith(
+        # own voice, so the system message says whose turn it is outright —
+        # and repeats the persona's own words after it, which is the last
+        # thing the model reads before the transcript.
+        system = _system_prompt(calls[0]).rstrip()
+        assert "It is Alex's turn. Reply as Alex and no one else" in system
+        assert system.endswith("You are Alex, a friendly assistant.")
+
+
+class TestTheVoiceSurvivesThePreamble:
+    """A persona's own prompt was ~5% of its system message, and the 95%
+    was identical for everyone in the room. Every persona ended up sounding
+    like the preamble — which is to say, like each other."""
+
+    def test_the_voice_is_repeated_at_the_end(self, client, monkeypatch):
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        system = _system_prompt(calls[0])
+        # Once at the top as the system prompt proper, once at the end.
+        assert system.count("You are Alex, a friendly assistant.") == 2
+
+    def test_a_long_prompt_is_trimmed_on_a_sentence_boundary(self):
+        # Half a sentence reads as a truncation the model may try to
+        # complete, which is the failure the containment layer exists for.
+        persona = Persona(
+            name="Alex",
+            system_prompt=("You are Alex. " * 60) + "This tail is far past the cap.",
+            router_hints="x",
+        )
+        voice = chat_router._voice_reminder(persona)
+        assert len(voice) <= chat_router._VOICE_REMINDER_CHARS
+        assert voice.endswith(".")
+        assert "This tail" not in voice
+
+    def test_an_empty_prompt_falls_back_to_the_plain_turn_line(self):
+        persona = Persona(name="Alex", system_prompt=" ", router_hints="x")
+        assert chat_router._voice_reminder(persona) == ""
+        preamble = chat_router._build_room_preamble(
+            persona, "TNG", ["Alex"], TypicalLength.NORMAL
+        )
+        assert preamble.rstrip().endswith(
             "It is Alex's turn. Reply as Alex, and no one else."
         )
+
+    def test_the_voice_outweighs_a_bare_name_mention(self, client, monkeypatch):
+        # The point of the change: a persona with a real voice should not
+        # be a rounding error in its own system prompt.
+        long_voice = (
+            "You are Alex. You interrupt. You distrust anything that sounds "
+            "rehearsed, and you say so. You never use the word 'certainly'."
+        )
+        _patch_personas(monkeypatch, PersonasConfig(personas=[
+            Persona(name="Alex", description="d", system_prompt=long_voice, router_hints="x"),
+            Persona(name="Luna", description="d", system_prompt="You are Luna.", router_hints="y"),
+        ]))
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        system = _system_prompt(calls[0])
+        assert system.count("You distrust anything that sounds rehearsed") == 2
 
 
 class TestReplyCountIsReached:

@@ -162,6 +162,32 @@ def _player_lines(player: Optional[Persona], speaker: str) -> list[str]:
     return lines
 
 
+# How much of the persona's own prompt to repeat at the end of the
+# preamble. Long enough to carry a voice, short enough that a persona with
+# an 8KB prompt does not double the system message.
+_VOICE_REMINDER_CHARS = 600
+
+
+def _voice_reminder(persona: Persona) -> str:
+    """The persona's own prompt again, trimmed for the recency position.
+
+    Cut on a sentence boundary where there is one in range: half a
+    sentence reads as a truncation the model may try to complete, which is
+    the failure mode the whole containment layer exists to avoid.
+    """
+    prompt = " ".join(persona.system_prompt.split())
+    if not prompt:
+        return ""
+    if len(prompt) <= _VOICE_REMINDER_CHARS:
+        return prompt
+    cut = prompt[:_VOICE_REMINDER_CHARS]
+    for end in (". ", "! ", "? "):
+        idx = cut.rfind(end)
+        if idx > _VOICE_REMINDER_CHARS // 2:
+            return cut[: idx + 1]
+    return cut.rstrip() + "\u2026"
+
+
 def _build_room_preamble(
     persona: Persona,
     chat_room: str,
@@ -245,7 +271,26 @@ def _build_room_preamble(
     # Stated last so it is the final thing before the transcript. A persona
     # replying third or fourth has seen no assistant turn in this
     # conversation at all, so it has no in-context anchor for its own voice.
-    lines += ["", f"It is {persona.name}'s turn. Reply as {persona.name}, and no one else."]
+    #
+    # The persona's *character* is repeated here, not just its name. The
+    # system prompt is assembled as "<persona prompt>\n\n<this preamble>",
+    # and this preamble runs to ~255 words of text that is identical for
+    # everyone in the room — so a typical 15-word persona prompt was about
+    # 5% of what the model read, sitting as far from the generation point
+    # as it is possible to be. Every persona then sounded like the
+    # preamble, which is to say like every other persona. Restating the
+    # voice last costs a few dozen tokens and puts it where
+    # instruction-following is strongest.
+    voice = _voice_reminder(persona)
+    if voice:
+        lines += [
+            "",
+            f"It is {persona.name}'s turn. Reply as {persona.name} and no one else, "
+            f"in {persona.name}'s own voice rather than a neutral one:",
+            voice,
+        ]
+    else:
+        lines += ["", f"It is {persona.name}'s turn. Reply as {persona.name}, and no one else."]
 
     return "\n".join(lines)
 
