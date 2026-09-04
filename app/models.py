@@ -49,6 +49,59 @@ class SuggestReplyResponse(BaseModel):
     text: str
 
 
+# ---------------------------------------------------------------------------
+# Persona drafting
+# ---------------------------------------------------------------------------
+
+class PersonaDraftRequest(BaseModel):
+    """A short brief for a new persona."""
+    brief: str = Field(..., min_length=1, max_length=2000)
+
+
+class PersonaDraftResponse(BaseModel):
+    """A drafted persona, plus why it is shaped the way it is.
+
+    Everything here lands in the editor form for review. Nothing is
+    written to disk until the user saves, exactly like the suggested
+    player message: the LLM drafts, the human decides.
+    """
+    name: str
+    description: str
+    system_prompt: str
+    router_hints: str
+    length_bias: LengthBias
+    avatar_color: str
+    # Which differentiation levers were used, and which the brief supplied.
+    notes: List[str] = Field(default_factory=list)
+    # One sentence on how this persona differs from the existing cast.
+    contrast: str = ""
+    # Local checks the model is the wrong judge of (generic vocabulary, a
+    # prompt too short to outweigh the room preamble, no negative space).
+    warnings: List[str] = Field(default_factory=list)
+
+
+class PersonaPreviewRequest(BaseModel):
+    """Try an unsaved draft against a question before committing to it."""
+    name: str = Field(..., min_length=1, max_length=25)
+    system_prompt: str = Field(..., min_length=1, max_length=8192)
+    description: str = Field(default="", max_length=30)
+    length_bias: LengthBias = LengthBias.MATCH
+    question: str = Field(..., min_length=1, max_length=2000)
+    # An existing persona to answer the same question, for comparison.
+    compare_with: Optional[str] = Field(default=None, max_length=25)
+
+
+class PersonaPreviewReply(BaseModel):
+    persona: str
+    text: str
+
+
+class PersonaPreviewResponse(BaseModel):
+    """The draft's answer, and optionally an existing persona's, side by side."""
+    draft: PersonaPreviewReply
+    comparison: Optional[PersonaPreviewReply] = None
+
+
 class SessionPersonasRequest(BaseModel):
     """Update which personas are active in the current session."""
     active_personas: List[str] = Field(

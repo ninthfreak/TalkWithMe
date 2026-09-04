@@ -782,3 +782,196 @@ class TestLengthBiasRoundTrips:
     def test_the_clone_carries_it(self, client, personas_root):
         client.post("/api/personas", data=_persona_form(length_bias="much_longer"))
         assert client.post("/api/personas/Data/clone").json()["length_bias"] == "much_longer"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/personas/draft  and  POST /api/personas/preview
+# ---------------------------------------------------------------------------
+
+DRAFT_REPLY = """NAME: Rennick
+DESCRIPTION: A suspicious harbourmaster
+ROUTER_HINTS: boats, cargo
+LENGTH_BIAS: shorter
+AVATAR_COLOR: #2E7D32
+CONTRAST: Rennick asks for paperwork where the others speculate.
+NOTES:
+- Stance: answers questions with questions about provenance.
+- Negative space: never speculates about unlogged cargo.
+SYSTEM_PROMPT:
+You run the harbour and assume everyone is smuggling. You never speculate
+about cargo you have not seen logged.
+"""
+
+
+def _stub_completion(monkeypatch, *replies):
+    """Serve canned completions in order; record the prompts."""
+    import app.routers.personas as personas_router
+
+    seen = []
+    queue = list(replies)
+
+    async def fake(messages, max_tokens=64, temperature=None):
+        seen.append({"messages": messages, "max_tokens": max_tokens,
+                     "temperature": temperature})
+        return queue.pop(0) if queue else ""
+
+    monkeypatch.setattr(personas_router, "chat_completion", fake)
+    return seen
+
+
+class TestDraftPersona:
+    def test_a_brief_comes_back_as_a_full_persona(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, DRAFT_REPLY)
+
+        resp = client.post("/api/personas/draft", json={"brief": "a suspicious harbourmaster"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["name"] == "Rennick"
+        assert body["description"] == "A suspicious harbourmaster"
+        assert body["length_bias"] == "shorter"
+        assert body["avatar_color"] == "#2E7D32"
+        assert body["system_prompt"].startswith("You run the harbour")
+        assert len(body["notes"]) == 2
+        assert "paperwork" in body["contrast"]
+
+    def test_the_existing_cast_is_sent_so_the_draft_contrasts(self, client, personas_root, monkeypatch):
+        seen = _stub_completion(monkeypatch, DRAFT_REPLY)
+        client.post("/api/personas/draft", json={"brief": "a harbourmaster"})
+
+        system = seen[0]["messages"][0]["content"]
+        assert "Alex" in system and "Luna" in system
+
+    def test_prose_temperature_not_the_routers(self, client, personas_root, monkeypatch):
+        # At the router's 0.1 every draft comes back the same draft.
+        seen = _stub_completion(monkeypatch, DRAFT_REPLY)
+        client.post("/api/personas/draft", json={"brief": "a harbourmaster"})
+        assert seen[0]["temperature"] == 0.8
+
+    def test_a_name_collision_is_resolved_against_the_cast(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, DRAFT_REPLY.replace("NAME: Rennick", "NAME: Luna"))
+
+        body = client.post("/api/personas/draft", json={"brief": "x"}).json()
+
+        assert body["name"] != "Luna"
+        assert body["name"].startswith("Luna")
+
+    def test_warnings_come_back_with_the_draft(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, "NAME: R\nSYSTEM_PROMPT:\nYou are a friendly assistant.")
+
+        body = client.post("/api/personas/draft", json={"brief": "x"}).json()
+
+        joined = " ".join(body["warnings"])
+        assert "generic assistant vocabulary" in joined
+        assert "words" in joined            # too short to outweigh the preamble
+
+    def test_an_unreadable_reply_is_a_503_not_a_blank_form(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, "I'm sorry, I can't help with that.")
+        resp = client.post("/api/personas/draft", json={"brief": "x"})
+        assert resp.status_code == 503
+
+    def test_an_empty_reply_is_a_503(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, "")
+        assert client.post("/api/personas/draft", json={"brief": "x"}).status_code == 503
+
+    def test_a_blank_brief_is_rejected_before_the_llm(self, client, personas_root, monkeypatch):
+        seen = _stub_completion(monkeypatch, DRAFT_REPLY)
+        assert client.post("/api/personas/draft", json={"brief": ""}).status_code == 422
+        assert seen == []
+
+    def test_nothing_is_written_to_disk(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, DRAFT_REPLY)
+        client.post("/api/personas/draft", json={"brief": "a harbourmaster"})
+
+        # Drafting is not saving: the form is the review step.
+        assert not (personas_root / "Rennick").exists()
+        assert [p["name"] for p in client.get("/api/personas").json()] == ["Alex", "Luna"]
+
+    def test_the_route_is_not_shadowed_by_the_name_routes(self, client, personas_root, monkeypatch):
+        # /api/personas/draft must not be read as a persona called "draft".
+        _stub_completion(monkeypatch, DRAFT_REPLY)
+        assert client.post("/api/personas/draft", json={"brief": "x"}).status_code == 200
+
+
+class TestPreviewPersona:
+    def _req(self, **overrides):
+        payload = {
+            "name": "Rennick",
+            "system_prompt": "You run the harbour and never speculate.",
+            "description": "A harbourmaster",
+            "length_bias": "match",
+            "question": "Is the boat seaworthy?",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_a_draft_answers_without_being_saved(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, "Depends whose boat.")
+
+        resp = client.post("/api/personas/preview", json=self._req())
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["draft"] == {"persona": "Rennick", "text": "Depends whose boat."}
+        assert body["comparison"] is None
+        assert not (personas_root / "Rennick").exists()
+
+    def test_the_preview_uses_the_real_room_preamble(self, client, personas_root, monkeypatch):
+        # A preview built from a simpler prompt would preview something the
+        # app never runs — including the voice restatement at the end.
+        seen = _stub_completion(monkeypatch, "Depends whose boat.")
+        client.post("/api/personas/preview", json=self._req())
+
+        system = seen[0]["messages"][0]["content"]
+        assert "There is nobody else." in system
+        assert system.rstrip().endswith("You run the harbour and never speculate.")
+
+    def test_comparison_runs_an_existing_persona_on_the_same_question(
+        self, client, personas_root, monkeypatch
+    ):
+        seen = _stub_completion(monkeypatch, "Depends whose boat.", "The sea keeps its counsel.")
+
+        body = client.post(
+            "/api/personas/preview", json=self._req(compare_with="Luna")
+        ).json()
+
+        assert body["comparison"] == {"persona": "Luna", "text": "The sea keeps its counsel."}
+        # Same question to both, or the comparison proves nothing.
+        assert seen[0]["messages"][1] == seen[1]["messages"][1]
+
+    def test_the_comparison_isolates_the_persona_prompt(self, client, personas_root, monkeypatch):
+        # Both sides run in a room of one, so the only difference between
+        # the two prompts is the persona being compared. Anything else and
+        # the comparison stops being evidence.
+        seen = _stub_completion(monkeypatch, "a", "b")
+        client.post("/api/personas/preview", json=self._req(compare_with="Luna"))
+
+        draft_sys, other_sys = (c["messages"][0]["content"] for c in seen)
+        assert "You are the only one here" in draft_sys
+        assert "You are the only one here" in other_sys
+        assert seen[0]["max_tokens"] == seen[1]["max_tokens"]
+
+    def test_an_unknown_comparison_persona_is_404(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, "a", "b")
+        resp = client.post("/api/personas/preview", json=self._req(compare_with="Nobody"))
+        assert resp.status_code == 404
+
+    def test_an_empty_draft_reply_is_a_503(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, "   ")
+        assert client.post("/api/personas/preview", json=self._req()).status_code == 503
+
+    def test_an_empty_comparison_reply_is_dropped_not_fatal(self, client, personas_root, monkeypatch):
+        # The draft is what the user asked about; a failed comparison
+        # should not lose them the answer they wanted.
+        _stub_completion(monkeypatch, "Depends whose boat.", "")
+        body = client.post(
+            "/api/personas/preview", json=self._req(compare_with="Luna")
+        ).json()
+        assert body["draft"]["text"] == "Depends whose boat."
+        assert body["comparison"] is None
+
+    def test_a_bad_draft_name_is_rejected(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, "a")
+        assert client.post(
+            "/api/personas/preview", json=self._req(name="har/bour")
+        ).status_code == 422

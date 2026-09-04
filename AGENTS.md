@@ -218,6 +218,8 @@ Chat rooms are stored in `chatrooms.yaml` and managed via `get_chatrooms()` / `s
 | `POST` | `/api/personas` | Create a new persona (multipart form: text fields + optional avatar/reference audio files) |
 | `PUT` | `/api/personas/{name}` | Update a persona (multipart form; rename cascades to chat rooms, directory is never renamed) |
 | `DELETE` | `/api/personas/{name}` | Delete a persona and its directory (cascades to chat rooms) |
+| `POST` | `/api/personas/draft` | Draft a persona from a brief, written against the existing cast |
+| `POST` | `/api/personas/preview` | Answer one question as an unsaved draft, optionally beside an existing persona |
 | `POST` | `/api/personas/{name}/clone` | Clone a persona with a numeric suffix (`Name_2`, `Name_3`, …) |
 | `GET` | `/api/personas/{name}/avatar` | Serve a persona's avatar image file |
 | `GET` | `/api/personas/{name}/reference-audio` | Serve a persona's reference audio file (`ref.wav`) |

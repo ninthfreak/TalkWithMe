@@ -26,14 +26,26 @@ from app.config import (
     ChatRoomsConfig,
     Persona,
     PersonasConfig,
+    derive_max_tokens,
     get_chatrooms,
     get_personas,
     get_personas_directory,
+    get_settings,
+    resolve_typical_length,
     save_chatrooms,
     set_personas_cache,
 )
-from app.models import PersonaDetailResponse, PersonaResponse
-from app.services import persona_store
+from app.models import (
+    PersonaDetailResponse,
+    PersonaDraftRequest,
+    PersonaDraftResponse,
+    PersonaPreviewReply,
+    PersonaPreviewRequest,
+    PersonaPreviewResponse,
+    PersonaResponse,
+)
+from app.services import persona_draft, persona_store
+from app.services.llm import chat_completion
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/personas", tags=["personas"])
@@ -554,3 +566,155 @@ async def get_reference_audio(name: str):
         return Response(status_code=404, content="Reference audio file not found")
 
     return FileResponse(str(path), media_type="audio/wav")
+
+
+# ---------------------------------------------------------------------------
+# Drafting a persona with the LLM
+# ---------------------------------------------------------------------------
+#
+# Same contract as the suggested player message: the model drafts, the
+# result lands in the form, and nothing touches disk until the human
+# presses Save.
+
+# A full draft is ~120 words of prompt plus notes and the labelled fields.
+_DRAFT_MAX_TOKENS = 1400
+# One sample reply. Generous enough that a "much_longer" persona is not
+# cut off mid-demonstration, which would misrepresent it.
+_PREVIEW_MAX_TOKENS = 400
+
+
+@router.post("/draft", response_model=PersonaDraftResponse)
+async def draft_persona(req: PersonaDraftRequest):
+    """Draft a persona from a brief, written against the existing cast.
+
+    The cast matters as much as the brief: "a suspicious harbourmaster"
+    drafted in isolation is a generic suspicious harbourmaster, while the
+    same brief drafted against three existing characters comes back
+    deliberately unlike them. That is the whole reason this is a server
+    endpoint and not a prompt the user pastes somewhere.
+    """
+    settings = get_settings()
+    existing = list(get_personas().personas)
+
+    text = await chat_completion(
+        persona_draft.build_draft_prompt(req.brief, existing),
+        max_tokens=_DRAFT_MAX_TOKENS,
+        # Prose, not routing: the router's 0.1 produces four drafts that
+        # are the same draft.
+        temperature=settings.llm.temperature,
+    )
+    if not text.strip():
+        raise HTTPException(
+            status_code=503,
+            detail="The LLM returned nothing. Is the server running?",
+        )
+
+    draft = persona_draft.parse_draft(text)
+    if not draft.is_usable():
+        logger.info("Unusable persona draft returned: %.400s", text)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The draft came back in a shape this could not read. Try again, "
+                "or give the brief a bit more to work with."
+            ),
+        )
+
+    # Names must be unique, and the model cannot know what is taken.
+    taken = {p.name.lower() for p in existing}
+    if draft.name.lower() in taken:
+        base = draft.name[: persona_draft.MAX_NAME - 2].rstrip()
+        suffix = 2
+        while f"{base}_{suffix}".lower() in taken:
+            suffix += 1
+        draft.name = f"{base}_{suffix}"
+
+    return PersonaDraftResponse(
+        name=draft.name,
+        description=draft.description,
+        system_prompt=draft.system_prompt,
+        router_hints=draft.router_hints or "general conversation",
+        length_bias=draft.length_bias,
+        avatar_color=draft.avatar_color,
+        notes=draft.notes,
+        contrast=draft.contrast,
+        warnings=persona_draft.critique(draft),
+    )
+
+
+async def _preview_reply(persona: Persona, question: str) -> str:
+    """One reply from *persona*, built exactly as a real turn would be.
+
+    Deliberately reuses the chat router's own preamble builder. A preview
+    assembled from a simpler prompt would be a preview of something the
+    app never runs — including the voice restatement at the end, which is
+    a large part of why a persona sounds like itself at all.
+
+    Both sides of a comparison run in a room of one, so the only thing
+    that differs between them is the persona's own prompt. Putting each in
+    the other's roster would have been more lifelike and less useful: an
+    unsaved draft cannot appear in a saved persona's roster anyway, so the
+    two prompts would have differed in a second way and the comparison
+    would no longer isolate the thing being compared.
+    """
+    # Local import: this is the only place personas reaches into chat, and
+    # a module-level import would be a cycle waiting to happen.
+    from app.routers.chat import _build_room_preamble
+
+    settings = get_settings()
+    length = resolve_typical_length(persona, None, settings.general.typical_length)
+    preamble = _build_room_preamble(persona, "default", [persona.name], length)
+    messages = [
+        {"role": "system", "content": f"{persona.system_prompt}\n\n{preamble}"},
+        {"role": "user", "content": f"[User]: {question}"},
+    ]
+    return await chat_completion(
+        messages,
+        max_tokens=derive_max_tokens(length, min(settings.llm.max_tokens, _PREVIEW_MAX_TOKENS)),
+        temperature=settings.llm.temperature,
+    )
+
+
+@router.post("/preview", response_model=PersonaPreviewResponse)
+async def preview_persona(req: PersonaPreviewRequest):
+    """Answer one question as an unsaved draft, and optionally as a real persona.
+
+    The comparison is the point. A draft read on its own always sounds
+    plausible; read beside an existing persona answering the same
+    question, "these two are the same character" is obvious at a glance.
+    """
+    draft = Persona(
+        name=_validate_name(req.name),
+        description=req.description,
+        system_prompt=req.system_prompt,
+        router_hints="preview",
+        length_bias=req.length_bias,
+    )
+
+    other: Optional[Persona] = None
+    if req.compare_with:
+        other = next(
+            (p for p in get_personas().personas if p.name == req.compare_with), None
+        )
+        if other is None:
+            raise HTTPException(
+                status_code=404, detail=f"Persona '{req.compare_with}' not found"
+            )
+
+    draft_text = await _preview_reply(draft, req.question)
+    if not draft_text.strip():
+        raise HTTPException(
+            status_code=503,
+            detail="The LLM returned nothing for the draft. Is the server running?",
+        )
+
+    comparison = None
+    if other is not None:
+        other_text = await _preview_reply(other, req.question)
+        if other_text.strip():
+            comparison = PersonaPreviewReply(persona=other.name, text=other_text.strip())
+
+    return PersonaPreviewResponse(
+        draft=PersonaPreviewReply(persona=draft.name, text=draft_text.strip()),
+        comparison=comparison,
+    )
