@@ -103,6 +103,16 @@ const pfAllowToolCalls = document.getElementById("pf-allow-tool-calls");
 const pfLengthBias = document.getElementById("pf-length-bias");
 const gsfTypicalLength = document.getElementById("gsf-typical-length");
 
+// "Start fresh" — wiping stored context (used by gen-settings.js)
+const gsfContextSummary = document.getElementById("gsf-context-summary");
+const gsfWipeRooms = document.getElementById("gsf-wipe-rooms");
+const gsfWipeMemories = document.getElementById("gsf-wipe-memories");
+const gsfWipePlayingAs = document.getElementById("gsf-wipe-playing-as");
+const gsfWipeBtn = document.getElementById("gsf-btn-wipe");
+const gsfWipeResult = document.getElementById("gsf-wipe-result");
+const gsfWipeOverlay = document.getElementById("gsf-wipe-overlay");
+const gsfWipePlan = document.getElementById("gsf-wipe-plan");
+
 // Who the player is playing — one of the personas, or nobody
 const btnPlayingAs = document.getElementById("btn-playing-as");
 const playingAsOverlay = document.getElementById("playing-as-overlay");

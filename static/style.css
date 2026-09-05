@@ -1709,6 +1709,27 @@ html, body {
     gap: 16px;
 }
 
+/* The "what is stored" line, and the report after a wipe. Reads as a
+   fact about the app rather than as a form field, so it is boxed. */
+.gsf-context {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-input);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.gsf-context ul,
+#gsf-wipe-plan {
+    margin: 0;
+    padding-left: 18px;
+}
+
+#gsf-wipe-plan li {
+    margin-bottom: 4px;
+}
+
 .pd-section-label {
     font-weight: 600;
     font-size: 0.85rem;

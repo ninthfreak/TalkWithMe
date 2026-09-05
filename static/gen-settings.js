@@ -14,6 +14,13 @@ document.getElementById("gen-settings-btn-close").addEventListener("click", clos
 document.getElementById("gen-settings-btn-cancel").addEventListener("click", closeGenSettings);
 genSettingsForm.addEventListener("submit", submitGenSettings);
 
+gsfWipeBtn.addEventListener("click", openWipeConfirm);
+document.getElementById("gsf-wipe-cancel").addEventListener("click", closeWipeConfirm);
+document.getElementById("gsf-wipe-confirm").addEventListener("click", wipeContext);
+gsfWipeOverlay.addEventListener("click", (e) => {
+    if (e.target === gsfWipeOverlay) closeWipeConfirm();
+});
+
 genSettingsOverlay.addEventListener("click", (e) => {
     if (e.target === genSettingsOverlay) closeGenSettings();
 });
@@ -29,8 +36,12 @@ async function openGenSettings() {
     const saveBtn = document.getElementById("gen-settings-btn-save");
     saveBtn.disabled = true;
 
+    gsfWipeResult.classList.add("hidden");
     const ok = await loadGenSettingsIntoForm();
     saveBtn.disabled = !ok;
+    // Deliberately after the form: the wipe section is informational, and
+    // a slow or failed inventory must not hold up the settings.
+    refreshContextSummary();
 }
 
 function closeGenSettings() {
@@ -151,5 +162,139 @@ async function submitGenSettings(e) {
     } catch (err) {
         console.error("Failed to save settings:", err);
         showGenSettingsError("Request failed. Is the server running?");
+    }
+}
+
+
+/* ==========================================================================
+   Wiping stored context
+
+   The point of this section is not the deletion — "New Chat" has always
+   deleted a room. It is being able to answer "is anything still carrying
+   over?" without guessing: what exists is listed before, and what is left
+   is read back from disk after, so the answer is checked rather than
+   assumed.
+   ========================================================================== */
+
+/** The inventory last fetched, so the confirmation can describe the damage. */
+let gsfContext = null;
+
+function describeContext(ctx) {
+    if (!ctx) return "Could not read what is stored.";
+    const bits = [];
+    const messages = ctx.rooms.reduce((sum, r) => sum + r.messages, 0);
+    if (messages) {
+        bits.push(`${messages} message${messages === 1 ? "" : "s"} across ` +
+                  `${ctx.rooms.length} room${ctx.rooms.length === 1 ? "" : "s"}`);
+    }
+    const memories = ctx.personas.reduce((sum, p) => sum + p.memories, 0);
+    if (memories) {
+        bits.push(`${memories} saved memor${memories === 1 ? "y" : "ies"} ` +
+                  `(${ctx.personas.map(p => p.persona).join(", ")})`);
+    }
+    if (ctx.playing_as) bits.push(`playing as ${ctx.playing_as}`);
+    return bits.length ? `Stored now: ${bits.join("; ")}.` : "Nothing stored.";
+}
+
+async function refreshContextSummary() {
+    gsfContextSummary.textContent = "Checking…";
+    try {
+        const resp = await fetch("/api/session/context");
+        gsfContext = resp.ok ? await resp.json() : null;
+    } catch (err) {
+        console.error("Failed to read stored context:", err);
+        gsfContext = null;
+    }
+    gsfContextSummary.textContent = describeContext(gsfContext);
+}
+
+function wipeSelection() {
+    return {
+        rooms: gsfWipeRooms.checked ? "all" : "none",
+        memories: gsfWipeMemories.checked,
+        playing_as: gsfWipePlayingAs.checked,
+    };
+}
+
+function openWipeConfirm() {
+    const wanted = wipeSelection();
+    if (wanted.rooms === "none" && !wanted.memories && !wanted.playing_as) {
+        return showGenSettingsError("Tick at least one thing to wipe.");
+    }
+    genSettingsError.classList.add("hidden");
+
+    const lines = [];
+    if (wanted.rooms !== "none" && gsfContext) {
+        const messages = gsfContext.rooms.reduce((sum, r) => sum + r.messages, 0);
+        lines.push(`Every room's conversation — ${messages} message${messages === 1 ? "" : "s"}, and any audio with them.`);
+    }
+    if (wanted.memories && gsfContext) {
+        const memories = gsfContext.personas.reduce((sum, p) => sum + p.memories, 0);
+        lines.push(`Saved memories — ${memories} line${memories === 1 ? "" : "s"}` +
+                   (gsfContext.personas.length ? ` from ${gsfContext.personas.map(p => p.persona).join(", ")}.` : "."));
+    }
+    if (wanted.playing_as) {
+        lines.push(gsfContext && gsfContext.playing_as
+            ? `You stop playing as ${gsfContext.playing_as}.`
+            : "Who you are playing as (nobody is set).");
+    }
+    renderList(gsfWipePlan, lines);
+    gsfWipeOverlay.classList.remove("hidden");
+}
+
+function closeWipeConfirm() {
+    gsfWipeOverlay.classList.add("hidden");
+}
+
+async function wipeContext() {
+    const confirmBtn = document.getElementById("gsf-wipe-confirm");
+    confirmBtn.disabled = true;
+    try {
+        const resp = await fetch("/api/session/wipe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(wipeSelection()),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            closeWipeConfirm();
+            return showGenSettingsError(extractApiErrorMessage(err, resp.status));
+        }
+        const result = await resp.json();
+        gsfContext = result.remaining;
+
+        const done = [];
+        if (result.messages_deleted || result.rooms_cleared.length) {
+            done.push(`${result.messages_deleted} message${result.messages_deleted === 1 ? "" : "s"} ` +
+                      `from ${result.rooms_cleared.length} room${result.rooms_cleared.length === 1 ? "" : "s"}`);
+        }
+        if (result.memories_cleared.length) {
+            done.push(`memories for ${result.memories_cleared.join(", ")}`);
+        }
+        if (result.playing_as_cleared) done.push("who you are playing as");
+
+        gsfWipeResult.textContent =
+            (done.length ? `Deleted ${done.join(", ")}. ` : "Nothing to delete. ") +
+            describeContext(result.remaining);
+        gsfWipeResult.classList.remove("hidden");
+        gsfContextSummary.textContent = describeContext(result.remaining);
+
+        // The room on screen is one of the ones just emptied, and leaving
+        // its messages in the transcript would be the app showing context
+        // that no longer exists — the exact doubt this feature removes.
+        if (result.rooms_cleared.length) {
+            messagesEl.innerHTML = "";
+            showEmptyState();
+        }
+        if (result.playing_as_cleared) {
+            player.persona_name = "";
+            applyPlayingAsControls();
+        }
+    } catch (err) {
+        console.error("Failed to wipe context:", err);
+        showGenSettingsError("Request failed. Is the server running?");
+    } finally {
+        confirmBtn.disabled = false;
+        closeWipeConfirm();
     }
 }

@@ -707,6 +707,36 @@
                             <span class="field-hint">Used by the &ldquo;default&rdquo; room, which has no settings of its own. Every other room carries its own value, set in the room editor. Shapes length by instructing the persona &mdash; use this instead of lowering Max Tokens.</span>
                         </div>
                     </fieldset>
+                    <fieldset class="settings-section">
+                        <legend>Start fresh</legend>
+                        <p class="field-hint">Deletes stored conversation, not your personas, rooms or settings. Use it when you need to know that a persona&rsquo;s behaviour is its own and not something left over.</p>
+                        <div id="gsf-context-summary" class="gsf-context">Checking&hellip;</div>
+                        <div class="form-row">
+                            <label class="settings-checkbox-label">
+                                <input id="gsf-wipe-rooms" type="checkbox" checked>
+                                <span>Every room&rsquo;s conversation</span>
+                            </label>
+                            <span class="field-hint">All rooms, including any whose room you have since deleted &mdash; their transcripts outlive them. Audio goes too.</span>
+                        </div>
+                        <div class="form-row">
+                            <label class="settings-checkbox-label">
+                                <input id="gsf-wipe-memories" type="checkbox" checked>
+                                <span>Every persona&rsquo;s saved memories</span>
+                            </label>
+                            <span class="field-hint">The only context that survives &ldquo;New Chat&rdquo;, lives outside any room, and reaches a persona in all of them.</span>
+                        </div>
+                        <div class="form-row">
+                            <label class="settings-checkbox-label">
+                                <input id="gsf-wipe-playing-as" type="checkbox">
+                                <span>Who I am playing as</span>
+                            </label>
+                            <span class="field-hint">Not leftover state, but it does reach every persona in every room &mdash; worth clearing if you are hunting something that will not go away.</span>
+                        </div>
+                        <div class="form-row">
+                            <button type="button" id="gsf-btn-wipe" class="btn-danger">Wipe it</button>
+                        </div>
+                        <div id="gsf-wipe-result" class="gsf-context hidden"></div>
+                    </fieldset>
                 </div>
                 <div class="form-actions">
                     <button type="button" id="gen-settings-btn-cancel" class="btn-secondary">Cancel</button>
@@ -715,6 +745,22 @@
             </form>
         </div>
     </div>
+
+    <!-- Context wipe confirmation -->
+    <div id="gsf-wipe-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true">
+        <div class="modal-box modal-box-sm">
+            <div class="modal-header">
+                <h2>Wipe stored context</h2>
+            </div>
+            <p class="pe-confirm-msg">This cannot be undone. About to delete:</p>
+            <div id="gsf-wipe-plan" class="gsf-context"></div>
+            <div class="form-actions">
+                <button id="gsf-wipe-cancel" class="btn-secondary">Cancel</button>
+                <button id="gsf-wipe-confirm" class="btn-danger">Delete it</button>
+            </div>
+        </div>
+    </div>
+
 
     <!-- Load modules in dependency order -->
     <!-- Be careful with the load order!  -->

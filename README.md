@@ -776,6 +776,31 @@ That is the thing to look at whenever a persona behaves like a different one: ev
 which one character's text reaches another is visible in it, and none of them are guessable from
 the outside.
 
+### Starting from a known-clean slate
+
+**Settings → Start fresh** deletes stored conversation. It exists because "New Chat"
+answers a different question: it clears the room you are in, which is right for starting
+a fresh conversation and useless for asking *is anything at all still carrying over?*
+
+Three things can be wiped, and the list is the same list as the four carriers above
+minus the transcript you can already see:
+
+- **Every room's conversation** — all rooms, including any whose room you have since
+  deleted, because a transcript outlives the room it belonged to. Audio goes with it.
+- **Every persona's saved memories** — the only context that survives "New Chat", lives
+  outside any room, and reaches a persona in all of them.
+- **Who you are playing as** — not leftover state, but it does reach every persona in
+  every room, so it is worth ruling out when something will not go away.
+
+Personas, rooms and settings are never touched: this is a way to test the cast, not a
+reset button.
+
+What makes it usable as a *method* rather than a hope is that it counts. Before, it says
+what is stored ("22 messages across 3 rooms; 3 saved memories (Alex, Luna); playing as
+Luna"); the confirmation says exactly what is about to go; and afterwards it reports what
+was deleted and re-reads what is left **from disk** rather than predicting it. When it
+says "Nothing stored", that is an observation.
+
 ### Why does everyone sound like the same character?
 
 When one persona's trait spreads to the others, one of four things is carrying it, and the prompt

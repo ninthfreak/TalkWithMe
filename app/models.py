@@ -157,6 +157,57 @@ class PersonaPreviewResponse(BaseModel):
     comparison: Optional[PersonaPreviewReply] = None
 
 
+# ---------------------------------------------------------------------------
+# Wiping context
+# ---------------------------------------------------------------------------
+
+class RoomContext(BaseModel):
+    """One room's stored conversation."""
+    room: str
+    messages: int
+
+
+class PersonaMemoryContext(BaseModel):
+    """One persona's saved memories."""
+    persona: str
+    memories: int
+
+
+class ContextInventory(BaseModel):
+    """Everything currently able to carry into a future turn.
+
+    Shown before a wipe so the user knows what is about to go, and read
+    back afterwards so they can see that it went. That round trip is the
+    point: "I think I cleared it" is what this exists to replace.
+    """
+    rooms: List[RoomContext] = Field(default_factory=list)
+    personas: List[PersonaMemoryContext] = Field(default_factory=list)
+    # Who the player has adopted, "" for nobody. Not accumulated state
+    # like the other two, but it does reach every persona's prompt in
+    # every room, so a "why is this still happening" hunt has to see it.
+    playing_as: str = ""
+
+
+class WipeRequest(BaseModel):
+    """What to clear. Everything defaults to off — nothing is deleted by accident."""
+    # "current" clears the room in use; "all" clears every room with a
+    # directory on disk, including rooms deleted from the config whose
+    # transcripts outlived them.
+    rooms: Literal["none", "current", "all"] = "none"
+    memories: bool = False
+    playing_as: bool = False
+
+
+class WipeResult(BaseModel):
+    """What was actually deleted, and what is left."""
+    rooms_cleared: List[str] = Field(default_factory=list)
+    messages_deleted: int = 0
+    memories_cleared: List[str] = Field(default_factory=list)
+    playing_as_cleared: bool = False
+    # Read back after the deletions, from disk, not predicted.
+    remaining: ContextInventory
+
+
 class SessionPersonasRequest(BaseModel):
     """Update which personas are active in the current session."""
     active_personas: List[str] = Field(

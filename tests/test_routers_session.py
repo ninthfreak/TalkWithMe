@@ -2,8 +2,28 @@
 
 from pathlib import Path
 
+import pytest
+
+import app.config as app_config
+from app.config import ChatRoomsConfig, PlayerConfig
 from app.models import ChatMessage
 from app.persistence import persist_message
+from app.services import persona_store
+from tests.factories import make_personas_in_dir
+
+
+@pytest.fixture
+def personas_root(tmp_project_root):
+    """The stock Alex/Luna set as real directories, so memories have a home."""
+    root = tmp_project_root / "Personas"
+    app_config.set_personas_cache(make_personas_in_dir(root))
+    return root
+
+
+def _remember(personas_root, persona: str, *lines: str):
+    (personas_root / persona / persona_store.MEMORIES_FILENAME).write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
 
 def _add_exchange(room: str, user_text: str, reply_text: str):
@@ -101,3 +121,147 @@ class TestLoadRoom:
         body = resp.json()
         assert body["messages"] == []
         assert body["datetime"] is None
+
+
+class TestContextInventory:
+    """What is stored, so a wipe can be checked rather than assumed."""
+
+    def test_an_empty_install_has_nothing(self, client, personas_root):
+        body = client.get("/api/session/context").json()
+        assert body == {"rooms": [], "personas": [], "playing_as": ""}
+
+    def test_rooms_and_their_message_counts(self, client, personas_root):
+        _add_exchange("TNG", "hello", "hi there")
+        body = client.get("/api/session/context").json()
+        assert body["rooms"] == [{"room": "TNG", "messages": 2}]
+
+    def test_memories_are_counted_per_persona(self, client, personas_root):
+        _remember(personas_root, "Luna", "The user told me they sail.")
+        body = client.get("/api/session/context").json()
+        assert body["personas"] == [{"persona": "Luna", "memories": 1}]
+
+    def test_who_the_player_is_playing_is_part_of_it(self, client, personas_root, monkeypatch):
+        # Not accumulated state, but it reaches every persona in every
+        # room, so a "why is this still happening" hunt has to see it.
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name="Luna"))
+        assert client.get("/api/session/context").json()["playing_as"] == "Luna"
+
+
+class TestWipeContext:
+    def test_nothing_is_deleted_without_being_asked(self, client, personas_root):
+        _add_exchange("TNG", "hello", "hi there")
+        _remember(personas_root, "Luna", "The user told me they sail.")
+
+        body = client.post("/api/session/wipe", json={}).json()
+
+        assert body["rooms_cleared"] == [] and body["memories_cleared"] == []
+        assert body["remaining"]["rooms"] == [{"room": "TNG", "messages": 2}]
+
+    def test_every_room_goes(self, client, personas_root, persistence_root):
+        _add_exchange("TNG", "hello", "hi there")
+        _add_exchange("Tavern", "anyone about?", "not really")
+
+        body = client.post("/api/session/wipe", json={"rooms": "all"}).json()
+
+        assert sorted(body["rooms_cleared"]) == ["TNG", "Tavern"]
+        assert body["messages_deleted"] == 4
+        assert body["remaining"]["rooms"] == []
+        assert not (persistence_root / "TNG" / "history.json").exists()
+
+    def test_the_room_in_use_is_emptied_in_memory_too(self, client, personas_root):
+        # Clearing only the files would leave this turn's history alive,
+        # and the next reply built on a conversation the user just watched
+        # disappear.
+        _add_exchange("TNG", "hello", "hi there")
+        client.post("/api/session/wipe", json={"rooms": "all"})
+
+        assert client.get("/api/session").json()["history"] == []
+
+    def test_only_the_current_room_when_asked(self, client, personas_root):
+        _add_exchange("Tavern", "anyone about?", "not really")
+        _add_exchange("TNG", "hello", "hi there")   # leaves TNG current
+
+        body = client.post("/api/session/wipe", json={"rooms": "current"}).json()
+
+        assert body["rooms_cleared"] == ["TNG"]
+        assert body["remaining"]["rooms"] == [{"room": "Tavern", "messages": 2}]
+
+    def test_a_room_deleted_from_the_config_is_still_wiped(
+        self, client, personas_root, persistence_root, monkeypatch
+    ):
+        # Transcripts outlive the rooms they belong to, and a wipe that
+        # trusted chatrooms.yaml would leave exactly the conversations
+        # nobody can see any more.
+        _add_exchange("Ghost", "still here", "apparently")
+        monkeypatch.setattr(app_config, "_chatrooms_cache",
+                            ChatRoomsConfig(chat_rooms=[]))
+
+        body = client.post("/api/session/wipe", json={"rooms": "all"}).json()
+
+        assert body["rooms_cleared"] == ["Ghost"]
+
+    def test_memories_go_when_asked(self, client, personas_root):
+        _remember(personas_root, "Luna", "The user told me they sail.")
+        _remember(personas_root, "Alex", "The user told me they cycle.")
+
+        body = client.post("/api/session/wipe", json={"memories": True}).json()
+
+        assert sorted(body["memories_cleared"]) == ["Alex", "Luna"]
+        assert body["remaining"]["personas"] == []
+        assert not (personas_root / "Luna" / persona_store.MEMORIES_FILENAME).exists()
+
+    def test_a_persona_with_no_memories_is_not_reported_as_cleared(
+        self, client, personas_root
+    ):
+        _remember(personas_root, "Luna", "The user told me they sail.")
+        body = client.post("/api/session/wipe", json={"memories": True}).json()
+        assert body["memories_cleared"] == ["Luna"]
+
+    def test_memories_survive_a_rooms_only_wipe(self, client, personas_root):
+        # The distinction that makes this feature necessary: memories are
+        # the context that outlives every other clearing action.
+        _remember(personas_root, "Luna", "The user told me they sail.")
+        body = client.post("/api/session/wipe", json={"rooms": "all"}).json()
+        assert body["remaining"]["personas"] == [{"persona": "Luna", "memories": 1}]
+
+    def test_the_adopted_player_can_be_cleared(self, client, personas_root, monkeypatch):
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name="Luna"))
+
+        body = client.post("/api/session/wipe", json={"playing_as": True}).json()
+
+        assert body["playing_as_cleared"] is True
+        assert body["remaining"]["playing_as"] == ""
+
+    def test_clearing_nobody_is_not_reported_as_a_change(self, client, personas_root):
+        body = client.post("/api/session/wipe", json={"playing_as": True}).json()
+        assert body["playing_as_cleared"] is False
+
+    def test_the_cast_and_the_rooms_themselves_survive(
+        self, client, personas_root, persistence_root
+    ):
+        # A wipe that deleted the cast would be a reset button; this is a
+        # way to test the cast.
+        _add_exchange("TNG", "hello", "hi there")
+        _remember(personas_root, "Luna", "The user told me they sail.")
+
+        client.post("/api/session/wipe",
+                    json={"rooms": "all", "memories": True, "playing_as": True})
+
+        assert [p["name"] for p in client.get("/api/personas").json()] == ["Alex", "Luna"]
+        assert (personas_root / "Luna" / "prompt.md").exists()
+        assert (persistence_root / "TNG").is_dir()
+
+    def test_what_is_left_is_read_from_disk_not_predicted(
+        self, client, personas_root, persistence_root
+    ):
+        # The whole point of the round trip: "I think I cleared it" is
+        # what this exists to replace.
+        _add_exchange("TNG", "hello", "hi there")
+        (persistence_root / "Later").mkdir()
+
+        body = client.post("/api/session/wipe", json={"rooms": "current"}).json()
+
+        assert body["rooms_cleared"] == ["TNG"]
+        # "Later" is an empty directory, so it is not context; TNG has
+        # just been emptied, so it is not either.
+        assert body["remaining"]["rooms"] == []

@@ -304,6 +304,37 @@ def load_history_with_metadata(room_name: str) -> Dict[str, Any]:
     }
 
 
+def persisted_rooms() -> List[str]:
+    """Every room with a directory on disk, sorted, case-insensitively.
+
+    Read from the filesystem rather than from chatrooms.yaml on purpose:
+    deleting a room from the config leaves its transcript behind, and a
+    wipe that trusted the config would leave exactly the conversations
+    nobody can see any more. Names that are no longer valid room names are
+    skipped rather than raising — they cannot be written to either.
+    """
+    root = _PERSISTENCE_ROOT
+    if not root.is_dir():
+        return []
+    names = []
+    for item in sorted(root.iterdir(), key=lambda p: p.name.casefold()):
+        if not item.is_dir():
+            continue
+        try:
+            names.append(safe_room_name(item.name))
+        except UnsafeRoomName:
+            logger.warning("Ignoring unusable room directory %r", item.name)
+    return names
+
+
+def message_count(room_name: str) -> int:
+    """How many messages a room holds. 0 for a room with no history."""
+    try:
+        return len(load_history(room_name))
+    except UnsafeRoomName:
+        return 0
+
+
 def clear_room(room_name: str) -> None:
     """Delete all persisted files for a room.
 
