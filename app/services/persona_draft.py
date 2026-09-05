@@ -46,7 +46,13 @@ logger = logging.getLogger(__name__)
 class Lever:
     key: str
     title: str
+    # For the dialog: explains to a person why this matters.
     hint: str
+    # For the drafting prompt: the same thing said as an instruction.
+    # A model does not need to be told why a lever works, and every word
+    # spent explaining is a word competing with the specification above
+    # it. Defaults to the hint so a new lever cannot silently lose text.
+    prompt_hint: str = ""
     # The dial or detail field that now sets this directly, if any. Such a
     # lever is still shown in the dialog as teaching material, but it is
     # kept OUT of the drafting prompt: repeating "how the sentences are
@@ -82,7 +88,7 @@ LEVERS: List[Lever] = [
         "agenda",
         "What they want",
         "What they are pushing for, defending, or selling in the conversation. "
-        "A character with a stake argues; a character without one comments.",
+        "A character with a stake acts; a character without one comments.",
         superseded_by="wants",
     ),
     Lever(
@@ -95,8 +101,10 @@ LEVERS: List[Lever] = [
     Lever(
         "relationships",
         "What they think of the others",
-        "A named opinion about another persona in the room gives the model "
-        "something to play that a solo description cannot.",
+        "A named opinion — fond, wary, exasperated — about another persona in "
+        "the room gives the model something to play that a solo "
+        "description cannot.",
+        prompt_hint="a named opinion about someone else here — fond, wary, exasperated",
     ),
     Lever(
         "flaw",
@@ -108,8 +116,9 @@ LEVERS: List[Lever] = [
     Lever(
         "mood",
         "The mood they arrive in",
-        "Impatient, delighted, wary, bored. The default emotional register "
+        "Delighted, impatient, content, wary. The default emotional register "
         "before anything is said to them.",
+        prompt_hint="delighted, impatient, content, wary — before anyone speaks to them",
     ),
 ]
 
@@ -118,8 +127,9 @@ LEVERS: List[Lever] = [
 ANTI_PATTERNS = [
     "topic lists (\"philosophy, art, emotions\") — those route a question, "
     "they do not change a voice",
-    "adjective piles (\"thoughtful, curious, friendly\") — every model reads "
-    "all of them as \"helpful assistant\"",
+    "a pile of adjectives as the whole character (\"thoughtful, curious, "
+    "friendly\") — any one of those can be true of someone; the list is not "
+    "a person",
     "\"You are a helpful X\" framing — it collapses straight back to the "
     "default assistant register",
     "biography with no behavioural consequence — a backstory only matters "
@@ -326,24 +336,29 @@ class DetailField:
 # Free text, all optional. Blank means "invent it" — and the draft's notes
 # say which were given and which were invented, so the difference between
 # a thin brief and a full one is visible rather than mysterious.
+# The placeholders deliberately describe a *warm* character while the brief
+# box above them describes a prickly one. Every example in this dialog used
+# to be the same suspicious harbourmaster, and a page of examples in one
+# register is itself an instruction — to the model when it reaches the
+# prompt, and to the person writing the brief.
 DETAILS: List[DetailField] = [
     DetailField("wants", "What they want",
-                "to be proved right about the tide charts",
-                "What they are after in a conversation. A character with a stake argues; "
+                "everyone fed, whether or not they can pay today",
+                "What they are after in a conversation. A character with a stake acts; "
                 "one without a stake comments."),
     DetailField("never", "What they never do",
-                "never speculates about cargo he has not seen logged",
+                "never lets anyone leave empty-handed",
                 "Refusals and avoidances. The strongest single differentiator, because "
                 "it cuts off the generic reply."),
     DetailField("wrong", "Where they are wrong",
-                "still believes the new pilot rules are temporary",
+                "certain the new place on the corner will not last the winter",
                 "A blind spot or an out-of-date belief. Characters with no flaws "
                 "converge on the assistant voice."),
     DetailField("tic", "A verbal tic",
-                "opens with \"Right.\" and asks who signed for it",
+                "asks after your mother before she answers anything",
                 "One repeatable thing you would recognise in a single line."),
     DetailField("background", "Background",
-                "thirty years on the docks; took the job when his brother died",
+                "took the bakery over from her mother; knows everyone's order",
                 "Occupation or history — but only the parts that change how they answer."),
 ]
 
@@ -451,7 +466,10 @@ WRITING_RULES = (
     "Write the prompt itself in the plainest language that will do the job. It is a "
     "set of instructions to an actor, not an essay about a character, and not a "
     "demonstration of the character's own vocabulary — an ornate character still "
-    "gets a plainly-written prompt."
+    "gets a plainly-written prompt.\n\n"
+    "Distinct is not the same as difficult. Warm, kind, delighted, loyal and "
+    "generous are specific ways to be; write someone unpleasant only if you were "
+    "asked for one."
 )
 
 
@@ -471,7 +489,9 @@ def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
     # the block above as instructions, and restating them as advice makes
     # the model treat a setting as a suggestion.
     open_levers = [lv for lv in LEVERS if not lv.superseded_by]
-    lever_block = "\n".join(f"- {lv.title}: {lv.hint}" for lv in open_levers)
+    lever_block = "\n".join(
+        f"- {lv.title}: {lv.prompt_hint or lv.hint}" for lv in open_levers
+    )
     anti_block = _anti_pattern_block()
 
     set_lines = [line for line in
@@ -483,12 +503,17 @@ def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
         dial_block += ("\n- Not specified, so decide for yourself and say what you chose: "
                        + ", ".join(open_dials))
 
-    detail_lines = []
-    for detail in DETAILS:
-        given = spec.details.get(detail.key, "").strip()
+    # Blanks collapse into one line rather than five "NOT GIVEN" ones: the
+    # model needs to know which are open, not to be told five times how to
+    # fill one in, and the prompt is competing for attention with itself.
+    detail_lines = [
+        f"- {d.label}: {spec.details[d.key].strip()}"
+        for d in DETAILS if spec.details.get(d.key, "").strip()
+    ]
+    blank = [d.label for d in DETAILS if not spec.details.get(d.key, "").strip()]
+    if blank:
         detail_lines.append(
-            f"- {detail.label}: {given}" if given
-            else f"- {detail.label}: NOT GIVEN — invent something specific"
+            "- Invent the rest, and make each one specific: " + ", ".join(blank)
         )
 
     system = f"""You write characters for a group chat where several of them talk to one human and to each other. You are given a specification. Write ONE character who follows it exactly.
@@ -704,10 +729,19 @@ def parse_draft(text: str, base: Optional[PersonaDraft] = None) -> PersonaDraft:
 # Checked locally rather than asked of the model: these are the failures
 # the model itself is most likely to commit, so it is the wrong judge.
 
-_ANTI_PATTERN_WORDS = (
-    "helpful", "friendly", "thoughtful", "curious", "knowledgeable",
-    "insightful", "engaging", "assistant", "ai companion",
+# Words that ARE the default assistant, whatever else the prompt says.
+_ASSISTANT_WORDS = ("assistant", "ai companion", "helpful and")
+
+# Words that are only a problem in a heap. Any one of them can be true of
+# a person — a character is allowed to be kind — and flagging a single one
+# taught the opposite lesson: it read as "warmth is a mistake", which is
+# how a cast ends up uniformly unpleasant. Three or more is a pile, and a
+# pile is the failure the check is actually for.
+_BLAND_WORDS = (
+    "friendly", "thoughtful", "curious", "knowledgeable", "insightful",
+    "engaging", "helpful", "warm", "kind", "caring", "empathetic",
 )
+_BLAND_PILE = 3
 
 
 def critique(draft: PersonaDraft) -> List[str]:
@@ -722,11 +756,19 @@ def critique(draft: PersonaDraft) -> List[str]:
             "room's shared instructions — aim for something nearer "
             f"{TARGET_PROMPT_WORDS}."
         )
-    found = sorted({w for w in _ANTI_PATTERN_WORDS if w in prompt.lower()})
-    if found:
+    lowered = prompt.lower()
+    assistant = sorted({w for w in _ASSISTANT_WORDS if w in lowered})
+    if assistant:
         warnings.append(
-            "Contains generic assistant vocabulary (" + ", ".join(found) + "). "
+            "Contains assistant vocabulary (" + ", ".join(assistant) + "). "
             "Those words pull every model back towards its default voice."
+        )
+    bland = sorted({w for w in _BLAND_WORDS if w in lowered})
+    if len(bland) >= _BLAND_PILE:
+        warnings.append(
+            "Leans on a pile of adjectives (" + ", ".join(bland) + ") rather than "
+            "on things this character does. Any one of them is fine; several "
+            "together describe nobody in particular."
         )
     if "never" not in prompt.lower() and "refus" not in prompt.lower():
         warnings.append(

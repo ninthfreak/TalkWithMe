@@ -503,6 +503,12 @@ friendly"). Neither changes what a model does with a turn — the first routes a
 the second reads to every model as "helpful assistant". Two characters that differ only
 in subject matter produce the same sentences about different nouns.
 
+Note what that does *not* say: the problem is the pile, not the words in it. A character
+is allowed to be kind. An earlier version of the drafting prompt listed "friendly" and
+"helpful" among the things to avoid, and since the shortest road away from friendly and
+helpful is unpleasant, the whole cast came out unpleasant. The prompt now says outright
+that distinct is not the same as difficult.
+
 What does change behaviour, roughly in order of effect:
 
 | Lever | What it means |

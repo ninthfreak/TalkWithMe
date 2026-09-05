@@ -143,10 +143,11 @@ class TestDraftPrompt:
         # A lever the dials or details already set is an instruction, not
         # advice; restating it as advice invites the model to overrule it.
         system = system_of(spec())
-        # Matched on the hint, not the title: several lever titles are also
-        # detail-field labels, which legitimately appear elsewhere.
+        # Matched on the prompt hint, not the title: several lever titles
+        # are also detail-field labels, which legitimately appear elsewhere.
         for lever in persona_draft.LEVERS:
-            assert (lever.hint in system) is not bool(lever.superseded_by)
+            text = lever.prompt_hint or lever.hint
+            assert (text in system) is not bool(lever.superseded_by)
 
     def test_every_superseded_lever_names_a_real_field(self):
         for lever in persona_draft.LEVERS:
@@ -163,7 +164,7 @@ class TestDraftPrompt:
         # The model produces exactly these unless told not to.
         system = system_of(spec())
         assert "topic lists" in system
-        assert "adjective piles" in system
+        assert "pile of adjectives" in system
 
     def test_the_brief_says_who_they_are(self):
         system = system_of(spec("a suspicious harbourmaster"))
@@ -201,10 +202,27 @@ class TestDraftPrompt:
         assert "must not bleed together" in system
         assert "does not make a character hostile" in system
 
-    def test_a_given_detail_is_quoted_and_a_blank_one_is_left_open(self):
+    def test_a_given_detail_is_quoted_and_the_blanks_are_named_once(self):
+        # One line naming what is open, not five telling the model how to
+        # fill one in — the prompt is competing for attention with itself.
         system = system_of(spec(details={"never": "never guesses at cargo"}))
         assert "never guesses at cargo" in system
-        assert "NOT GIVEN" in system
+        assert system.count("Invent the rest") == 1
+        assert "What they want" in system and "Background" in system
+
+    def test_warmth_is_offered_as_an_option(self):
+        # Without this the prompt is a list of things not to be — bland,
+        # helpful, friendly, agreeable — and the shortest road away from
+        # all of them is unpleasant. Which is where the whole cast ended up.
+        system = system_of(spec())
+        assert "Distinct is not the same as difficult" in system
+        assert "unpleasant only if you were asked" in system
+
+    def test_the_prompt_does_not_ban_being_pleasant(self):
+        # "Avoid friendly" taught the model that warmth was the mistake.
+        # The mistake is the adjective pile, and the wording has to say so.
+        system = system_of(spec())
+        assert "any one of those can be true of someone" in system
 
     def test_the_user_turn_is_a_constant(self):
         # Everything the user typed is in the system turn, so the user turn
@@ -358,13 +376,34 @@ class TestCritique:
         warnings = critique(PersonaDraft(name="R", system_prompt="You run the harbour."))
         assert any("only 4 words" in w for w in warnings)
 
-    def test_generic_assistant_vocabulary_is_flagged(self):
+    def test_assistant_vocabulary_is_flagged(self):
         draft = PersonaDraft(
             name="R",
             system_prompt="You are a helpful and friendly assistant who is curious. " * 8,
         )
-        warnings = critique(draft)
-        assert any("generic assistant vocabulary" in w for w in warnings)
+        assert any("assistant vocabulary" in w for w in critique(draft))
+
+    def test_one_warm_word_is_not_a_fault(self):
+        # Flagging a single "kind" taught the opposite of the lesson: it
+        # read as "warmth is a mistake", which is how a cast ends up
+        # uniformly unpleasant.
+        draft = PersonaDraft(
+            name="Bess",
+            system_prompt=(
+                "You run the bakery and you are delighted to see whoever walks in. "
+                "You ask after their family by name before you talk about bread. "
+                "You never let anyone leave without something in their hand, and "
+                "you are kind about people the others have written off."
+            ),
+        )
+        assert critique(draft) == []
+
+    def test_a_pile_of_adjectives_is_a_fault(self):
+        draft = PersonaDraft(
+            name="R",
+            system_prompt="You are friendly, curious and thoughtful, and you never stop. " * 6,
+        )
+        assert any("pile of adjectives" in w for w in critique(draft))
 
     def test_missing_negative_space_is_flagged(self):
         draft = PersonaDraft(name="R", system_prompt="You ask about cargo. " * 20)

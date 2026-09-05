@@ -904,7 +904,7 @@ class TestDraftPersona:
         body = client.post("/api/personas/draft", json={"brief": "x"}).json()
 
         joined = " ".join(body["warnings"])
-        assert "generic assistant vocabulary" in joined
+        assert "assistant vocabulary" in joined
         assert "words" in joined            # too short to outweigh the preamble
 
     def test_an_unreadable_reply_is_a_503_not_a_blank_form(self, client, personas_root, monkeypatch):
@@ -1162,7 +1162,7 @@ class TestRefinePersona:
 
         body = client.post("/api/personas/refine", json=self._req()).json()
 
-        assert any("generic assistant vocabulary" in w for w in body["warnings"])
+        assert any("assistant vocabulary" in w for w in body["warnings"])
 
     def test_a_reply_that_changes_nothing_is_a_503(self, client, personas_root, monkeypatch):
         # Otherwise the user gets an unchanged form and no explanation.
