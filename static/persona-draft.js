@@ -6,7 +6,7 @@
  *  1. Teaches. The levers list (rendered server-side from the same
  *     constant the drafting prompt is built from) is what makes the next
  *     hand-written persona better, whether or not this tool is used again.
- *  2. Drafts. A brief plus the existing cast comes back as every field.
+ *  2. Drafts. A brief comes back as every field.
  *  3. Proves it. The same question answered by the draft and by a persona
  *     you already have, side by side — because a draft read on its own
  *     always sounds distinctive, and read beside its neighbour often
@@ -106,7 +106,6 @@ async function requestPersonaDraft() {
         pdDraftBtn.textContent = "Draft again";
     }
 
-    pdContrastEl.textContent = pdDraft.contrast || "";
     renderList(pdNotesEl, pdDraft.notes || []);
     renderList(pdWarningsEl, pdDraft.warnings || []);
     pdWarningsRow.classList.toggle("hidden", !(pdDraft.warnings || []).length);

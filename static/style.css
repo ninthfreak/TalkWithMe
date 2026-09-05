@@ -1650,13 +1650,6 @@ html, body {
     font-size: 0.85rem;
 }
 
-.pd-contrast {
-    font-size: 0.9rem;
-    font-style: italic;
-    color: var(--text-secondary);
-    margin: 0;
-}
-
 .pd-notes {
     margin: 0;
     padding-left: 18px;

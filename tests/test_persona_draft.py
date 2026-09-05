@@ -8,7 +8,7 @@ value, an invented enum member.
 
 import pytest
 
-from app.config import LengthBias, Persona
+from app.config import LengthBias
 from app.services import persona_draft
 from app.services.persona_draft import (
     PersonaDraft,
@@ -22,7 +22,6 @@ DESCRIPTION: A suspicious harbourmaster
 ROUTER_HINTS: boats, cargo, the harbour
 LENGTH_BIAS: shorter
 AVATAR_COLOR: #2E7D32
-CONTRAST: Where Luna reaches for metaphor, Rennick asks for paperwork.
 NOTES:
 - Stance: he answers questions with questions about provenance.
 - Negative space: never speculates about anything he has not seen logged.
@@ -40,7 +39,6 @@ class TestParseWellFormed:
         assert draft.router_hints == "boats, cargo, the harbour"
         assert draft.length_bias is LengthBias.SHORTER
         assert draft.avatar_color == "#2E7D32"
-        assert draft.contrast.startswith("Where Luna reaches for metaphor")
         assert len(draft.notes) == 2
         assert draft.system_prompt.startswith("You run the harbour")
         assert draft.is_usable()
@@ -125,42 +123,29 @@ class TestParseEnforcesFieldLimits:
 
 
 class TestDraftPrompt:
-    def test_the_existing_cast_is_included_to_write_against(self):
-        cast = [
-            Persona(name="Luna", description="A poet", router_hints="x",
-                    system_prompt="You speak in metaphor and never answer directly."),
-        ]
-        system = build_draft_prompt("a harbourmaster", cast)[0]["content"]
-        assert "Luna" in system
-        assert "You speak in metaphor" in system
-        assert "unmistakably NOT one of the others" in system
-
-    def test_an_empty_cast_says_so_rather_than_leaving_a_gap(self):
-        system = build_draft_prompt("a harbourmaster", [])[0]["content"]
-        assert "no other personas yet" in system
-
     def test_every_lever_reaches_the_prompt(self):
-        system = build_draft_prompt("x", [])[0]["content"]
+        system = build_draft_prompt("x")[0]["content"]
         for lever in persona_draft.LEVERS:
             assert lever.title in system
 
     def test_the_anti_patterns_are_named_explicitly(self):
         # The model produces exactly these unless told not to.
-        system = build_draft_prompt("x", [])[0]["content"]
+        system = build_draft_prompt("x")[0]["content"]
         assert "topic lists" in system
         assert "adjective piles" in system
 
     def test_the_brief_is_the_user_turn(self):
-        messages = build_draft_prompt("a suspicious harbourmaster", [])
+        messages = build_draft_prompt("a suspicious harbourmaster")
         assert messages[1]["role"] == "user"
         assert "a suspicious harbourmaster" in messages[1]["content"]
 
-    def test_a_long_cast_prompt_is_trimmed_not_dumped(self):
-        # Six personas with 8KB prompts would bury the instructions.
-        cast = [Persona(name=f"P{i}", description="d", router_hints="x",
-                        system_prompt="word " * 2000) for i in range(6)]
-        system = build_draft_prompt("x", cast)[0]["content"]
-        assert len(system) < 8000
+    def test_the_prompt_does_not_grow_with_the_cast(self):
+        # Distinctness comes from the levers, not from contrast with the
+        # existing personas — so the prompt is the same size whether there
+        # are none or fifty, and a draft costs the same either way.
+        system = build_draft_prompt("x")[0]["content"]
+        assert "cast" not in system.lower()
+        assert len(system) < 4000
 
 
 class TestCritique:

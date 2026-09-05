@@ -105,14 +105,14 @@ def _tool_persona_dir(tmp_path: Path, *, name="ToolUser", memory_size=8192) -> P
 
 
 def _stub_completion(monkeypatch, result: str):
-    async def fake_completion(prompt, max_tokens=16):
+    async def fake_completion(prompt, max_tokens=16, timeout=15.0):
         return result
 
     monkeypatch.setattr(chat_router, "chat_completion", fake_completion)
 
 
 def _stub_completion_error(monkeypatch):
-    async def fake_completion(prompt, max_tokens=16):
+    async def fake_completion(prompt, max_tokens=16, timeout=15.0):
         raise RuntimeError("llm down")
 
     monkeypatch.setattr(chat_router, "chat_completion", fake_completion)
@@ -1475,7 +1475,7 @@ class TestSuggestReply:
     def _stub(self, monkeypatch, result="Aye, that'll be tuppence."):
         seen = []
 
-        async def fake(messages, max_tokens=64, temperature=None):
+        async def fake(messages, max_tokens=64, temperature=None, timeout=15.0):
             seen.append({"messages": messages, "max_tokens": max_tokens,
                          "temperature": temperature})
             return result

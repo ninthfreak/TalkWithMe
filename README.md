@@ -500,16 +500,15 @@ sentence on one of the levers above are the target.
 **Draft with AI…** at the top of the persona editor takes a line or two — "a suspicious
 harbourmaster who thinks everyone is smuggling" — and fills in every field.
 
-The brief is only half the input. Your existing cast goes to the model too, with the
-opening of each persona's prompt, and it is asked for someone unmistakably unlike them.
-A harbourmaster drafted in isolation is a generic harbourmaster; drafted against the
-three characters you already have, it comes back deliberately not-those.
+The draft is built on the levers in the table above, and only on those. Your existing
+personas are not sent to the model — a character is defined by what it is, not by what
+the others are, and a draft costs the same whether you have two personas or fifty.
 
-Each draft explains itself. **How this one differs** is a sentence on where it sits
-against your cast. **What the draft did** names which levers it used and which ones your
-brief already supplied — so you can see what a good brief contains and write the next one
-by hand. **Worth a look** flags the failures the model is the wrong judge of: generic
-assistant vocabulary, a prompt too short to outweigh the room preamble, no negative space.
+Each draft explains itself. **What the draft did** names which levers it used and which
+ones your brief already supplied — so you can see what a good brief contains and write
+the next one by hand. **Worth a look** flags the failures the model is the wrong judge of:
+generic assistant vocabulary, a prompt too short to outweigh the room preamble, no
+negative space.
 
 **Try it before you keep it** asks the draft a question and shows the answer beside a
 persona you already have answering the same one. This is the part worth using every

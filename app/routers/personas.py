@@ -45,7 +45,7 @@ from app.models import (
     PersonaResponse,
 )
 from app.services import persona_draft, persona_store
-from app.services.llm import chat_completion
+from app.services.llm import PROSE_TIMEOUT, chat_completion
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/personas", tags=["personas"])
@@ -585,23 +585,24 @@ _PREVIEW_MAX_TOKENS = 400
 
 @router.post("/draft", response_model=PersonaDraftResponse)
 async def draft_persona(req: PersonaDraftRequest):
-    """Draft a persona from a brief, written against the existing cast.
+    """Draft a persona from a brief.
 
-    The cast matters as much as the brief: "a suspicious harbourmaster"
-    drafted in isolation is a generic suspicious harbourmaster, while the
-    same brief drafted against three existing characters comes back
-    deliberately unlike them. That is the whole reason this is a server
-    endpoint and not a prompt the user pastes somewhere.
+    The existing cast is read only to keep the name unique; none of it
+    goes to the model. Distinctness comes from the levers in the prompt,
+    not from contrast with whoever already exists — so the cost of a draft
+    does not grow with the number of personas.
     """
     settings = get_settings()
     existing = list(get_personas().personas)
 
     text = await chat_completion(
-        persona_draft.build_draft_prompt(req.brief, existing),
+        persona_draft.build_draft_prompt(req.brief),
         max_tokens=_DRAFT_MAX_TOKENS,
         # Prose, not routing: the router's 0.1 produces four drafts that
-        # are the same draft.
+        # are the same draft, and the router's timeout is sized for
+        # sixteen tokens, not a hundred-odd words.
         temperature=settings.llm.temperature,
+        timeout=PROSE_TIMEOUT,
     )
     if not text.strip():
         raise HTTPException(
@@ -637,7 +638,6 @@ async def draft_persona(req: PersonaDraftRequest):
         length_bias=draft.length_bias,
         avatar_color=draft.avatar_color,
         notes=draft.notes,
-        contrast=draft.contrast,
         warnings=persona_draft.critique(draft),
     )
 
@@ -672,6 +672,7 @@ async def _preview_reply(persona: Persona, question: str) -> str:
         messages,
         max_tokens=derive_max_tokens(length, min(settings.llm.max_tokens, _PREVIEW_MAX_TOKENS)),
         temperature=settings.llm.temperature,
+        timeout=PROSE_TIMEOUT,
     )
 
 

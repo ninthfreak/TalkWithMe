@@ -113,7 +113,7 @@
                 <div id="pe-form-error" class="pe-form-error hidden"></div>
                 <div class="pf-draft-bar">
                     <button type="button" id="pf-btn-draft" class="btn-secondary">&#10022; Draft with AI&hellip;</button>
-                    <span class="field-hint">Describe the character in a line and let the LLM fill the fields &mdash; written to be unlike the personas you already have.</span>
+                    <span class="field-hint">Describe the character in a line and let the LLM fill the fields, built on what actually makes a voice distinct.</span>
                 </div>
                 <form id="pe-form" novalidate>
                     <div class="form-row">
@@ -214,7 +214,7 @@
                 <h2 id="pd-title">Draft a persona</h2>
                 <button id="pd-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
             </div>
-            <div class="modal-intro field-hint">One or two lines is enough. The draft is written against the personas you already have, so it comes back deliberately unlike them.</div>
+            <div class="modal-intro field-hint">One or two lines is enough. The draft is built on the levers below, which is what makes it distinct &mdash; open them to see what a brief can carry.</div>
             <div id="pd-error" class="pe-form-error hidden"></div>
             <div class="settings-body">
                 <div class="form-row">
@@ -235,10 +235,6 @@
                 </details>
 
                 <div id="pd-result" class="hidden">
-                    <div class="form-row">
-                        <span class="pd-section-label">How this one differs</span>
-                        <p id="pd-contrast" class="pd-contrast"></p>
-                    </div>
                     <div class="form-row">
                         <span class="pd-section-label">What the draft did</span>
                         <ul id="pd-notes" class="pd-notes"></ul>

@@ -119,16 +119,29 @@ async def stream_chat(
     yield {"type": "finish", "reason": finish_reason}
 
 
+# The router picks a name in a handful of tokens; anything slower than this
+# is a server problem, not a slow answer.
+ROUTER_TIMEOUT = 15.0
+# Prose — a suggested message, a persona draft — can legitimately take a
+# local model a minute or more. Matches the streaming path's ceiling.
+PROSE_TIMEOUT = 120.0
+
+
 async def chat_completion(
     messages: List[Dict[str, str]],
     max_tokens: int = 64,
     temperature: Optional[float] = None,
+    timeout: float = ROUTER_TIMEOUT,
 ) -> str:
     """Non-streaming LLM call. Used for the persona router and suggestions.
 
     *temperature* defaults to 0.1, which is what the router wants — it is
     picking a name, not writing. Callers producing prose (the suggested
-    player message) should pass the configured sampling temperature.
+    player message, a persona draft) should pass the configured sampling
+    temperature — and PROSE_TIMEOUT. The default timeout is sized for the
+    router's sixteen tokens; a persona draft asked to write a hundred-odd
+    words hit it every time on a local model, came back as "", and the
+    server then finished generating into a closed connection.
 
     Returns the full response text, or empty string on failure.
     """
@@ -144,7 +157,7 @@ async def chat_completion(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             body = resp.json()

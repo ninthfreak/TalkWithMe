@@ -793,7 +793,6 @@ DESCRIPTION: A suspicious harbourmaster
 ROUTER_HINTS: boats, cargo
 LENGTH_BIAS: shorter
 AVATAR_COLOR: #2E7D32
-CONTRAST: Rennick asks for paperwork where the others speculate.
 NOTES:
 - Stance: answers questions with questions about provenance.
 - Negative space: never speculates about unlogged cargo.
@@ -810,9 +809,9 @@ def _stub_completion(monkeypatch, *replies):
     seen = []
     queue = list(replies)
 
-    async def fake(messages, max_tokens=64, temperature=None):
+    async def fake(messages, max_tokens=64, temperature=None, timeout=15.0):
         seen.append({"messages": messages, "max_tokens": max_tokens,
-                     "temperature": temperature})
+                     "temperature": temperature, "timeout": timeout})
         return queue.pop(0) if queue else ""
 
     monkeypatch.setattr(personas_router, "chat_completion", fake)
@@ -833,20 +832,26 @@ class TestDraftPersona:
         assert body["avatar_color"] == "#2E7D32"
         assert body["system_prompt"].startswith("You run the harbour")
         assert len(body["notes"]) == 2
-        assert "paperwork" in body["contrast"]
 
-    def test_the_existing_cast_is_sent_so_the_draft_contrasts(self, client, personas_root, monkeypatch):
+    def test_the_existing_cast_is_not_sent_to_the_model(self, client, personas_root, monkeypatch):
+        # Diversity comes from the levers, not from contrast: the prompt
+        # must not grow with the cast, and a character is defined by what
+        # it is rather than by what the others are.
         seen = _stub_completion(monkeypatch, DRAFT_REPLY)
         client.post("/api/personas/draft", json={"brief": "a harbourmaster"})
 
-        system = seen[0]["messages"][0]["content"]
-        assert "Alex" in system and "Luna" in system
+        sent = " ".join(m["content"] for m in seen[0]["messages"])
+        assert "Alex" not in sent and "Luna" not in sent
 
-    def test_prose_temperature_not_the_routers(self, client, personas_root, monkeypatch):
-        # At the router's 0.1 every draft comes back the same draft.
+    def test_prose_temperature_and_timeout_not_the_routers(self, client, personas_root, monkeypatch):
+        # At the router's 0.1 every draft is the same draft, and at the
+        # router's 15s a hundred-word draft times out on a local model,
+        # comes back as "", and the server finishes generating into a
+        # closed connection.
         seen = _stub_completion(monkeypatch, DRAFT_REPLY)
         client.post("/api/personas/draft", json={"brief": "a harbourmaster"})
         assert seen[0]["temperature"] == 0.8
+        assert seen[0]["timeout"] >= 60
 
     def test_a_name_collision_is_resolved_against_the_cast(self, client, personas_root, monkeypatch):
         _stub_completion(monkeypatch, DRAFT_REPLY.replace("NAME: Rennick", "NAME: Luna"))
@@ -915,6 +920,11 @@ class TestPreviewPersona:
         assert body["draft"] == {"persona": "Rennick", "text": "Depends whose boat."}
         assert body["comparison"] is None
         assert not (personas_root / "Rennick").exists()
+
+    def test_the_preview_gets_the_prose_timeout(self, client, personas_root, monkeypatch):
+        seen = _stub_completion(monkeypatch, "Depends whose boat.")
+        client.post("/api/personas/preview", json=self._req())
+        assert seen[0]["timeout"] >= 60
 
     def test_the_preview_uses_the_real_room_preamble(self, client, personas_root, monkeypatch):
         # A preview built from a simpler prompt would preview something the

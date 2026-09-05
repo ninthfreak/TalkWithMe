@@ -73,8 +73,6 @@ class PersonaDraftResponse(BaseModel):
     avatar_color: str
     # Which differentiation levers were used, and which the brief supplied.
     notes: List[str] = Field(default_factory=list)
-    # One sentence on how this persona differs from the existing cast.
-    contrast: str = ""
     # Local checks the model is the wrong judge of (generic vocabulary, a
     # prompt too short to outweigh the room preamble, no negative space).
     warnings: List[str] = Field(default_factory=list)

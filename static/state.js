@@ -124,7 +124,6 @@ const pdOverlay = document.getElementById("pd-overlay");
 const pdBrief = document.getElementById("pd-brief");
 const pdErrorEl = document.getElementById("pd-error");
 const pdResult = document.getElementById("pd-result");
-const pdContrastEl = document.getElementById("pd-contrast");
 const pdNotesEl = document.getElementById("pd-notes");
 const pdWarningsEl = document.getElementById("pd-warnings");
 const pdWarningsRow = document.getElementById("pd-warnings-row");

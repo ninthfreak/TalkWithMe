@@ -12,6 +12,13 @@ prompt is built around it, and the draft comes back with notes saying
 which levers the brief supplied and which had to be invented — so the
 guidance transfers to personas written by hand afterwards.
 
+Diversity comes from the levers, not from the cast. An earlier version
+sent every existing persona to the model and asked for someone unlike
+them. That was the wrong mechanism: it made the prompt grow with the cast
+(slow past a handful of personas), and it defined a new character by what
+the others were rather than by what it was. A character built from strong
+levers is distinct on its own.
+
 Output is parsed from labelled blocks rather than JSON. Local models
 follow "NAME: ..." far more reliably than they emit valid JSON, and a
 half-written brace costs the whole draft where a missing block costs one
@@ -23,7 +30,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from app.config import LengthBias, Persona
+from app.config import LengthBias
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +142,6 @@ class PersonaDraft:
     avatar_color: str = "#4A90D9"
     # One line per lever, saying what was used and where it came from.
     notes: List[str] = field(default_factory=list)
-    # How this persona is meant to differ from the existing cast.
-    contrast: str = ""
 
     def is_usable(self) -> bool:
         """Enough to populate the form: a name and something to say."""
@@ -147,40 +152,20 @@ class PersonaDraft:
 # Prompt construction
 # ---------------------------------------------------------------------------
 
-def _cast_summary(existing: List[Persona]) -> str:
-    """The current cast, in enough detail to be written *against*.
-
-    The whole system prompt of each is too much (a room of six would bury
-    the instructions), but a name and a description alone is too little to
-    contrast with — the description is capped at 30 characters. The opening
-    of each prompt is the useful middle.
-    """
-    if not existing:
-        return "There are no other personas yet; this is the first."
-    lines = []
-    for p in existing:
-        opening = " ".join(p.system_prompt.split())[:220]
-        lines.append(f"- {p.name} ({p.description or 'no description'}): {opening}")
-    return "\n".join(lines)
-
-
-def build_draft_prompt(brief: str, existing: List[Persona]) -> List[dict]:
+def build_draft_prompt(brief: str) -> List[dict]:
     """The messages that ask the LLM for a persona.
 
     Written as an instruction to a *casting director*, not to an assistant
     filling in a form: the framing matters, because "fill in these fields"
-    produces field-shaped filler and "make this person different from those
-    people" produces a character.
+    produces field-shaped filler and "write this person so they could not
+    be mistaken for anyone" produces a character.
     """
     lever_block = "\n".join(f"- {lv.title}: {lv.hint}" for lv in LEVERS)
     anti_block = "\n".join(f"- Avoid {a}" for a in ANTI_PATTERNS)
 
-    system = f"""You write characters for a group chat where several of them talk to one human and to each other. You are given a short brief and the cast that already exists. Your job is to produce one new character who is unmistakably NOT one of the others.
+    system = f"""You write characters for a group chat where several of them talk to one human and to each other. You are given a short brief. Your job is to produce one character specific enough that they could not be mistaken for anyone else — a person, not a role.
 
-The cast so far:
-{_cast_summary(existing)}
-
-What actually makes a character behave differently (use as many as the brief allows, and invent the rest):
+What actually makes a character behave distinctly (use as many as the brief allows, and invent the rest):
 {lever_block}
 
 What does not work, and must not appear in your output:
@@ -195,7 +180,6 @@ DESCRIPTION: <up to {MAX_DESCRIPTION} characters, shown in the room roster>
 ROUTER_HINTS: <comma-separated topics this character should be picked for>
 LENGTH_BIAS: <one of: much_shorter, shorter, match, longer, much_longer>
 AVATAR_COLOR: <a hex colour like #4A90D9>
-CONTRAST: <one sentence on how this character differs from the cast above>
 NOTES:
 - <one line per lever you used, naming the lever and what you did with it; say which ones the brief already supplied and which you invented>
 SYSTEM_PROMPT:
@@ -214,7 +198,7 @@ SYSTEM_PROMPT:
 
 _LABELS = (
     "NAME", "DESCRIPTION", "ROUTER_HINTS", "LENGTH_BIAS",
-    "AVATAR_COLOR", "CONTRAST", "NOTES", "SYSTEM_PROMPT",
+    "AVATAR_COLOR", "NOTES", "SYSTEM_PROMPT",
 )
 _LABEL_RE = re.compile(rf"^\s*({'|'.join(_LABELS)})\s*:\s*(.*)$", re.IGNORECASE)
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -268,7 +252,6 @@ def parse_draft(text: str) -> PersonaDraft:
     draft.name = draft.name.replace("/", " ").replace("\\", " ").strip()
     draft.description = _clean_one_line(blocks.get("DESCRIPTION", ""), MAX_DESCRIPTION)
     draft.router_hints = _clean_one_line(blocks.get("ROUTER_HINTS", ""), MAX_ROUTER_HINTS)
-    draft.contrast = _clean_one_line(blocks.get("CONTRAST", ""), 400)
     draft.notes = _parse_notes(blocks.get("NOTES", ""))
 
     prompt = blocks.get("SYSTEM_PROMPT", "").strip().strip("`").strip()

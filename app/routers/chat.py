@@ -35,7 +35,7 @@ from app.models import (
 from app import persistence
 from app.session import recent_exchanges, session
 from app.services import builtin, persona_store
-from app.services.llm import chat_completion, stream_chat, stream_chat_with_tools
+from app.services.llm import PROSE_TIMEOUT, chat_completion, stream_chat, stream_chat_with_tools
 from app.services.reply_guard import ReplyGuard, stop_sequences
 from app.services.tool_registry import get_all_tools
 
@@ -804,8 +804,10 @@ async def suggest_reply(req: SuggestReplyRequest):
         _build_suggestion_prompt(req.chat_room),
         max_tokens=derive_max_tokens(length, settings.llm.max_tokens),
         # Prose, not routing: use the configured sampling temperature so a
-        # suggestion does not come out flat and repetitive.
+        # suggestion does not come out flat and repetitive, and give it
+        # the time prose takes.
         temperature=settings.llm.temperature,
+        timeout=PROSE_TIMEOUT,
     )
 
     if not text.strip():
