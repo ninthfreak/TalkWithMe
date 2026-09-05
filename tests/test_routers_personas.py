@@ -1020,3 +1020,166 @@ class TestPreviewPersona:
         assert client.post(
             "/api/personas/preview", json=self._req(name="har/bour")
         ).status_code == 422
+
+    def test_an_unsaved_prompt_can_be_the_comparison(self, client, personas_root, monkeypatch):
+        # How a refinement shows a before and after of one character.
+        seen = _stub_completion(monkeypatch, "Depends whose boat.", "Whose boat. That first.")
+
+        body = client.post("/api/personas/preview", json=self._req(
+            compare_prompt="You run the harbour.", label="After", compare_label="Before",
+        )).json()
+
+        assert body["draft"] == {"persona": "After", "text": "Depends whose boat."}
+        assert body["comparison"] == {"persona": "Before", "text": "Whose boat. That first."}
+        # Same question and same room to both; only the prompt differs.
+        assert seen[0]["messages"][1] == seen[1]["messages"][1]
+        after_sys, before_sys = (c["messages"][0]["content"] for c in seen)
+        assert after_sys.startswith("You run the harbour and never speculate.")
+        assert before_sys.startswith("You run the harbour.")
+
+    def test_the_before_and_after_share_a_name(self, client, personas_root, monkeypatch):
+        # The room preamble is built from the persona, so a different name
+        # on the "before" side would make the two prompts differ twice and
+        # the comparison would stop isolating the change.
+        seen = _stub_completion(monkeypatch, "a", "b")
+        client.post("/api/personas/preview",
+                    json=self._req(compare_prompt="You run the harbour."))
+        assert seen[0]["messages"][0]["content"].count("Rennick") == \
+               seen[1]["messages"][0]["content"].count("Rennick")
+
+    def test_the_unsaved_comparison_labels_itself_when_unlabelled(
+        self, client, personas_root, monkeypatch
+    ):
+        _stub_completion(monkeypatch, "a", "b")
+        body = client.post("/api/personas/preview",
+                           json=self._req(compare_prompt="You run the harbour.")).json()
+        assert body["comparison"]["persona"] == "Rennick (before)"
+
+    def test_two_kinds_of_comparison_at_once_is_rejected(self, client, personas_root, monkeypatch):
+        seen = _stub_completion(monkeypatch, "a", "b")
+        resp = client.post("/api/personas/preview", json=self._req(
+            compare_with="Luna", compare_prompt="You run the harbour."))
+        assert resp.status_code == 422
+        assert seen == []
+
+    def test_a_blank_comparison_prompt_is_not_a_comparison(self, client, personas_root, monkeypatch):
+        seen = _stub_completion(monkeypatch, "Depends whose boat.")
+        body = client.post("/api/personas/preview", json=self._req(compare_prompt="  ")).json()
+        assert body["comparison"] is None
+        assert len(seen) == 1
+
+
+REFINED_REPLY = """DESCRIPTION: Harbourmaster, coarse
+NOTES:
+- Changed: he swears now, in the same clipped way he already spoke.
+- Kept: the questions about provenance, and never speculating.
+SYSTEM_PROMPT:
+You run the harbour and you swear about it. You never speculate about cargo
+you have not seen logged.
+"""
+
+
+class TestRefinePersona:
+    def _req(self, **overrides):
+        payload = {
+            "name": "Rennick",
+            "system_prompt": "You run the harbour. You never speculate about cargo.",
+            "description": "A harbourmaster",
+            "router_hints": "boats, cargo",
+            "length_bias": "shorter",
+            "instruction": "make him coarser",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_an_instruction_comes_back_as_a_revision(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, REFINED_REPLY)
+
+        resp = client.post("/api/personas/refine", json=self._req())
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["system_prompt"].startswith("You run the harbour and you swear")
+        assert body["description"] == "Harbourmaster, coarse"
+        assert len(body["notes"]) == 2
+
+    def test_fields_the_revision_left_out_keep_their_values(
+        self, client, personas_root, monkeypatch
+    ):
+        # The prompt asks the model to omit what it did not change, so an
+        # omission must not blank the field or reset the length bias.
+        _stub_completion(monkeypatch, REFINED_REPLY)
+
+        body = client.post("/api/personas/refine", json=self._req()).json()
+
+        assert body["router_hints"] == "boats, cargo"
+        assert body["length_bias"] == "shorter"
+
+    def test_the_persona_and_the_instruction_both_reach_the_model(
+        self, client, personas_root, monkeypatch
+    ):
+        seen = _stub_completion(monkeypatch, REFINED_REPLY)
+        client.post("/api/personas/refine", json=self._req())
+
+        sent = seen[0]["messages"][0]["content"]
+        assert "You run the harbour. You never speculate about cargo." in sent
+        assert "make him coarser" in sent
+        assert seen[0]["timeout"] >= 60
+        assert seen[0]["temperature"] == 0.8
+
+    def test_the_form_is_refined_not_the_saved_copy(self, client, personas_root, monkeypatch):
+        # The user is looking at the form; refining what is on disk would
+        # revise a version they cannot see and lose their unsaved edits.
+        seen = _stub_completion(monkeypatch, REFINED_REPLY)
+        client.post("/api/personas/refine",
+                    json=self._req(name="Luna", system_prompt="Edited but not saved."))
+
+        assert "Edited but not saved." in seen[0]["messages"][0]["content"]
+
+    def test_no_name_or_colour_comes_back(self, client, personas_root, monkeypatch):
+        # A revision that renamed the character would be a different one.
+        _stub_completion(monkeypatch, "NAME: Someone Else\nAVATAR_COLOR: #111111\n" + REFINED_REPLY)
+
+        body = client.post("/api/personas/refine", json=self._req()).json()
+
+        assert "name" not in body and "avatar_color" not in body
+
+    def test_warnings_come_back_with_the_revision(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, "NOTES:\n- Softened him.\nSYSTEM_PROMPT:\n"
+                                      "You are a friendly and helpful assistant.")
+
+        body = client.post("/api/personas/refine", json=self._req()).json()
+
+        assert any("generic assistant vocabulary" in w for w in body["warnings"])
+
+    def test_a_reply_that_changes_nothing_is_a_503(self, client, personas_root, monkeypatch):
+        # Otherwise the user gets an unchanged form and no explanation.
+        _stub_completion(monkeypatch, "I'm sorry, I can't help with that.")
+        assert client.post("/api/personas/refine", json=self._req()).status_code == 503
+
+    def test_an_empty_reply_is_a_503(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, "")
+        assert client.post("/api/personas/refine", json=self._req()).status_code == 503
+
+    def test_a_blank_instruction_is_rejected_before_the_llm(
+        self, client, personas_root, monkeypatch
+    ):
+        seen = _stub_completion(monkeypatch, REFINED_REPLY)
+        assert client.post(
+            "/api/personas/refine", json=self._req(instruction="")
+        ).status_code == 422
+        assert seen == []
+
+    def test_nothing_is_written_to_disk(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, REFINED_REPLY)
+        before = (personas_root / "Luna" / "prompt.md").read_text()
+        client.post("/api/personas/refine", json=self._req(name="Luna"))
+        assert (personas_root / "Luna" / "prompt.md").read_text() == before
+
+    def test_the_route_is_not_shadowed_by_the_name_routes(
+        self, client, personas_root, monkeypatch
+    ):
+        _stub_completion(monkeypatch, REFINED_REPLY)
+        assert client.post(
+            "/api/personas/refine", json=self._req()
+        ).status_code == 200

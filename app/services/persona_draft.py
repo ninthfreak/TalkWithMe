@@ -27,7 +27,7 @@ field.
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Tuple
 
 from app.config import LengthBias
@@ -428,6 +428,37 @@ class PersonaDraft:
 # Prompt construction
 # ---------------------------------------------------------------------------
 
+# Language shared by drafting and refining. Both are the same job under
+# different starting conditions, and the two failures below happen in both:
+# a free-text instruction read as a global intensity dial, and a prompt
+# written as an essay about the character rather than instructions to an
+# actor. Kept as constants so a fix to one path cannot miss the other.
+
+INDEPENDENCE_NOTE = (
+    "These settings are independent of one another and must not bleed together. A "
+    "coarse or profane register is about WORD CHOICE and nothing else: it does not "
+    "make a character hostile, impatient, uncooperative or bad at conversation. "
+    "Whether they escalate is Temperament, and nothing else. How this character "
+    "feels about any *particular* person is NOT set here at all — that comes out of "
+    "who they are and who they are talking to, so do not write them as uniformly "
+    "warm or uniformly hostile toward everyone."
+)
+
+WRITING_RULES = (
+    "Second person, addressed to the character (\"You interrupt when...\"). Every "
+    "sentence should say something the character does or does not do; cut anything "
+    "that is only description.\n\n"
+    "Write the prompt itself in the plainest language that will do the job. It is a "
+    "set of instructions to an actor, not an essay about a character, and not a "
+    "demonstration of the character's own vocabulary — an ornate character still "
+    "gets a plainly-written prompt."
+)
+
+
+def _anti_pattern_block() -> str:
+    return "\n".join(f"- Avoid {a}" for a in ANTI_PATTERNS)
+
+
 def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
     """The messages that ask the LLM for a persona.
 
@@ -441,7 +472,7 @@ def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
     # the model treat a setting as a suggestion.
     open_levers = [lv for lv in LEVERS if not lv.superseded_by]
     lever_block = "\n".join(f"- {lv.title}: {lv.hint}" for lv in open_levers)
-    anti_block = "\n".join(f"- Avoid {a}" for a in ANTI_PATTERNS)
+    anti_block = _anti_pattern_block()
 
     set_lines = [line for line in
                  (spec.instruction_for(d.key) for d in DIALS) if line]
@@ -465,7 +496,7 @@ def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
 HOW THIS CHARACTER SPEAKS AND ENGAGES
 {dial_block}
 
-These settings are independent of one another and must not bleed together. A coarse or profane register is about WORD CHOICE and nothing else: it does not make a character hostile, impatient, uncooperative or bad at conversation. Whether they escalate is Temperament, and nothing else. How this character feels about any *particular* person is NOT set here at all — that comes out of who they are and who they are talking to, so do not write them as uniformly warm or uniformly hostile toward everyone.
+{INDEPENDENCE_NOTE}
 
 WHO THEY ARE
 {spec.brief.strip()}
@@ -479,9 +510,7 @@ WHAT DOES NOT WORK, AND MUST NOT APPEAR IN YOUR OUTPUT
 {anti_block}
 
 WRITING THE SYSTEM PROMPT
-Second person, addressed to the character ("You interrupt when..."). Around {TARGET_PROMPT_WORDS} words. Every sentence should say something the character does or does not do; cut anything that is only description.
-
-Write the prompt itself in the plainest language that will do the job. It is a set of instructions to an actor, not an essay about a character, and not a demonstration of the character's own vocabulary — an ornate character still gets a plainly-written prompt.
+Around {TARGET_PROMPT_WORDS} words. {WRITING_RULES}
 
 Reply in exactly this format, with these labels, and nothing else:
 
@@ -498,6 +527,71 @@ SYSTEM_PROMPT:
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": "Write the character."},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Refining a persona that already exists
+# ---------------------------------------------------------------------------
+#
+# A different job from drafting, and the difference is conservation: the
+# character already works, and the ask is usually one axis of it. A model
+# handed a prompt and told to "make him warmer" will cheerfully rewrite
+# the whole thing in its own register and hand back a stranger — so the
+# instruction to leave everything else alone has to be as loud as the
+# change itself, and the notes have to say what was preserved.
+
+MAX_REFINE_INSTRUCTION = 1000
+
+
+def build_refine_prompt(current: PersonaDraft, instruction: str) -> List[dict]:
+    """The messages that ask the LLM to revise an existing persona.
+
+    ``current`` is what is in the editor form, not what is on disk: the
+    user is looking at the form, and refining anything else would revise a
+    persona they cannot see.
+    """
+    system = f"""You revise characters for a group chat. You are given one that already exists and one instruction about what to change. Make that change and leave everything else alone.
+
+THE CHARACTER AS IT STANDS
+Name: {current.name}
+Description: {current.description}
+Router hints: {current.router_hints}
+Reply length vs the room: {current.length_bias.value}
+System prompt:
+{current.system_prompt.strip()}
+
+THE CHANGE ASKED FOR
+{instruction.strip()}
+
+HOW TO MAKE IT
+Change what the instruction asks for and nothing else. Everything the instruction does not touch stays as it is, in the same words wherever those words still work — this is a revision, not a rewrite, and it must still be recognisably the same character afterwards.
+
+Do not change the name. Keep the description, router hints and reply length as they are unless the change makes them wrong.
+
+Read the instruction narrowly. A word about how they SPEAK changes their word choice and nothing else: asking for a coarser or blunter character does not make them hostile, impatient, uncooperative or bad at conversation, and asking for a warmer one does not make them agree with everybody. {INDEPENDENCE_NOTE}
+
+If the instruction is vague, apply it to the smallest part of the character it could reasonably mean, and say in your notes what you took it to mean.
+
+WHAT DOES NOT WORK, AND MUST NOT APPEAR IN YOUR OUTPUT
+{_anti_pattern_block()}
+
+WRITING THE SYSTEM PROMPT
+Keep it about as long as it already is unless the instruction asks for more or less. {WRITING_RULES}
+
+Reply in exactly this format, with these labels, and nothing else. Omit a label entirely if that field is unchanged:
+
+DESCRIPTION: <up to {MAX_DESCRIPTION} characters, shown in the room roster>
+ROUTER_HINTS: <comma-separated topics this character should be picked for>
+LENGTH_BIAS: <one of: much_shorter, shorter, match, longer, much_longer>
+NOTES:
+- <what you changed, and what you deliberately left alone>
+SYSTEM_PROMPT:
+<the revised prompt, second person, no name prefix, no quotes>"""
+
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": "Revise the character."},
     ]
 
 
@@ -551,27 +645,48 @@ def _parse_notes(block: str) -> List[str]:
     return notes
 
 
-def parse_draft(text: str) -> PersonaDraft:
-    """Turn a model reply into a draft, salvaging whatever is well formed."""
-    blocks = _split_blocks(text)
-    draft = PersonaDraft()
+def parse_draft(text: str, base: Optional[PersonaDraft] = None) -> PersonaDraft:
+    """Turn a model reply into a draft, salvaging whatever is well formed.
 
-    draft.name = _clean_one_line(blocks.get("NAME", ""), MAX_NAME)
-    # A slash makes the persona unreachable on /api/personas/{name}/...
-    draft.name = draft.name.replace("/", " ").replace("\\", " ").strip()
-    draft.description = _clean_one_line(blocks.get("DESCRIPTION", ""), MAX_DESCRIPTION)
-    draft.router_hints = _clean_one_line(blocks.get("ROUTER_HINTS", ""), MAX_ROUTER_HINTS)
+    ``base`` is what an omitted or empty block falls back to. Drafting
+    passes nothing and gets the field defaults; refining passes the
+    persona as it stands, which is what makes "omit a label if that field
+    is unchanged" safe to ask for — without it a reply that sensibly left
+    DESCRIPTION out would blank the description, and a missing
+    LENGTH_BIAS would quietly reset a laconic persona to "match".
+    """
+    blocks = _split_blocks(text)
+    draft = replace(base) if base is not None else PersonaDraft()
+    # Notes are about this reply, never inherited from the previous one.
     draft.notes = _parse_notes(blocks.get("NOTES", ""))
 
+    name = _clean_one_line(blocks.get("NAME", ""), MAX_NAME)
+    # A slash makes the persona unreachable on /api/personas/{name}/...
+    name = name.replace("/", " ").replace("\\", " ").strip()
+    if name:
+        draft.name = name
+
+    description = _clean_one_line(blocks.get("DESCRIPTION", ""), MAX_DESCRIPTION)
+    if description:
+        draft.description = description
+
+    router_hints = _clean_one_line(blocks.get("ROUTER_HINTS", ""), MAX_ROUTER_HINTS)
+    if router_hints:
+        draft.router_hints = router_hints
+
     prompt = blocks.get("SYSTEM_PROMPT", "").strip().strip("`").strip()
-    draft.system_prompt = prompt[:MAX_SYSTEM_PROMPT]
+    if prompt:
+        draft.system_prompt = prompt[:MAX_SYSTEM_PROMPT]
 
     raw_bias = _clean_one_line(blocks.get("LENGTH_BIAS", ""), 32).lower()
-    try:
-        draft.length_bias = LengthBias(raw_bias)
-    except ValueError:
-        if raw_bias:
-            logger.info("Draft returned an unusable length_bias %r; using 'match'", raw_bias)
+    if raw_bias:
+        try:
+            draft.length_bias = LengthBias(raw_bias)
+        except ValueError:
+            logger.info(
+                "Draft returned an unusable length_bias %r; keeping %r",
+                raw_bias, draft.length_bias.value,
+            )
 
     colour = _clean_one_line(blocks.get("AVATAR_COLOR", ""), 7)
     if _HEX_RE.match(colour):

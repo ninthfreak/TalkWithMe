@@ -553,6 +553,32 @@ often doesn't.
 
 Nothing is saved until you press Save. The draft lands in the form to be argued with.
 
+## Refining a persona you already have
+
+**Refine with AI…** sits beside **Draft with AI…** when you are editing a saved
+persona. It takes the character whole and one sentence about what should change —
+"less nautical jargon, and he should let an argument go instead of pressing it" — and
+gives back a revision.
+
+The risk here is the opposite of drafting's. A draft fails by having no shape; a
+refinement fails by losing a shape that already worked, because a model handed a prompt
+and one instruction will happily rewrite the whole thing in its own register and hand
+back a stranger. So the instruction to leave everything else alone is as loud in the
+prompt as the change itself, the model is asked to omit any field it did not change
+(anything omitted keeps its current value rather than being blanked), and **What
+changed** reports what it kept as well as what it altered.
+
+A vague instruction is read narrowly — applied to the smallest part of the character it
+could reasonably mean, with the reading stated in the notes — and the same
+independence rule the dials use applies here too: asking for a coarser character changes
+their word choice and does not make them hostile.
+
+**Before and after** asks the same question of the persona as it stands and of the
+revision, side by side. That is the check worth running every time: it shows whether the
+change is the one you asked for, and whether anything else moved with it.
+
+The name and the avatar colour are never touched. Nothing is saved until you press Save.
+
 ## Keeping personas in their own voice
 
 Three things personas do in a group chat that they should not:

@@ -162,4 +162,5 @@ async def index(request: Request):
         "persona_dial_groups": persona_draft.DIAL_GROUPS,
         "persona_details": persona_draft.DETAILS,
         "persona_detail_max": persona_draft.MAX_DETAIL_CHARS,
+        "persona_refine_max": persona_draft.MAX_REFINE_INSTRUCTION,
     })

@@ -8,12 +8,15 @@ value, an invented enum member.
 
 import pytest
 
+from dataclasses import replace
+
 from app.config import LengthBias
 from app.services import persona_draft
 from app.services.persona_draft import (
     PersonaDraft,
     PersonaSpec,
     build_draft_prompt,
+    build_refine_prompt,
     critique,
     parse_draft,
 )
@@ -247,6 +250,105 @@ class TestPersonaSpec:
         s = spec(details={"wants": "a\nb " + "x" * 1000})
         assert len(s.details["wants"]) <= persona_draft.MAX_DETAIL_CHARS
         assert "\n" not in s.details["wants"]
+
+
+class TestSeededParsing:
+    """Refining parses over the persona as it stands, not over nothing."""
+
+    CURRENT = PersonaDraft(
+        name="Rennick",
+        description="Harbourmaster",
+        system_prompt="You run the harbour.",
+        router_hints="boats, cargo",
+        length_bias=LengthBias.SHORTER,
+        avatar_color="#2E7D32",
+    )
+
+    def test_an_omitted_field_keeps_its_current_value(self):
+        # The refine prompt asks the model to omit unchanged fields, which
+        # is only safe if omitting one changes nothing.
+        out = parse_draft("SYSTEM_PROMPT:\nYou run the harbour and you swear.",
+                          base=self.CURRENT)
+        assert out.description == "Harbourmaster"
+        assert out.router_hints == "boats, cargo"
+        assert out.length_bias is LengthBias.SHORTER
+        assert out.name == "Rennick"
+        assert out.system_prompt.endswith("you swear.")
+
+    def test_an_empty_block_is_not_a_deletion(self):
+        # Models emit "DESCRIPTION:" with nothing after it; that is a
+        # non-answer, not an instruction to blank the field.
+        out = parse_draft("DESCRIPTION:\nSYSTEM_PROMPT:\nYou run it.", base=self.CURRENT)
+        assert out.description == "Harbourmaster"
+
+    def test_an_unusable_length_bias_keeps_the_current_one(self):
+        out = parse_draft("LENGTH_BIAS: terse\nSYSTEM_PROMPT:\nYou run it.",
+                          base=self.CURRENT)
+        assert out.length_bias is LengthBias.SHORTER
+
+    def test_a_changed_field_is_taken(self):
+        out = parse_draft("DESCRIPTION: Harbourmaster, coarse\nLENGTH_BIAS: longer\n"
+                          "SYSTEM_PROMPT:\nYou run it.", base=self.CURRENT)
+        assert out.description == "Harbourmaster, coarse"
+        assert out.length_bias is LengthBias.LONGER
+
+    def test_notes_are_never_inherited(self):
+        # The notes describe the reply that produced them.
+        base = replace(self.CURRENT, notes=["from a previous round"])
+        out = parse_draft("SYSTEM_PROMPT:\nYou run it.", base=base)
+        assert out.notes == []
+
+    def test_the_base_is_not_mutated(self):
+        before = replace(self.CURRENT)
+        parse_draft("NAME: Someone\nSYSTEM_PROMPT:\np", base=self.CURRENT)
+        assert self.CURRENT == before
+
+
+class TestRefinePrompt:
+    CURRENT = TestSeededParsing.CURRENT
+
+    def system(self, instruction="make him coarser"):
+        return build_refine_prompt(self.CURRENT, instruction)[0]["content"]
+
+    def test_the_whole_persona_is_sent(self):
+        system = self.system()
+        assert "You run the harbour." in system
+        assert "Rennick" in system
+        assert "Harbourmaster" in system
+        assert "boats, cargo" in system
+        assert "shorter" in system
+
+    def test_the_instruction_is_sent(self):
+        assert "make him coarser" in self.system()
+
+    def test_conservation_is_stated_as_loudly_as_the_change(self):
+        # The failure mode: a model handed a prompt and one instruction
+        # rewrites the whole thing in its own register.
+        system = self.system()
+        assert "nothing else" in system
+        assert "revision, not a rewrite" in system
+        assert "same character" in system
+
+    def test_a_vague_instruction_is_read_narrowly(self):
+        assert "smallest part" in self.system("make him better")
+
+    def test_the_independence_note_is_repeated_here(self):
+        # A free-text instruction is the same global-dial trap the dials
+        # exist to remove: "make him crude" must not make him hostile.
+        system = self.system("make him crude")
+        assert "does not make a character hostile" in system
+        assert "word choice and nothing else" in system.lower()
+
+    def test_the_name_is_not_up_for_revision(self):
+        system = self.system()
+        assert "Do not change the name" in system
+        assert "NAME:" not in system
+
+    def test_unchanged_fields_may_be_omitted(self):
+        assert "Omit a label entirely if that field is unchanged" in self.system()
+
+    def test_the_shared_writing_rules_are_used(self):
+        assert persona_draft.WRITING_RULES in self.system()
 
 
 class TestCritique:

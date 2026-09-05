@@ -2,11 +2,13 @@
 
 from typing import Dict, List, Optional, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import LengthBias, TypicalLength
 
 from app.config import DEFAULT_MEMORY_SIZE, MAX_MEMORY_SIZE
+
+from app.services.persona_draft import MAX_REFINE_INSTRUCTION
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +88,38 @@ class PersonaDraftResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class PersonaRefineRequest(BaseModel):
+    """An existing persona, plus a sentence about what to change.
+
+    The persona is sent whole rather than looked up by name: the user is
+    looking at the editor form, and refining what is on disk would revise
+    a version they cannot see and would throw away edits they have made
+    but not yet saved.
+    """
+    name: str = Field(..., min_length=1, max_length=25)
+    system_prompt: str = Field(..., min_length=1, max_length=8192)
+    description: str = Field(default="", max_length=30)
+    router_hints: str = Field(default="", max_length=256)
+    length_bias: LengthBias = LengthBias.MATCH
+    instruction: str = Field(..., min_length=1, max_length=MAX_REFINE_INSTRUCTION)
+
+
+class PersonaRefineResponse(BaseModel):
+    """A revised persona: only the fields a refinement is allowed to change.
+
+    No name and no avatar colour on purpose. A refinement that renamed the
+    character would be a different character, and one that repainted the
+    avatar would be a surprise nobody asked for.
+    """
+    description: str
+    system_prompt: str
+    router_hints: str
+    length_bias: LengthBias
+    # What the model changed, and what it says it deliberately left alone.
+    notes: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class PersonaPreviewRequest(BaseModel):
     """Try an unsaved draft against a question before committing to it."""
     name: str = Field(..., min_length=1, max_length=25)
@@ -93,8 +127,23 @@ class PersonaPreviewRequest(BaseModel):
     description: str = Field(default="", max_length=30)
     length_bias: LengthBias = LengthBias.MATCH
     question: str = Field(..., min_length=1, max_length=2000)
-    # An existing persona to answer the same question, for comparison.
+    # An existing persona to answer the same question, for comparison...
     compare_with: Optional[str] = Field(default=None, max_length=25)
+    # ...or an unsaved prompt, which is how a refinement shows a before
+    # and after of the same character. Exactly one of the two, or neither.
+    compare_prompt: Optional[str] = Field(default=None, max_length=8192)
+    compare_length_bias: LengthBias = LengthBias.MATCH
+    # What to call each side. Both default to the persona's own name.
+    label: str = Field(default="", max_length=40)
+    compare_label: str = Field(default="", max_length=40)
+
+    @model_validator(mode="after")
+    def _one_comparison_at_most(self):
+        if self.compare_with and self.compare_prompt:
+            raise ValueError(
+                "Compare against a saved persona or an unsaved prompt, not both"
+            )
+        return self
 
 
 class PersonaPreviewReply(BaseModel):

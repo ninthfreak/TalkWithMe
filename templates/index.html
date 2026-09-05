@@ -113,7 +113,8 @@
                 <div id="pe-form-error" class="pe-form-error hidden"></div>
                 <div class="pf-draft-bar">
                     <button type="button" id="pf-btn-draft" class="btn-secondary">&#10022; Draft with AI&hellip;</button>
-                    <span class="field-hint">Describe the character in a line and let the LLM fill the fields, built on what actually makes a voice distinct.</span>
+                    <button type="button" id="pf-btn-refine" class="btn-secondary hidden">&#10022; Refine with AI&hellip;</button>
+                    <span class="field-hint">Describe the character in a line and let the LLM fill the fields, built on what actually makes a voice distinct. <span id="pf-refine-hint" class="hidden">Refine changes one thing about the character you already have and leaves the rest alone.</span></span>
                 </div>
                 <form id="pe-form" novalidate>
                     <div class="form-row">
@@ -295,6 +296,64 @@
                 <button type="button" id="pd-btn-cancel" class="btn-secondary">Cancel</button>
                 <button type="button" id="pd-btn-draft" class="btn-accent">Draft it</button>
                 <button type="button" id="pd-btn-use" class="btn-accent hidden">Use this draft</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Refine a saved persona: one instruction, then a before/after -->
+    <div id="pr-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pr-title">
+        <div class="modal-box modal-box-wide">
+            <div class="modal-header">
+                <h2 id="pr-title">Refine a persona</h2>
+                <button id="pr-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
+            </div>
+            <div class="modal-intro field-hint">Say what should change &mdash; one thing, in a sentence or two. Everything you do not mention is meant to survive unchanged, and the notes will say what did.</div>
+            <div id="pr-error" class="pe-form-error hidden"></div>
+            <div class="settings-body">
+                <details id="pr-current" class="pd-levers">
+                    <summary>The persona as it stands</summary>
+                    <pre id="pr-current-prompt" class="pr-current-prompt"></pre>
+                </details>
+
+                <div class="form-row">
+                    <label for="pr-instruction">What should change <span class="required">*</span></label>
+                    <textarea id="pr-instruction" maxlength="{{ persona_refine_max }}" rows="3" placeholder="Less nautical jargon, and he should let an argument go instead of pressing it"></textarea>
+                    <span class="field-hint">Works on what is in the form right now, including edits you have not saved.</span>
+                </div>
+
+                <div id="pr-result" class="hidden">
+                    <div class="form-row">
+                        <span class="pd-section-label">What changed</span>
+                        <ul id="pr-notes" class="pd-notes"></ul>
+                    </div>
+                    <div class="form-row hidden" id="pr-warnings-row">
+                        <span class="pd-section-label">Worth a look</span>
+                        <ul id="pr-warnings" class="pd-notes pd-warnings"></ul>
+                    </div>
+                    <div class="form-row">
+                        <span class="pd-section-label">The revised prompt</span>
+                        <textarea id="pr-prompt" maxlength="8192" rows="8"></textarea>
+                        <span class="field-hint">Edit it here or in the form afterwards &mdash; either way nothing is saved until you press Save.</span>
+                    </div>
+
+                    <fieldset class="settings-section">
+                        <legend>Before and after</legend>
+                        <div class="form-row">
+                            <label for="pr-question">Ask them something</label>
+                            <input id="pr-question" type="text" maxlength="2000" value="Is the boat seaworthy?">
+                            <span class="field-hint">The same question answered by the persona you have and by the revision, so you can see whether the change is the one you asked for &mdash; and whether anything else moved with it.</span>
+                        </div>
+                        <div class="form-row">
+                            <button type="button" id="pr-btn-try" class="btn-secondary">Run both</button>
+                        </div>
+                        <div id="pr-replies" class="pd-replies hidden"></div>
+                    </fieldset>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="button" id="pr-btn-cancel" class="btn-secondary">Cancel</button>
+                <button type="button" id="pr-btn-refine" class="btn-accent">Refine it</button>
+                <button type="button" id="pr-btn-use" class="btn-accent hidden">Use this revision</button>
             </div>
         </div>
     </div>
@@ -660,6 +719,7 @@
     <script src="/static/chat.js"></script>
     <script src="/static/persona.js"></script>
     <script src="/static/persona-draft.js"></script>
+    <script src="/static/persona-refine.js"></script>
     <script src="/static/chatrooms.js"></script>
     <script src="/static/settings.js"></script>
     <script src="/static/gen-settings.js"></script>

@@ -118,6 +118,8 @@ const speakAsOverlay = document.getElementById("speak-as-overlay");
 const saTextEl = document.getElementById("sa-text");
 const pfMemorySize = document.getElementById("pf-memory-size");
 const pfMemoriesClearBtn = document.getElementById("pf-memories-clear");
+const pfRefineBtn = document.getElementById("pf-btn-refine");
+const pfRefineHint = document.getElementById("pf-refine-hint");
 
 // Persona drafting (used by persona-draft.js)
 const pdOverlay = document.getElementById("pd-overlay");
@@ -138,6 +140,23 @@ const pdRepliesEl = document.getElementById("pd-replies");
 const pdDraftBtn = document.getElementById("pd-btn-draft");
 const pdTryBtn = document.getElementById("pd-btn-try");
 const pdUseBtn = document.getElementById("pd-btn-use");
+
+// Persona refining (used by persona-refine.js)
+const prOverlay = document.getElementById("pr-overlay");
+const prTitle = document.getElementById("pr-title");
+const prCurrentPrompt = document.getElementById("pr-current-prompt");
+const prInstruction = document.getElementById("pr-instruction");
+const prErrorEl = document.getElementById("pr-error");
+const prResult = document.getElementById("pr-result");
+const prNotesEl = document.getElementById("pr-notes");
+const prWarningsEl = document.getElementById("pr-warnings");
+const prWarningsRow = document.getElementById("pr-warnings-row");
+const prPromptEl = document.getElementById("pr-prompt");
+const prQuestionEl = document.getElementById("pr-question");
+const prRepliesEl = document.getElementById("pr-replies");
+const prRefineBtn = document.getElementById("pr-btn-refine");
+const prTryBtn = document.getElementById("pr-btn-try");
+const prUseBtn = document.getElementById("pr-btn-use");
 
 // Persona editor editing state
 let peEditingName = null;

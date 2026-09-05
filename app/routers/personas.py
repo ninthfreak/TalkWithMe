@@ -42,6 +42,8 @@ from app.models import (
     PersonaPreviewReply,
     PersonaPreviewRequest,
     PersonaPreviewResponse,
+    PersonaRefineRequest,
+    PersonaRefineResponse,
     PersonaResponse,
 )
 from app.services import persona_draft, persona_store
@@ -643,6 +645,62 @@ async def draft_persona(req: PersonaDraftRequest):
     )
 
 
+@router.post("/refine", response_model=PersonaRefineResponse)
+async def refine_persona(req: PersonaRefineRequest):
+    """Revise an existing persona from one instruction about what to change.
+
+    The inverse of drafting: there the risk is a character with no shape,
+    here it is losing a shape that already works. So the model is given
+    the persona whole, told to change only what was asked and to keep the
+    rest word for word, and its reply is parsed *over* the current values
+    — an omitted block leaves that field exactly as it was rather than
+    blanking it.
+    """
+    settings = get_settings()
+    current = persona_draft.PersonaDraft(
+        name=req.name,
+        description=req.description,
+        system_prompt=req.system_prompt,
+        router_hints=req.router_hints,
+        length_bias=req.length_bias,
+    )
+
+    text = await chat_completion(
+        persona_draft.build_refine_prompt(current, req.instruction),
+        max_tokens=_DRAFT_MAX_TOKENS,
+        temperature=settings.llm.temperature,
+        timeout=PROSE_TIMEOUT,
+    )
+    if not text.strip():
+        raise HTTPException(
+            status_code=503,
+            detail="The LLM returned nothing. Is the server running?",
+        )
+
+    revised = persona_draft.parse_draft(text, base=current)
+    # A reply that changed nothing at all is a failure worth naming: the
+    # user asked for something and would otherwise see an unchanged form
+    # and no explanation.
+    if revised.system_prompt.strip() == current.system_prompt.strip() and not revised.notes:
+        logger.info("Refinement returned nothing usable: %.400s", text)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The revision came back in a shape this could not read. Try again, "
+                "or say more plainly what should change."
+            ),
+        )
+
+    return PersonaRefineResponse(
+        description=revised.description,
+        system_prompt=revised.system_prompt,
+        router_hints=revised.router_hints,
+        length_bias=revised.length_bias,
+        notes=revised.notes,
+        warnings=persona_draft.critique(revised),
+    )
+
+
 async def _preview_reply(persona: Persona, question: str) -> str:
     """One reply from *persona*, built exactly as a real turn would be.
 
@@ -684,6 +742,8 @@ async def preview_persona(req: PersonaPreviewRequest):
     The comparison is the point. A draft read on its own always sounds
     plausible; read beside an existing persona answering the same
     question, "these two are the same character" is obvious at a glance.
+    The comparison side is either a saved persona (drafting) or an unsaved
+    prompt (refining, where the pair is one character before and after).
     """
     draft = Persona(
         name=_validate_name(req.name),
@@ -694,6 +754,7 @@ async def preview_persona(req: PersonaPreviewRequest):
     )
 
     other: Optional[Persona] = None
+    other_label = ""
     if req.compare_with:
         other = next(
             (p for p in get_personas().personas if p.name == req.compare_with), None
@@ -702,6 +763,17 @@ async def preview_persona(req: PersonaPreviewRequest):
             raise HTTPException(
                 status_code=404, detail=f"Persona '{req.compare_with}' not found"
             )
+        other_label = req.compare_label.strip() or other.name
+    elif req.compare_prompt and req.compare_prompt.strip():
+        # A before-and-after of one character. Same name as the other
+        # side, deliberately: the room preamble is built from the persona,
+        # so a different name would make the two prompts differ in a
+        # second way and the comparison would stop isolating the change.
+        other = draft.model_copy(update={
+            "system_prompt": req.compare_prompt,
+            "length_bias": req.compare_length_bias,
+        })
+        other_label = req.compare_label.strip() or f"{draft.name} (before)"
 
     draft_text = await _preview_reply(draft, req.question)
     if not draft_text.strip():
@@ -714,9 +786,11 @@ async def preview_persona(req: PersonaPreviewRequest):
     if other is not None:
         other_text = await _preview_reply(other, req.question)
         if other_text.strip():
-            comparison = PersonaPreviewReply(persona=other.name, text=other_text.strip())
+            comparison = PersonaPreviewReply(persona=other_label, text=other_text.strip())
 
     return PersonaPreviewResponse(
-        draft=PersonaPreviewReply(persona=draft.name, text=draft_text.strip()),
+        draft=PersonaPreviewReply(
+            persona=req.label.strip() or draft.name, text=draft_text.strip()
+        ),
         comparison=comparison,
     )

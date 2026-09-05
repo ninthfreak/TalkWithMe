@@ -1682,6 +1682,33 @@ html, body {
     margin-top: 12px;
 }
 
+/* The persona as it stands, shown read-only above the instruction box.
+   Wraps rather than scrolls sideways: it is the thing being changed and
+   has to be readable at a glance. */
+.pr-current-prompt {
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* The result blocks sit inside a plain div, so they do not inherit the
+   modal body's gap and would otherwise run together. */
+#pd-result,
+#pr-result {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
 .pd-section-label {
     font-weight: 600;
     font-size: 0.85rem;
