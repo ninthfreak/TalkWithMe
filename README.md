@@ -751,9 +751,17 @@ dump above says which:
    what it reads. The preamble now tells each persona in as many words that the others' moods and
    obsessions are theirs alone — but this is the one route that no instruction removes entirely,
    so a strong voice of your own (see the section above) is what actually holds the line.
+
+   Until v6.0 the transcript could also *follow you into another room*: history is a single list
+   in the server and rooms are not, so a turn taken in a room the frontend had not explicitly
+   loaded was built on whichever room was loaded last. Switching rooms in the UI loaded the new
+   room and hid it; a second tab, or a message sent in the moment between switching and the
+   history arriving, did not. The server now guarantees that the history it is holding belongs to
+   the room the turn is being taken in.
 2. **The adopted player.** "Playing as…" puts the player's own prompt in front of every persona,
-   in every room. It is quoted and capped so it reads as a note about somebody else, but if the
-   player character is the loudest thing in the room, consider whether you want to be playing them.
+   in every room — and a persona prompt is written in the second person, so until v6.0 it read as
+   a set of instructions addressed to whoever was reading it. It is now quoted, capped and framed
+   as a note about somebody else.
 3. **Saved memories.** A persona with tool calls enabled can save a memory during a group
    conversation, and a memory of what somebody *else* is like comes back in every later
    conversation as though it were true of them. The tool is told not to, but anything already
@@ -764,8 +772,10 @@ dump above says which:
    prompt. Descriptions are short and belong to the roster line; the character itself belongs in
    the system prompt.
 
-Only the first of these lives in the room, which is why the other three can follow a persona into
-a brand new room with nobody else in it.
+Only the first of these belongs to the room, which is why the rest can follow a persona into a
+brand new room with nobody else in it — and why "it is still happening in a fresh room" is the
+most useful thing you can notice, since it rules the transcript out and names the culprit as one
+of the other three.
 
 ### Notes and gotchas
 

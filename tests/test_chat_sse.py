@@ -1079,6 +1079,76 @@ def _played_room(monkeypatch, *, require=False, playing="Kira", player_prompt=No
     ])
 
 
+class TestOneRoomsHistoryStaysInIt:
+    """A turn is built on the history of the room it is taken in.
+
+    History is one in-memory list and rooms are not, so the reading side
+    used to point at whichever room was loaded last. The frontend calls
+    GET /api/session/load-room/{room} when you pick a room from the
+    dropdown, which hid this — but every path that misses it (a second tab
+    on this single global session, a room deleted out from under the
+    selector, a message sent between switching and the history arriving)
+    put one room's conversation into another room's prompt, and the
+    personas there carried on the mood of a conversation the user thought
+    they had left.
+    """
+
+    def _two_rooms(self, monkeypatch):
+        _patch_chatrooms(monkeypatch, [
+            ChatRoom(name="RoomA", persona_names=["Alex", "Luna"]),
+            ChatRoom(name="Solo", persona_names=["Alex"]),
+        ])
+
+    def test_a_new_room_does_not_inherit_the_last_ones_transcript(
+        self, client, monkeypatch
+    ):
+        self._two_rooms(monkeypatch)
+        calls = _capture(monkeypatch, tokens=("Everything", " bores", " me."))
+        _chat(client, message="What about the harbour?", who_answers="Alex",
+              chat_room="RoomA")
+
+        # No load-room in between, which is the whole point.
+        calls.clear()
+        _chat(client, message="Hello", who_answers="Alex", chat_room="Solo")
+
+        turns = [m["content"] for m in calls[0]["messages"] if m["role"] != "system"]
+        assert turns == ["[User]: Hello"]
+
+    def test_switching_back_finds_the_first_room_where_it_was_left(
+        self, client, monkeypatch
+    ):
+        # The history follows the room rather than being thrown away: the
+        # invariant is "the loaded history belongs to this room", not
+        # "start fresh whenever the room changes".
+        self._two_rooms(monkeypatch)
+        calls = _capture(monkeypatch)
+        _chat(client, message="What about the harbour?", who_answers="Alex",
+              chat_room="RoomA")
+        _chat(client, message="Hello", who_answers="Alex", chat_room="Solo")
+
+        calls.clear()
+        _chat(client, message="Still there?", who_answers="Alex", chat_room="RoomA")
+
+        turns = [m["content"] for m in calls[0]["messages"] if m["role"] != "system"]
+        assert "[User]: What about the harbour?" in turns
+        assert "[User]: Hello" not in turns
+
+    def test_speaking_as_a_persona_switches_rooms_the_same_way(
+        self, client, monkeypatch
+    ):
+        # /api/chat/speak takes the same door and needs the same guarantee.
+        self._two_rooms(monkeypatch)
+        _capture(monkeypatch)
+        _chat(client, message="What about the harbour?", who_answers="Alex",
+              chat_room="RoomA")
+
+        resp = client.post("/api/chat/speak", json={
+            "persona": "Alex", "text": "New room, new subject.", "chat_room": "Solo",
+        })
+        assert resp.status_code == 200
+        assert [m.content for m in session.history] == ["New room, new subject."]
+
+
 class TestPersonasDoNotAbsorbEachOther:
     """One character's traits must not become everyone's.
 

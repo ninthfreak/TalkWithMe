@@ -23,8 +23,28 @@ class TestRoomTracking:
         assert manager.current_room == "TNG"
 
     def test_set_current_room_same_room_is_noop(self, manager):
+        manager.add_user_message("hello", "uid-1")
         manager.set_current_room("default")
         assert manager.current_room == "default"
+        # Not a reload: staying put must not disturb what is in hand.
+        assert len(manager.history) == 1
+
+    def test_switching_rooms_brings_that_rooms_history_with_it(self, manager):
+        # History is one list and rooms are not, so a tracker that moved
+        # without the history left the next turn reading the room the user
+        # had just left — one room's conversation in another's prompt.
+        manager.add_user_message("about the harbour", "uid-1")
+        manager.set_current_room("TNG")
+
+        assert manager.history == []
+
+    def test_switching_back_finds_the_room_as_it_was_left(self, manager):
+        manager.add_user_message("about the harbour", "uid-1")
+        manager.set_current_room("TNG")
+        manager.add_user_message("somewhere else", "uid-2")
+        manager.set_current_room("default")
+
+        assert [m.content for m in manager.history] == ["about the harbour"]
 
 
 class TestActivePersonas:

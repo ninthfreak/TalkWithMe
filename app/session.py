@@ -174,10 +174,24 @@ class SessionManager:
         return self._current_room
 
     def set_current_room(self, room_name: str):
-        """Switch the active chat room.
+        """Switch the active chat room, bringing that room's history with it.
 
-        Messages are persisted individually as they arrive, so no bulk
-        flush is needed here. Just updates the room tracker.
+        This used to only move the tracker, on the reasoning that messages
+        are persisted individually so nothing needed flushing. That was
+        half the story: history is a single in-memory list and rooms are
+        not, so the *reading* side was left pointing at whatever room was
+        loaded last. A turn taken in a room the frontend had not called
+        GET /api/session/load-room/{room} for was therefore built on the
+        previous room's transcript — one room's conversation appearing in
+        another's prompt, invisibly, with the personas dutifully carrying
+        on the mood of a conversation the user thought they had left.
+
+        The frontend does call load-room when you pick a room from the
+        dropdown, which is why this survived: every path that misses it is
+        a side door (a second tab or device on this single global session,
+        a room deleted out from under the selector, a message sent in the
+        moment between switching and the history arriving). The invariant
+        belongs on this side, where no caller can skip it.
 
         The name is validated because it becomes a directory name — see
         persistence.safe_room_name. Raises UnsafeRoomName.
@@ -185,7 +199,7 @@ class SessionManager:
         room_name = persistence.safe_room_name(room_name)
         if room_name == self._current_room:
             return
-        self._current_room = room_name
+        self.load_room(room_name)
 
     def reset(self):
         """Wipe history, clear persistence for current room, and reset personas.
