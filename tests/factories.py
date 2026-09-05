@@ -268,25 +268,38 @@ class FakeStreamResponse:
         for line in self._lines:
             yield line
 
+    async def aread(self):
+        """Drain the body, as the real response requires before reading it."""
+        return b""
+
 
 class FakeLLMClient:
     """httpx.AsyncClient stand-in for the LLM endpoints.
 
     `lines` is the list of SSE lines served for every streamed request;
-    `payloads` records the JSON payload of each request. For non-streaming
-    calls, pass `post_response` (used by chat_completion).
+    `payloads` records the JSON payload of each request and `urls` the URL
+    it went to — which endpoint was called is the whole difference between
+    the two prompt formats. For non-streaming calls, pass `post_response`
+    (used by chat_completion).
+
+    `stream_status_by_path` maps a URL fragment to a status code, so a
+    backend that has /v1/chat/completions but not /v1/completions can be
+    stood up: {"/v1/completions": 404}.
     """
 
     def __init__(
         self,
         lines: List[str],
         post_response: Optional[httpx.Response] = None,
+        stream_status_by_path: Optional[dict] = None,
         *args,
         **kwargs,
     ):
         self.lines = lines
         self.post_response = post_response
+        self.stream_status_by_path = stream_status_by_path or {}
         self.payloads: List[dict] = []
+        self.urls: List[str] = []
 
     async def __aenter__(self):
         return self
@@ -296,6 +309,10 @@ class FakeLLMClient:
 
     def stream(self, method, url, json=None):
         self.payloads.append(json)
+        self.urls.append(url)
+        for fragment, status in self.stream_status_by_path.items():
+            if url.endswith(fragment):
+                return FakeStreamResponse([], status_code=status)
         return FakeStreamResponse(self.lines)
 
     async def post(self, url, json=None):

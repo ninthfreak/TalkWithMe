@@ -631,7 +631,14 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
                 "streaming path taken; NO tools of any kind supplied to LLM",
                 persona_name,
             )
-            stream = stream_chat(messages, max_tokens=max_tokens, stop=stop)
+            # persona_name is what lets the transcript format prime the
+            # prompt with this persona's own tag. The tools path above
+            # cannot take it: tool calling is a chat-endpoint feature with
+            # no completion-endpoint equivalent, so a persona with tools
+            # enabled always speaks through the instruct template.
+            stream = stream_chat(
+                messages, max_tokens=max_tokens, stop=stop, persona_name=persona_name
+            )
 
         full_text = ""
         try:

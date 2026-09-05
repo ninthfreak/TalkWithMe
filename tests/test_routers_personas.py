@@ -809,9 +809,11 @@ def _stub_completion(monkeypatch, *replies):
     seen = []
     queue = list(replies)
 
-    async def fake(messages, max_tokens=64, temperature=None, timeout=15.0):
+    async def fake(messages, max_tokens=64, temperature=None, timeout=15.0,
+                   persona_name=None):
         seen.append({"messages": messages, "max_tokens": max_tokens,
-                     "temperature": temperature, "timeout": timeout})
+                     "temperature": temperature, "timeout": timeout,
+                     "persona_name": persona_name})
         return queue.pop(0) if queue else ""
 
     monkeypatch.setattr(personas_router, "chat_completion", fake)
@@ -1020,6 +1022,16 @@ class TestPreviewPersona:
         assert client.post(
             "/api/personas/preview", json=self._req(name="har/bour")
         ).status_code == 422
+
+    def test_both_sides_are_auditioned_as_the_room_would_play_them(
+        self, client, personas_root, monkeypatch
+    ):
+        # A persona previewed through the instruct template and then run
+        # as a transcript is a preview of a different character.
+        seen = _stub_completion(monkeypatch, "a", "b")
+        client.post("/api/personas/preview", json=self._req(compare_with="Luna"))
+
+        assert [c["persona_name"] for c in seen] == ["Rennick", "Luna"]
 
     def test_an_unsaved_prompt_can_be_the_comparison(self, client, personas_root, monkeypatch):
         # How a refinement shows a before and after of one character.

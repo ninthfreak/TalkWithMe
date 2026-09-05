@@ -107,6 +107,21 @@ Startup decision matrix in `app/config.py::load_personas()` (lazy-imports `perso
 
 **Persona list ordering**: Anywhere a list of personas is shown to the user (the sidebar, the persona editor modal, the persona picker modal, and anything added in the future), it must be sorted alphabetically and case-insensitively using `comparePersonasByName()` from `utils.js`. The shared `personas` global is pre-sorted in `loadPersonas()` (`app.js`), but each render function sorts its own input list rather than trusting the caller's order. **Do not** rely on `GET /api/personas` returning any particular order — the backend intentionally returns personas in raw directory/creation order; sorting is a display concern and belongs in the frontend only.
 
+## Two prompt formats
+
+`llm.prompt_format` (`PromptFormat.TRANSCRIPT` | `CHAT`, default TRANSCRIPT) decides how a persona's turn is put to the model, and it is the largest single lever on how the dialogue reads.
+
+**TRANSCRIPT** renders the whole message list flat with `render_transcript()` and posts it to `/v1/completions`, ending on the speaker's own tag with nothing after it — `[Alex]:`. That empty line is the mechanism: the model continues a conversation instead of answering as an assistant. **CHAT** posts roles to `/v1/chat/completions`, where the backend applies the model's instruct template — a request for a complete, resolved answer, applied *after* the persona prompt and closer to the generation point, which is why persona writing alone never fixed the register.
+
+Details that matter when editing this:
+
+- `render_transcript()` re-tags the responding persona's own past turns (they are the `assistant` role, so they arrive untagged, and an untagged line in a script has no speaker). Turns are joined with a **single** newline — blank lines between them read as separate blocks of writing rather than as a conversation — and the system message becomes a header above them.
+- The prompt ends with no trailing space after the colon; the model supplies its own leading space and `_stream_transcript()` strips it from the first token, so bubble, TTS, persistence and the reply guard all see the same text.
+- Fallback is checked **before any token is yielded** (`CompletionEndpointMissing` is raised from the status check), which is what makes it safe: a reply is never half one format and half the other. A backend without the endpoint warns once per turn and serves it through CHAT.
+- The tools path (`stream_chat_with_tools`) has no transcript equivalent — tool calling is a chat-endpoint feature — so a persona with `allow_tool_calls` always takes CHAT. `stream_chat()` only renders a transcript when the caller passes `persona_name`, which is also why the router and suggestion calls (no single speaker to prime) stay on CHAT.
+- `chat_completion(persona_name=...)` does the same for the non-streaming path, so `POST /api/personas/preview` auditions a persona the way the room will play it. A persona previewed through the instruct template and then run as a transcript is a preview of a different character — the same reasoning as building the real room preamble there.
+- Everything else is identical between the two: same preamble, same containment rules, same stop sequences (they already cover `\n[Name]:` and `\nName:`, which is exactly what a flat transcript needs), same reply guard.
+
 ## Chat flow
 
 `POST /api/chat` streams SSE. Every event is a single `data: <JSON>\n\n` line; the `type` field is always present, and the frontend switches on it in `handleSSEEvent()` in `chat.js`. Event types: `start`, `token`, `tool_call`, `done`, `error`, `complete`.

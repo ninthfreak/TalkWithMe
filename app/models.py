@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.config import LengthBias, TypicalLength
+from app.config import LengthBias, PromptFormat, TypicalLength
 
 from app.config import DEFAULT_MEMORY_SIZE, MAX_MEMORY_SIZE
 
@@ -307,6 +307,10 @@ class LLMSettingsRequest(BaseModel):
     model: str = Field(..., min_length=1)
     max_tokens: int = Field(..., ge=1)
     temperature: float = Field(..., ge=0.0, le=1.0)
+    # Defaulted rather than required: an older frontend, or anything
+    # posting the settings shape from before this existed, must not
+    # silently reset how every persona is prompted.
+    prompt_format: PromptFormat = PromptFormat.TRANSCRIPT
 
 
 class TTSSettingsRequest(BaseModel):
@@ -358,6 +362,7 @@ class LLMSettingsResponse(BaseModel):
     model: str
     max_tokens: int
     temperature: float
+    prompt_format: PromptFormat
 
 
 class TTSSettingsResponse(BaseModel):

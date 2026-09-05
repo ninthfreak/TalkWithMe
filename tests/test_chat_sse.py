@@ -43,9 +43,10 @@ def _stub_stream(monkeypatch, tokens, finish_reason="stop", capture=None):
     reply was truncated. *capture*, if given, is appended the call kwargs.
     """
 
-    async def fake_stream(messages, max_tokens=None, stop=None):
+    async def fake_stream(messages, max_tokens=None, stop=None, persona_name=None):
         if capture is not None:
-            capture.append({"messages": messages, "max_tokens": max_tokens, "stop": stop})
+            capture.append({"messages": messages, "max_tokens": max_tokens,
+                            "stop": stop, "persona_name": persona_name})
         for token in tokens:
             yield {"type": "token", "token": token}
         yield {"type": "finish", "reason": finish_reason}
@@ -54,7 +55,7 @@ def _stub_stream(monkeypatch, tokens, finish_reason="stop", capture=None):
 
 
 def _stub_stream_error_after(monkeypatch, tokens_before_error):
-    async def fake_stream(messages, max_tokens=None, stop=None):
+    async def fake_stream(messages, max_tokens=None, stop=None, persona_name=None):
         for token in tokens_before_error:
             yield {"type": "token", "token": token}
         raise RuntimeError("boom")
@@ -338,7 +339,7 @@ class TestMultiPersonaReplies:
         _patch_general(monkeypatch, max_persona_replies=2)
         seen_contexts = []
 
-        async def capturing_stream(messages, max_tokens=None, stop=None):
+        async def capturing_stream(messages, max_tokens=None, stop=None, persona_name=None):
             seen_contexts.append(
                 [(m["role"], m["content"]) for m in messages if m["role"] != "system"])
             yield {"type": "token", "token": "hi"}
@@ -668,7 +669,7 @@ class TestPersonaMemory:
 
         seen = []
 
-        async def capturing_stream(messages, max_tokens=None, stop=None):
+        async def capturing_stream(messages, max_tokens=None, stop=None, persona_name=None):
             seen.append(list(messages))
             yield {"type": "token", "token": "hi"}
             yield {"type": "finish", "reason": "stop"}
@@ -707,7 +708,7 @@ class TestPersonaMemory:
 
         seen = []
 
-        async def capturing_stream(messages, max_tokens=None, stop=None):
+        async def capturing_stream(messages, max_tokens=None, stop=None, persona_name=None):
             seen.append(list(messages))
             yield {"type": "token", "token": "hi"}
             yield {"type": "finish", "reason": "stop"}
@@ -768,7 +769,7 @@ class TestPersonaMemory:
         # plain stream path must not be offered anything tool-shaped.
         seen = []
 
-        async def capturing_stream(messages, max_tokens=None, stop=None):
+        async def capturing_stream(messages, max_tokens=None, stop=None, persona_name=None):
             seen.append(list(messages))
             yield {"type": "token", "token": "hi"}
             yield {"type": "finish", "reason": "stop"}
@@ -1003,7 +1004,7 @@ class TestTruncation:
         _patch_general(monkeypatch, max_persona_replies=2)
         seen = []
 
-        async def fake_stream(messages, max_tokens=None, stop=None):
+        async def fake_stream(messages, max_tokens=None, stop=None, persona_name=None):
             seen.append([(m["role"], m["content"]) for m in messages])
             yield {"type": "token", "token": "One. Two. Three and it stops mid"}
             yield {"type": "finish", "reason": "length"}
@@ -1021,7 +1022,7 @@ class TestTruncation:
         _patch_general(monkeypatch, max_persona_replies=2)
         seen = []
 
-        async def fake_stream(messages, max_tokens=None, stop=None):
+        async def fake_stream(messages, max_tokens=None, stop=None, persona_name=None):
             seen.append([(m["role"], m["content"]) for m in messages])
             yield {"type": "token", "token": "One. Two. Three and it stops mid"}
             yield {"type": "finish", "reason": "stop"}
@@ -1077,6 +1078,24 @@ def _played_room(monkeypatch, *, require=False, playing="Kira", player_prompt=No
             require_player_persona=require,
         )
     ])
+
+
+class TestTheSpeakerIsNamedToTheStream:
+    def test_the_router_hands_over_who_is_speaking(self, client, monkeypatch):
+        # Transcript format primes the prompt with this persona's own tag,
+        # so it needs the name; without it the stream falls back to chat
+        # format and the whole point is lost.
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex")
+
+        assert calls[0]["persona_name"] == "Alex"
+
+    def test_each_persona_in_turn_is_named(self, client, monkeypatch):
+        _patch_general(monkeypatch, max_persona_replies=2)
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert [c["persona_name"] for c in calls] == ["Alex", "Luna"]
 
 
 class TestOneRoomsHistoryStaysInIt:
@@ -1355,7 +1374,7 @@ class TestNeverSpeakAsTheUser:
         _patch_general(monkeypatch, max_persona_replies=2)
         seen = []
 
-        async def capturing(messages, max_tokens=None, stop=None):
+        async def capturing(messages, max_tokens=None, stop=None, persona_name=None):
             seen.append([m["content"] for m in messages if m["role"] != "system"])
             yield {"type": "token", "token": "ok"}
             yield {"type": "finish", "reason": "stop"}
@@ -1411,7 +1430,7 @@ class TestNeverSpeakAsTheUser:
         _patch_general(monkeypatch, max_persona_replies=1)
         calls = {"n": 0}
 
-        async def alternating(messages, max_tokens=None, stop=None):
+        async def alternating(messages, max_tokens=None, stop=None, persona_name=None):
             calls["n"] += 1
             token = "User: hmm" if calls["n"] == 1 else "A real answer."
             yield {"type": "token", "token": token}
@@ -1563,7 +1582,7 @@ class TestReplyCountIsReached:
         self._room_of(monkeypatch, size=6, max_replies=6)
         calls = {"n": 0}
 
-        async def one_cut(messages, max_tokens=None, stop=None):
+        async def one_cut(messages, max_tokens=None, stop=None, persona_name=None):
             calls["n"] += 1
             token = "User: nope" if calls["n"] == 2 else "fine"
             yield {"type": "token", "token": token}

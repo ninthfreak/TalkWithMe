@@ -76,6 +76,7 @@ function populateSettingsForm(data) {
     sfLlmModel.value = data.llm.model || "";
     sfLlmMaxTokens.value = data.llm.max_tokens || 1024;
     sfLlmTemperature.value = data.llm.temperature ?? 0.8;
+    sfLlmPromptFormat.value = data.llm.prompt_format || "transcript";
 
     // TTS
     sfTtsEnabled.checked = data.tts.enabled;
@@ -132,6 +133,7 @@ function collectSettingsFromForm() {
             model: sfLlmModel.value.trim(),
             max_tokens: parseInt(sfLlmMaxTokens.value, 10),
             temperature: parseFloat(sfLlmTemperature.value),
+            prompt_format: sfLlmPromptFormat.value,
         },
         // This dialog doesn't edit general settings, so it sends none: the
         // backend treats `general` as a partial update (omitted fields keep

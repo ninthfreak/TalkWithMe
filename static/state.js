@@ -187,6 +187,7 @@ const sfLlmBaseUrl = document.getElementById("sf-llm-base-url");
 const sfLlmModel = document.getElementById("sf-llm-model");
 const sfLlmMaxTokens = document.getElementById("sf-llm-max-tokens");
 const sfLlmTemperature = document.getElementById("sf-llm-temperature");
+const sfLlmPromptFormat = document.getElementById("sf-llm-prompt-format");
 
 // Settings form fields — TTS
 const sfTtsEnabled = document.getElementById("sf-tts-enabled");

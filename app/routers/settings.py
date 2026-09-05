@@ -27,6 +27,7 @@ def _to_response(cfg: AppSettings) -> SettingsResponse:
             model=cfg.llm.model,
             max_tokens=cfg.llm.max_tokens,
             temperature=cfg.llm.temperature,
+            prompt_format=cfg.llm.prompt_format,
         ),
         tts=TTSSettingsResponse(
             enabled=cfg.tts.enabled,
@@ -93,6 +94,7 @@ def update_settings(req: SettingsUpdateRequest):
             model=req.llm.model,
             max_tokens=req.llm.max_tokens,
             temperature=req.llm.temperature,
+            prompt_format=req.llm.prompt_format,
         ),
         tts=TTSConfig(
             enabled=req.tts.enabled,

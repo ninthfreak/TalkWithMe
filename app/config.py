@@ -159,11 +159,30 @@ def derive_max_tokens(length: TypicalLength, ceiling: int) -> int:
 # Settings
 # ---------------------------------------------------------------------------
 
+class PromptFormat(str, Enum):
+    """How a persona's turn is put to the model.
+
+    TRANSCRIPT sends one flat script to the completion endpoint, ending at
+    the responding persona's name, so the model *continues a conversation*.
+    CHAT sends the roles the OpenAI chat API expects, which the backend
+    wraps in the model's instruct template — a request for an assistant's
+    answer, and answers are what it produces: complete, tidy, resolved.
+    That register survives any amount of persona prompt, which is why the
+    transcript form is the default.
+    """
+
+    TRANSCRIPT = "transcript"
+    CHAT = "chat"
+
+
 class LLMSettings(BaseModel):
     base_url: str = "http://localhost:8080"
     model: str = "default"
     max_tokens: int = 1024
     temperature: float = 0.8
+    # Falls back to CHAT by itself when the backend has no completion
+    # endpoint, so this default cannot break an OpenAI-style server.
+    prompt_format: PromptFormat = PromptFormat.TRANSCRIPT
 
 
 class TTSConfig(BaseModel):

@@ -732,6 +732,10 @@ async def _preview_reply(persona: Persona, question: str) -> str:
         max_tokens=derive_max_tokens(length, min(settings.llm.max_tokens, _PREVIEW_MAX_TOKENS)),
         temperature=settings.llm.temperature,
         timeout=PROSE_TIMEOUT,
+        # Auditioned the same way they will be played: a persona previewed
+        # through the instruct template and then run as a transcript is a
+        # preview of a different character.
+        persona_name=persona.name,
     )
 
 

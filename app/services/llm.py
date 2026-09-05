@@ -1,8 +1,30 @@
 """Streaming client for a locally running llama.cpp server.
 
-The llama.cpp server exposes an OpenAI-compatible API at /v1/chat/completions.
-We stream tokens via SSE for the main chat flow, and do a quick non-streaming
-call for the persona router.
+The llama.cpp server exposes an OpenAI-compatible API at /v1/chat/completions
+and /v1/completions. We stream tokens via SSE for the main chat flow, and do a
+quick non-streaming call for the persona router.
+
+**Two ways to ask for a persona's turn**, and the difference is most of what
+separates this app's dialogue from a dedicated roleplay front-end:
+
+* ``PromptFormat.CHAT`` sends roles to /v1/chat/completions. The backend
+  wraps them in the model's instruct template, which is a request for an
+  *assistant's answer* — complete, tidy, resolved, and addressed to a user.
+  No amount of persona prompt fully undoes that framing, because it is
+  applied after the prompt and closer to the generation point.
+* ``PromptFormat.TRANSCRIPT`` (the default) sends one flat script to
+  /v1/completions, ending at the responding persona's own name:
+
+      [Tony]: what about the harbour?
+      [Alex]:
+
+  The model is not being asked for an answer; it is continuing a
+  conversation it can already see the rhythm of. Same model, same persona,
+  different job.
+
+Transcript mode falls back to chat mode by itself when the backend has no
+completion endpoint, and tool calling has no completion-endpoint
+equivalent, so a persona with tools enabled always takes the chat path.
 
 Tool calling: stream_chat_with_tools() runs a fully agentic loop — when the
 LLM answers with tool_calls, we invoke each tool (built-in tools from
@@ -18,7 +40,7 @@ from typing import AsyncGenerator, Dict, List, Optional
 
 import httpx
 
-from app.config import Persona, get_settings
+from app.config import Persona, PromptFormat, get_settings
 from app.services import builtin, mcp_client
 from app.services.tool_registry import get_server_for_tool
 
@@ -50,6 +72,101 @@ def _base_payload(
     return payload
 
 
+def render_transcript(messages: List[dict], persona_name: str) -> str:
+    """The messages list as one flat script, primed for *persona_name*.
+
+    The system message becomes a header, every turn keeps the "[Name]: "
+    tagging the room preamble already explains, and the whole thing ends
+    on the responding persona's own tag with nothing after it — that empty
+    line is the entire mechanism. A model handed it has one obvious job:
+    say the next thing this person says.
+
+    The persona's own past turns are untagged in the messages list (they
+    are its "assistant" role there) and are re-tagged here, because in a
+    script every line needs a speaker or the transcript stops reading as
+    one.
+    """
+    header: List[str] = []
+    turns: List[str] = []
+    for msg in messages:
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        role = msg.get("role")
+        if role == "system":
+            header.append(content)
+        elif role == "assistant":
+            turns.append(f"[{persona_name}]: {content}")
+        else:
+            # Already tagged by build_llm_messages, human and personas alike.
+            turns.append(content)
+
+    # One newline between turns, a blank line only after the header: the
+    # transcript has to look like a conversation, and lines separated by
+    # blank lines read as separate blocks of writing instead.
+    body = "\n".join(turns)
+    prompt = "\n\n".join(part for part in ("\n\n".join(header), body) if part)
+    # No trailing space after the colon: the model emits its own leading
+    # space, and a space we add is a token boundary we chose for it.
+    return f"{prompt}\n[{persona_name}]:" if prompt else f"[{persona_name}]:"
+
+
+def _completion_payload(
+    prompt: str,
+    max_tokens: Optional[int] = None,
+    stop: Optional[List[str]] = None,
+) -> dict:
+    """/v1/completions payload — the transcript-mode twin of _base_payload."""
+    settings = get_settings()
+    payload = {
+        "model": settings.llm.model,
+        "prompt": prompt,
+        "max_tokens": max_tokens if max_tokens is not None else settings.llm.max_tokens,
+        "temperature": settings.llm.temperature,
+        "stream": True,
+    }
+    if stop:
+        payload["stop"] = stop
+    return payload
+
+
+class CompletionEndpointMissing(Exception):
+    """The backend has no usable /v1/completions — fall back to chat mode."""
+
+
+async def _iter_text_chunks(payload: dict) -> AsyncGenerator[dict, None]:
+    """Yield one `choices[0]` dict per SSE line from /v1/completions.
+
+    Same shape as _iter_completion_chunks, except the token lives in
+    "text" rather than "delta.content". Raises CompletionEndpointMissing
+    when the endpoint is not there, so the caller can retry in chat mode
+    rather than failing a turn over a backend difference.
+    """
+    settings = get_settings()
+    url = f"{settings.llm.base_url}/v1/completions"
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream("POST", url, json=payload) as resp:
+            if resp.status_code in (404, 405, 501):
+                await resp.aread()
+                raise CompletionEndpointMissing(
+                    f"{url} returned {resp.status_code}"
+                )
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                data_str = line[len("data: "):]
+                if data_str.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                    yield chunk["choices"][0]
+                except (json.JSONDecodeError, KeyError, IndexError) as exc:
+                    logger.warning("Malformed SSE chunk from LLM: %s", exc)
+                    continue
+
+
 async def _iter_completion_chunks(payload: dict) -> AsyncGenerator[dict, None]:
     """Yield one `choices[0]` dict per SSE data line from the LLM.
 
@@ -76,10 +193,50 @@ async def _iter_completion_chunks(payload: dict) -> AsyncGenerator[dict, None]:
                     continue
 
 
+async def _stream_transcript(
+    messages: List[Dict[str, str]],
+    persona_name: str,
+    max_tokens: Optional[int] = None,
+    stop: Optional[List[str]] = None,
+) -> AsyncGenerator[dict, None]:
+    """Stream a persona's turn as a continuation of a flat transcript.
+
+    Yields the same events as stream_chat(). Raises
+    CompletionEndpointMissing before yielding anything if the backend has
+    no completion endpoint, which is what makes the caller's fallback safe
+    — nothing has reached the user at that point.
+    """
+    prompt = render_transcript(messages, persona_name)
+    payload = _completion_payload(prompt, max_tokens=max_tokens, stop=stop)
+    finish_reason: Optional[str] = None
+    # The prompt ends at "[Name]:" with no trailing space, so the model's
+    # first token usually carries one. Stripping it here rather than in the
+    # frontend keeps every consumer (bubble, TTS, persistence, the guard)
+    # working on the same text.
+    seen_text = False
+    chunks = _iter_text_chunks(payload)
+    try:
+        async for choice in chunks:
+            token = choice.get("text") or ""
+            if token and not seen_text:
+                token = token.lstrip()
+                if not token:
+                    continue
+                seen_text = True
+            if token:
+                yield {"type": "token", "token": token}
+            if choice.get("finish_reason"):
+                finish_reason = choice["finish_reason"]
+    finally:
+        await chunks.aclose()
+    yield {"type": "finish", "reason": finish_reason}
+
+
 async def stream_chat(
     messages: List[Dict[str, str]],
     max_tokens: Optional[int] = None,
     stop: Optional[List[str]] = None,
+    persona_name: Optional[str] = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream a reply from the LLM's /v1/chat/completions endpoint.
 
@@ -93,7 +250,27 @@ async def stream_chat(
     reason == "length" means the reply was cut off at max_tokens, and the
     caller must mark it so the next persona is not handed a dangling
     sentence to complete.
+
+    With *persona_name* given and the transcript format configured, the
+    turn goes to /v1/completions as a flat script instead (see the module
+    docstring). A backend without that endpoint falls back here, once per
+    call and silently to the user: a different backend is not a reason to
+    lose somebody's turn.
     """
+    settings = get_settings()
+    if persona_name and settings.llm.prompt_format is PromptFormat.TRANSCRIPT:
+        try:
+            async for event in _stream_transcript(
+                messages, persona_name, max_tokens=max_tokens, stop=stop
+            ):
+                yield event
+            return
+        except CompletionEndpointMissing as exc:
+            logger.warning(
+                "No completion endpoint (%s); using chat format for this turn. "
+                "Set llm.prompt_format to 'chat' to stop trying.", exc,
+            )
+
     payload = _base_payload(messages, max_tokens=max_tokens, stop=stop)
     finish_reason: Optional[str] = None
     # Hold a handle on the inner generator so it can be closed explicitly.
@@ -127,11 +304,45 @@ ROUTER_TIMEOUT = 15.0
 PROSE_TIMEOUT = 120.0
 
 
+async def _text_completion(
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    timeout: float,
+) -> Optional[str]:
+    """One non-streaming /v1/completions call.
+
+    Returns the text, "" on any failure the caller should treat as an
+    empty answer, or None when the endpoint is not there — which is the
+    caller's cue to retry in chat format rather than to give up.
+    """
+    settings = get_settings()
+    url = f"{settings.llm.base_url}/v1/completions"
+    payload = {
+        "model": settings.llm.model,
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code in (404, 405, 501):
+                return None
+            resp.raise_for_status()
+            return (resp.json()["choices"][0].get("text") or "").strip()
+    except Exception as exc:
+        logger.warning("LLM completion call failed: %s", exc)
+        return ""
+
+
 async def chat_completion(
     messages: List[Dict[str, str]],
     max_tokens: int = 64,
     temperature: Optional[float] = None,
     timeout: float = ROUTER_TIMEOUT,
+    persona_name: Optional[str] = None,
 ) -> str:
     """Non-streaming LLM call. Used for the persona router and suggestions.
 
@@ -142,6 +353,12 @@ async def chat_completion(
     router's sixteen tokens; a persona draft asked to write a hundred-odd
     words hit it every time on a local model, came back as "", and the
     server then finished generating into a closed connection.
+
+    With *persona_name* given and the transcript format configured, the
+    call goes to /v1/completions as a flat script, exactly as a real turn
+    would — a persona auditioned in one format and played in another is a
+    preview of something the app never runs, which is the same reason the
+    preview builds the real room preamble.
 
     Returns the full response text, or empty string on failure.
     """
@@ -155,6 +372,20 @@ async def chat_completion(
         "temperature": 0.1 if temperature is None else temperature,
         "stream": False,
     }
+
+    if persona_name and settings.llm.prompt_format is PromptFormat.TRANSCRIPT:
+        text = await _text_completion(
+            render_transcript(messages, persona_name),
+            max_tokens=max_tokens,
+            temperature=payload["temperature"],
+            timeout=timeout,
+        )
+        if text is not None:
+            return text
+        logger.warning(
+            "No completion endpoint; using chat format for this call. "
+            "Set llm.prompt_format to 'chat' to stop trying."
+        )
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

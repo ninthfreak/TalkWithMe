@@ -458,6 +458,40 @@ ceiling: TalkWithMe derives a per-reply cap from the tier that sits roughly four
 above the target, so it acts as a runaway guard and never as the thing shaping your
 replies. Leaving `max_tokens` low will keep cutting personas off mid-sentence.
 
+## How a persona's turn is asked for
+
+There are two ways to put a turn to a local model, and the difference is most of what
+separates this app's dialogue from a dedicated roleplay front-end. It is under
+**Servers → LLM → How personas are asked to speak**.
+
+**Transcript** (the default) sends the room to `/v1/completions` as one flat script that
+stops at the speaker's own name:
+
+```
+[Tony]: what about the harbour?
+[Alex]:
+```
+
+The model is not being asked for anything. It is continuing a conversation it can
+already see the rhythm of, and it writes the next line the way the lines above it are
+written — including the parts that make dialogue sound like dialogue: not answering the
+question, trailing off, talking past each other.
+
+**Chat** sends the same material to `/v1/chat/completions` as roles, which the server
+wraps in the model's instruct template. That template is a request for *an assistant's
+answer* — complete, tidy, resolved, addressed to a user — and it is applied after your
+persona prompt and closer to the point of generation, so no amount of persona writing
+fully undoes it. Replies come out correct and a little lifeless, each one wrapping up
+its own topic.
+
+Two cases still use Chat whatever this is set to, and both are unavoidable rather than
+chosen: a persona with **tool calls** enabled (tool calling is a chat-endpoint feature
+with no completion-endpoint equivalent), and any backend without a `/v1/completions`
+endpoint — that falls back on its own, logs a warning, and nobody loses a turn over it.
+
+Nothing else changes between the two. The room preamble, the containment rules, the stop
+sequences and the reply guard are identical either way.
+
 ## Making personas actually different
 
 The commonest disappointment with this app is a room full of characters who all

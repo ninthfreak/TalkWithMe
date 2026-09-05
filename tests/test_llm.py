@@ -11,7 +11,7 @@ import pytest
 
 import app.config as app_config
 import app.services.llm as llm
-from app.config import Persona
+from app.config import LLMSettings, Persona, PromptFormat
 from app.services import builtin
 from tests.factories import (
     make_personas,
@@ -500,6 +500,155 @@ class TestStreamChatWithTools:
         assert events[-1]["type"] == "finish"
         assert events[-2]["type"] == "tool_call"
         assert tool_events[0]["failed"] is False
+
+
+# ---------------------------------------------------------------------------
+# Transcript format — the completion endpoint
+# ---------------------------------------------------------------------------
+
+def text_line(text: str) -> str:
+    """A /v1/completions SSE line: the token lives in "text", not a delta."""
+    return sse_line({"choices": [{"text": text}]})
+
+
+def _transcript_settings(monkeypatch, fmt=PromptFormat.TRANSCRIPT):
+    monkeypatch.setattr(app_config, "_settings_cache", make_settings(
+        llm=LLMSettings(base_url="http://llm.local:8080", model="m", prompt_format=fmt)
+    ))
+
+
+ROOM = [
+    {"role": "system", "content": "You are Alex.\n\nRules."},
+    {"role": "user", "content": "[Tony]: hello"},
+    {"role": "assistant", "content": "Hi there."},
+    {"role": "user", "content": "[Marv]: this is dull."},
+]
+
+
+class TestRenderTranscript:
+    def test_it_ends_on_the_speakers_own_tag(self):
+        # The empty line after the tag is the entire mechanism: the model's
+        # job becomes "say the next thing this person says".
+        assert llm.render_transcript(ROOM, "Alex").endswith("\n[Alex]:")
+
+    def test_the_speakers_own_past_turns_are_tagged_too(self):
+        # They arrive untagged (they are the "assistant" role), and an
+        # untagged line in a script has no speaker.
+        assert "[Alex]: Hi there." in llm.render_transcript(ROOM, "Alex")
+
+    def test_other_voices_keep_the_tags_they_already_have(self):
+        prompt = llm.render_transcript(ROOM, "Alex")
+        assert "[Tony]: hello" in prompt
+        assert "[Marv]: this is dull." in prompt
+
+    def test_the_system_message_becomes_a_header(self):
+        assert llm.render_transcript(ROOM, "Alex").startswith("You are Alex.")
+
+    def test_turns_are_one_line_apart(self):
+        # Blank lines between turns read as separate blocks of writing
+        # rather than as a conversation.
+        assert "[Tony]: hello\n[Alex]: Hi there." in llm.render_transcript(ROOM, "Alex")
+
+    def test_no_trailing_space_after_the_colon(self):
+        # A space we add is a token boundary we chose for the model.
+        assert not llm.render_transcript(ROOM, "Alex").endswith(" ")
+
+    def test_an_empty_room_still_primes_the_speaker(self):
+        assert llm.render_transcript([], "Alex") == "[Alex]:"
+
+
+class TestTranscriptStreaming:
+    def test_it_calls_the_completion_endpoint_with_a_prompt(self, monkeypatch):
+        _transcript_settings(monkeypatch)
+        client = FakeLLMClient([text_line("Not much."), finish_line("stop")])
+        patch_llm_client(monkeypatch, client)
+
+        events = _collect(llm.stream_chat(ROOM, persona_name="Alex"))
+
+        assert client.urls == ["http://llm.local:8080/v1/completions"]
+        assert "messages" not in client.payloads[0]
+        assert client.payloads[0]["prompt"].endswith("[Alex]:")
+        assert _tokens(events) == ["Not much."]
+        assert events[-1] == {"type": "finish", "reason": "stop"}
+
+    def test_the_leading_space_after_the_tag_is_dropped(self, monkeypatch):
+        # The prompt ends at "[Alex]:" so the model supplies the space.
+        # Stripping it here keeps bubble, TTS, persistence and the guard
+        # all working on the same text.
+        _transcript_settings(monkeypatch)
+        patch_llm_client(monkeypatch, FakeLLMClient(
+            [text_line("  Not"), text_line(" much."), finish_line("stop")]
+        ))
+
+        events = _collect(llm.stream_chat(ROOM, persona_name="Alex"))
+        assert _tokens(events) == ["Not", " much."]
+
+    def test_stop_strings_are_passed_through(self, monkeypatch):
+        _transcript_settings(monkeypatch)
+        client = FakeLLMClient([text_line("hi"), finish_line("stop")])
+        patch_llm_client(monkeypatch, client)
+
+        _collect(llm.stream_chat(ROOM, stop=["\n[Luna]:"], persona_name="Alex"))
+        assert client.payloads[0]["stop"] == ["\n[Luna]:"]
+
+    def test_truncation_is_still_reported(self, monkeypatch):
+        # The router marks a cut reply so the next persona is not handed a
+        # dangling sentence to finish.
+        _transcript_settings(monkeypatch)
+        patch_llm_client(monkeypatch, FakeLLMClient(
+            [text_line("I was saying"), finish_line("length")]
+        ))
+
+        events = _collect(llm.stream_chat(ROOM, persona_name="Alex"))
+        assert events[-1] == {"type": "finish", "reason": "length"}
+
+
+class TestFallingBackToChat:
+    def test_a_backend_without_the_endpoint_falls_back(self, monkeypatch, caplog):
+        # A different backend is not a reason to lose somebody's turn.
+        _transcript_settings(monkeypatch)
+        client = FakeLLMClient(
+            [token_line("Not much."), finish_line("stop")],
+            stream_status_by_path={"/v1/completions": 404},
+        )
+        patch_llm_client(monkeypatch, client)
+
+        with caplog.at_level("WARNING"):
+            events = _collect(llm.stream_chat(ROOM, persona_name="Alex"))
+
+        assert client.urls[-1] == "http://llm.local:8080/v1/chat/completions"
+        assert _tokens(events) == ["Not much."]
+        assert "prompt_format" in caplog.text
+
+    def test_nothing_reaches_the_caller_before_the_fallback(self, monkeypatch):
+        # The fallback is only safe because the endpoint check happens
+        # before any token is yielded — otherwise the reply would be
+        # half one format and half the other.
+        _transcript_settings(monkeypatch)
+        patch_llm_client(monkeypatch, FakeLLMClient(
+            [token_line("a"), token_line("b"), finish_line("stop")],
+            stream_status_by_path={"/v1/completions": 404},
+        ))
+
+        events = _collect(llm.stream_chat(ROOM, persona_name="Alex"))
+        assert _tokens(events) == ["a", "b"]
+
+    def test_chat_format_setting_uses_the_chat_endpoint(self, monkeypatch):
+        _transcript_settings(monkeypatch, PromptFormat.CHAT)
+        client = FakeLLMClient([token_line("hi"), finish_line("stop")])
+        patch_llm_client(monkeypatch, client)
+
+        _collect(llm.stream_chat(ROOM, persona_name="Alex"))
+        assert client.urls == ["http://llm.local:8080/v1/chat/completions"]
+
+    def test_without_a_persona_name_there_is_no_transcript_to_render(self, monkeypatch):
+        # The suggestion and router calls have no single speaker to prime.
+        _transcript_settings(monkeypatch)
+        client = FakeLLMClient([token_line("hi"), finish_line("stop")])
+        patch_llm_client(monkeypatch, client)
+
+        _collect(llm.stream_chat(ROOM))
+        assert client.urls == ["http://llm.local:8080/v1/chat/completions"]
 
 
 # ---------------------------------------------------------------------------
