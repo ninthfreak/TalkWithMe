@@ -736,6 +736,37 @@ of the console with `grep "Persona memory"`. That trail tells you quickly whethe
 never offered to the LLM at all, or was offered but the model chose not to call it (which is
 often a model/prompt issue rather than an app issue).
 
+DEBUG also dumps **the exact prompt every persona is given** — the whole system message and a
+one-line summary of each history turn, logged as `Prompt for 'Alex' — system message (N chars)`.
+That is the thing to look at whenever a persona behaves like a different one: every route by
+which one character's text reaches another is visible in it, and none of them are guessable from
+the outside.
+
+### Why does everyone sound like the same character?
+
+When one persona's trait spreads to the others, one of four things is carrying it, and the prompt
+dump above says which:
+
+1. **The transcript.** In a room, everyone reads everyone else's lines, and a model continues
+   what it reads. The preamble now tells each persona in as many words that the others' moods and
+   obsessions are theirs alone — but this is the one route that no instruction removes entirely,
+   so a strong voice of your own (see the section above) is what actually holds the line.
+2. **The adopted player.** "Playing as…" puts the player's own prompt in front of every persona,
+   in every room. It is quoted and capped so it reads as a note about somebody else, but if the
+   player character is the loudest thing in the room, consider whether you want to be playing them.
+3. **Saved memories.** A persona with tool calls enabled can save a memory during a group
+   conversation, and a memory of what somebody *else* is like comes back in every later
+   conversation as though it were true of them. The tool is told not to, but anything already
+   saved stays saved: check with `grep -ri "..." Personas/*/memories.txt`, and clear a persona's
+   memories from the persona editor.
+4. **The roster.** Each persona is told who else is here, with their descriptions, so a
+   description written as a trait ("finds everything boring") is a trait sitting in everyone's
+   prompt. Descriptions are short and belong to the roster line; the character itself belongs in
+   the system prompt.
+
+Only the first of these lives in the room, which is why the other three can follow a persona into
+a brand new room with nobody else in it.
+
 ### Notes and gotchas
 
 - `uvicorn --log-level debug` does **not** enable the app's debug logging. That flag only changes

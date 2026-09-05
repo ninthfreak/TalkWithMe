@@ -207,6 +207,7 @@ Description of the `add_memory` tool should include the following points:
 - Errors from this tool are not fatal - this is an optional feature, it's fine to proceed if the memory was not saved.
 - It is not a requirement to submit a memory on every conversation turn. The goal is to only note interesting memories.
 - Begin each memory with "The user told me" (always refer to the user as "the user" when saving memories)
+- Save only what the USER said about themselves. Never save anything about the other characters in the room, and never save anything about yourself — a room is a group chat, so another persona's lines are in the transcript too, and a memory of what somebody else is like comes back in every later conversation (in every room) as though it were true of the persona holding it.
 - Only submit a memory if the user has revealed something interesting about themselves OR if the user explicitly asks for something to be remembered.
   - examples: ambitions, hopes, dreams, fears, strong emotions, personal anecdotes
   - specific requests: "Call me Tom from now on" -> "The user told me to address them as Tom."

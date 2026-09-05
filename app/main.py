@@ -65,10 +65,16 @@ logging.basicConfig(
     level=_resolve_root_log_level(),
     format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
 )
-# httpx logs every request it makes at INFO. Fine when debugging a client,
-# spammy in normal operation — TTS/STT/LLM/MCP traffic would otherwise
-# flood the console one line per HTTP round-trip.
+# httpx logs every request it makes at INFO, and httpcore logs every
+# socket operation at DEBUG. Fine when debugging a client, spammy in
+# normal operation — TTS/STT/LLM/MCP traffic would otherwise flood the
+# console one line per HTTP round-trip.
+#
+# httpcore matters most at DEBUG, which is exactly when the app's own
+# debug lines are wanted: half a dozen socket lines between every pair of
+# them buries the prompt dump this level exists to produce.
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 

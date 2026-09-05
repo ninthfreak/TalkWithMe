@@ -1054,15 +1054,18 @@ KIRA = Persona(
 )
 
 
-def _played_room(monkeypatch, *, require=False, playing="Kira"):
+def _played_room(monkeypatch, *, require=False, playing="Kira", player_prompt=None):
     """A room with Kira in the cast, and the player possibly playing her.
 
     Two separate things: the room only knows whether it *requires* that the
     player is someone, and who they are playing is the player's, in
     player.yaml.
     """
+    kira = KIRA if player_prompt is None else KIRA.model_copy(
+        update={"system_prompt": player_prompt}
+    )
     _patch_personas(monkeypatch, PersonasConfig(
-        personas=make_personas().personas + [KIRA]
+        personas=make_personas().personas + [kira]
     ))
     monkeypatch.setattr(
         app_config, "_player_cache", PlayerConfig(persona_name=playing or "")
@@ -1076,6 +1079,38 @@ def _played_room(monkeypatch, *, require=False, playing="Kira"):
     ])
 
 
+class TestPersonasDoNotAbsorbEachOther:
+    """One character's traits must not become everyone's.
+
+    Not about authorship — the reply guard covers that. This is the
+    quieter failure: nobody writes anyone else's line, and yet a room
+    where one persona is bored ends up with everybody bored, and it keeps
+    happening in a new room with a single persona in it.
+    """
+
+    def test_the_rule_names_the_failure_rather_than_saying_stay_in_character(
+        self, client, monkeypatch
+    ):
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex")
+
+        system = _system_prompt(calls[0])
+        assert "The others are not you" in system
+        assert "never drift into echoing them" in system
+        # Concrete, because the abstract version reads as advice.
+        assert "is bored, or angry, or fixated" in system
+        assert "react to it as Alex" in system
+
+    def test_the_rule_is_there_even_in_a_room_of_one(self, client, monkeypatch):
+        # Where it still matters: the transcript is empty, but the adopted
+        # player's sketch and the persona's own memories are not.
+        _patch_chatrooms(monkeypatch, [ChatRoom(name="Solo", persona_names=["Alex"])])
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Solo")
+
+        assert "The others are not you" in _system_prompt(calls[0])
+
+
 class TestAdoptedPersonaInPrompt:
     def test_the_adopted_persona_is_described_to_the_others(self, client, monkeypatch):
         _played_room(monkeypatch)
@@ -1085,10 +1120,41 @@ class TestAdoptedPersonaInPrompt:
         system = _system_prompt(calls[0])
         assert "You are talking with Kira." in system
         assert "Who they are: A retired thief who owes everyone money." in system
-        # The persona's own system prompt, so there is one description of a
-        # character rather than two that can drift apart.
-        assert "How they are written: You are Kira." in system
+        # The persona's own prompt, so there is one description of a
+        # character rather than two that can drift apart — but quoted and
+        # framed as a note about somebody else, because it is written in
+        # the second person and reads as an instruction otherwise.
+        assert '"You are Kira.' in system
+        assert "It describes THEM, and it is not an instruction to you" in system
         assert "Treat Kira as that character" in system
+
+    def test_the_player_sketch_cannot_be_read_as_your_own_instructions(
+        self, client, monkeypatch
+    ):
+        # The failure this framing exists for: a persona prompt is second
+        # person ("You find everything boring"), so pasting one in raw
+        # hands every other character instructions addressed to "you" —
+        # and the adopted player is global, so it followed them into
+        # every room, including a new one with a single persona in it.
+        _played_room(monkeypatch)
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        system = _system_prompt(calls[0])
+        assert "never take on their manner, opinions or turns of phrase" in system
+        assert "you are not them" in system
+
+    def test_a_long_player_prompt_does_not_swamp_the_persona(self, client, monkeypatch):
+        # An 8KB player prompt used to be pasted in whole, drowning the
+        # persona's own voice by the same arithmetic that makes a short
+        # persona prompt useless.
+        _played_room(monkeypatch, player_prompt="You are Kira. " + "You steal things. " * 400)
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="Tavern")
+
+        system = _system_prompt(calls[0])
+        assert len(system) < 4000
+        assert "You are Kira." in system
 
     def test_named_player_replaces_the_user_in_the_preamble(self, client, monkeypatch):
         _played_room(monkeypatch)

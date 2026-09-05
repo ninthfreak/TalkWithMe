@@ -136,6 +136,29 @@ def _other_persona_text(msg: ChatMessage) -> str:
     return f"{trimmed} (message was cut off)"
 
 
+def _log_prompt(responding_persona: str, messages: List[Dict[str, str]]) -> None:
+    """Dump the exact prompt at DEBUG (TALKWITHME_LOG_LEVEL=debug).
+
+    Worth the noise: every "why is this persona behaving like that one"
+    question is answerable in one glance at what the model was actually
+    handed, and unanswerable without it. Text that describes one character
+    reaches another through several routes — the roster, the adopted
+    player's sketch, saved memories, the transcript itself — and which one
+    is carrying it in any given room is not a guess worth making.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    system = messages[0]["content"] if messages else ""
+    turns = "\n".join(
+        f"  {m['role']}: {m['content'][:120]}" for m in messages[1:]
+    )
+    logger.debug(
+        "Prompt for '%s' — system message (%d chars):\n%s\n"
+        "%d history message(s):\n%s",
+        responding_persona, len(system), system, len(messages) - 1, turns or "  (none)",
+    )
+
+
 class SessionManager:
     """Manages the single active chat session."""
 
@@ -307,6 +330,7 @@ class SessionManager:
                         }
                     )
 
+        _log_prompt(responding_persona, messages)
         return messages
 
     def get_history_dicts(self) -> List[dict]:

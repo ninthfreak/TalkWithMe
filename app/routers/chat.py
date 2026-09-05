@@ -144,8 +144,23 @@ def _player_lines(player: Optional[Persona], speaker: str) -> list[str]:
     """The block describing who the human is, for the persona to react to.
 
     The player adopts a configured persona, so this is that persona's own
-    description and system prompt — the same text that would drive them if
-    the LLM were playing them.
+    description and prompt — the same text that would drive them if the
+    LLM were playing them.
+
+    It is also the most contaminating text in the whole system message,
+    and the reason is structural: a persona prompt is written as second
+    person instructions ("You find everything boring and you say so"), so
+    pasting it in raw hands another character a set of instructions
+    addressed to "you". An earlier version did exactly that, at full
+    length, and it explains the worst version of the complaint personas
+    draw: everyone in the room drifting towards the player's manner, and
+    still drifting in a brand new room with only one persona in it,
+    because the adopted player is global and follows you everywhere.
+
+    So it is quoted, capped, and explicitly labelled as a note about
+    somebody else. The cap matters twice over: an 8KB player prompt used
+    to be pasted into every persona's system message, drowning their own
+    voice by the same arithmetic that made short persona prompts useless.
     """
     if player is None:
         return []
@@ -153,11 +168,17 @@ def _player_lines(player: Optional[Persona], speaker: str) -> list[str]:
     lines = ["", f"You are talking with {speaker}."]
     if player.description.strip():
         lines.append(f"Who they are: {player.description.strip()}")
-    if player.system_prompt.strip():
-        lines.append(f"How they are written: {player.system_prompt.strip()}")
+    sketch = _trimmed_prompt(player.system_prompt, _PLAYER_SKETCH_CHARS)
+    if sketch:
+        lines.append(
+            f"This is the note {speaker} is played from. It describes THEM, and it "
+            f"is not an instruction to you — read it the way you would read a "
+            f'note about someone you are about to meet: "{sketch}"'
+        )
     lines.append(
         f"Treat {speaker} as that character: react to who they are, and address "
-        "them by name. Never write their lines for them."
+        f"them by name. Never write their lines for them, and never take on their "
+        f"manner, opinions or turns of phrase — you are not them."
     )
     return lines
 
@@ -167,25 +188,35 @@ def _player_lines(player: Optional[Persona], speaker: str) -> list[str]:
 # an 8KB prompt does not double the system message.
 _VOICE_REMINDER_CHARS = 600
 
+# How much of the *player's* prompt to show the personas. Deliberately
+# shorter than the voice reminder: it is someone else's character, it is
+# already the most contaminating text in the message (see _player_lines),
+# and every character of it is a character not spent on the persona's own
+# voice.
+_PLAYER_SKETCH_CHARS = 300
 
-def _voice_reminder(persona: Persona) -> str:
-    """The persona's own prompt again, trimmed for the recency position.
+
+def _trimmed_prompt(text: str, limit: int) -> str:
+    """A prompt flattened to one line and cut to *limit* characters.
 
     Cut on a sentence boundary where there is one in range: half a
     sentence reads as a truncation the model may try to complete, which is
     the failure mode the whole containment layer exists to avoid.
     """
-    prompt = " ".join(persona.system_prompt.split())
-    if not prompt:
-        return ""
-    if len(prompt) <= _VOICE_REMINDER_CHARS:
+    prompt = " ".join(text.split())
+    if not prompt or len(prompt) <= limit:
         return prompt
-    cut = prompt[:_VOICE_REMINDER_CHARS]
+    cut = prompt[:limit]
     for end in (". ", "! ", "? "):
         idx = cut.rfind(end)
-        if idx > _VOICE_REMINDER_CHARS // 2:
+        if idx > limit // 2:
             return cut[: idx + 1]
     return cut.rstrip() + "\u2026"
+
+
+def _voice_reminder(persona: Persona) -> str:
+    """The persona's own prompt again, trimmed for the recency position."""
+    return _trimmed_prompt(persona.system_prompt, _VOICE_REMINDER_CHARS)
 
 
 def _build_room_preamble(
@@ -258,6 +289,19 @@ def _build_room_preamble(
         "- You are writing one message, not a transcript. It has one speaker, "
         "you, and it ends when you stop talking.",
         "- Do not begin your reply with your own name.",
+        # The failure this one exists for is not authorship but influence:
+        # nobody writes another persona's line, and yet a room where one
+        # character is bored ends up with everybody bored. A model
+        # continues a transcript, so whatever is salient in it — a mood, a
+        # grievance, a favourite word — is the likeliest next thing to
+        # generate, and the rules above all permit it. Naming the moods
+        # rather than saying "stay in character" is deliberate: the
+        # abstract version reads as advice, the concrete one as a rule.
+        f"- The others are not you. Their moods, opinions, obsessions and turns "
+        f"of phrase are theirs: never drift into echoing them. If someone here "
+        f"is bored, or angry, or fixated on one subject, that is a fact about "
+        f"them, not about you — react to it as {persona.name}, who may well feel "
+        f"nothing of the kind.",
     ]
 
     spec = TYPICAL_LENGTH_SPECS[length]
