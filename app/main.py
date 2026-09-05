@@ -144,14 +144,22 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 async def index(request: Request):
     """Serve the main chat UI.
 
-    The persona-differentiation levers are rendered from the same list the
-    drafting prompt is built from (app/services/persona_draft.py). Kept
-    server-side on purpose: the dialog teaches the user what to write, and
-    a hand-copied list in the JS would drift away from what the model is
-    actually told within a release or two.
+    The persona drafting dialog — its dials, its detail fields and its
+    levers list — is rendered from the same constants the drafting prompt
+    is built from (app/services/persona_draft.py). Kept server-side on
+    purpose: the dropdown values ARE the prompt's vocabulary, so a
+    hand-copied list in the JS would start sending options the prompt has
+    no instruction for within a release or two.
+
+    The levers list is filtered the same way the prompt filters it: a
+    lever the form now sets directly is a control, not advice, and listing
+    it twice reads as two ways to set the same thing.
     """
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "persona_levers": persona_draft.LEVERS,
+        "persona_levers": [lv for lv in persona_draft.LEVERS if not lv.superseded_by],
         "persona_anti_patterns": persona_draft.ANTI_PATTERNS,
+        "persona_dial_groups": persona_draft.DIAL_GROUPS,
+        "persona_details": persona_draft.DETAILS,
+        "persona_detail_max": persona_draft.MAX_DETAIL_CHARS,
     })

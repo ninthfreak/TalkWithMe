@@ -1,6 +1,6 @@
 """Pydantic request / response models for the TalkWithMe API."""
 
-from typing import List, Optional, Literal
+from typing import Dict, List, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,8 +54,16 @@ class SuggestReplyResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PersonaDraftRequest(BaseModel):
-    """A short brief for a new persona."""
+    """The specification for a new persona: a brief, dials, and details.
+
+    Only ``brief`` is required. ``dials`` and ``details`` are free-form
+    dicts here rather than a fixed model so that adding an axis is a
+    one-line change in ``persona_draft`` — the service validates the keys
+    and values, and silently drops anything it does not recognise.
+    """
     brief: str = Field(..., min_length=1, max_length=2000)
+    dials: Dict[str, str] = Field(default_factory=dict)
+    details: Dict[str, str] = Field(default_factory=dict)
 
 
 class PersonaDraftResponse(BaseModel):

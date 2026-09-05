@@ -1645,6 +1645,43 @@ html, body {
     color: var(--text-secondary);
 }
 
+/* The dials: label and dropdown on one line, hint beneath the dropdown.
+   Seven stacked full-width rows push the Draft button off the screen, and
+   the hints are the part that has to stay readable. */
+.pd-dial-row {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+}
+
+.pd-dial-row .field-hint {
+    grid-column: 2;
+}
+
+/* Selects elsewhere in the app are left at browser defaults; inside this
+   dialog they are the primary control, so they match the text inputs. */
+#pd-overlay select {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 7px 8px;
+    font-size: 0.85rem;
+    font-family: inherit;
+    outline: none;
+}
+
+#pd-overlay select:focus {
+    border-color: var(--accent);
+}
+
+/* The detail fields live inside a <details>, which has no gap of its own. */
+.pd-levers .form-row {
+    margin-top: 12px;
+}
+
 .pd-section-label {
     font-weight: 600;
     font-size: 0.85rem;

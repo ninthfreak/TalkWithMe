@@ -585,18 +585,19 @@ _PREVIEW_MAX_TOKENS = 400
 
 @router.post("/draft", response_model=PersonaDraftResponse)
 async def draft_persona(req: PersonaDraftRequest):
-    """Draft a persona from a brief.
+    """Draft a persona from a brief plus whatever dials and details were set.
 
     The existing cast is read only to keep the name unique; none of it
-    goes to the model. Distinctness comes from the levers in the prompt,
-    not from contrast with whoever already exists — so the cost of a draft
-    does not grow with the number of personas.
+    goes to the model. Distinctness comes from the specification, not from
+    contrast with whoever already exists — so the cost of a draft does not
+    grow with the number of personas.
     """
     settings = get_settings()
     existing = list(get_personas().personas)
+    spec = persona_draft.PersonaSpec.from_request(req.brief, req.dials, req.details)
 
     text = await chat_completion(
-        persona_draft.build_draft_prompt(req.brief),
+        persona_draft.build_draft_prompt(spec),
         max_tokens=_DRAFT_MAX_TOKENS,
         # Prose, not routing: the router's 0.1 produces four drafts that
         # are the same draft, and the router's timeout is sized for

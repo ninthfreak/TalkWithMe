@@ -853,6 +853,41 @@ class TestDraftPersona:
         assert seen[0]["temperature"] == 0.8
         assert seen[0]["timeout"] >= 60
 
+    def test_the_dials_reach_the_prompt_as_instructions(self, client, personas_root, monkeypatch):
+        seen = _stub_completion(monkeypatch, DRAFT_REPLY)
+        client.post("/api/personas/draft", json={
+            "brief": "a harbourmaster",
+            "dials": {"register": "coarse", "temperament": "unflappable"},
+            "details": {"never": "never guesses at cargo"},
+        })
+
+        sent = seen[0]["messages"][0]["content"]
+        assert "crude turns of phrase" in sent
+        assert "nothing gets a rise out of them" in sent
+        assert "never guesses at cargo" in sent
+
+    def test_a_junk_dial_does_not_reach_the_model_or_500(self, client, personas_root, monkeypatch):
+        # The dropdowns are rendered from the server's own constants, so
+        # anything else is a stale page or a hand-rolled request.
+        seen = _stub_completion(monkeypatch, DRAFT_REPLY)
+        resp = client.post("/api/personas/draft", json={
+            "brief": "x",
+            "dials": {"register": "sassy", "nonsense": "yes"},
+            "details": {"favourite_colour": "blue"},
+        })
+
+        assert resp.status_code == 200
+        sent = seen[0]["messages"][0]["content"]
+        assert "sassy" not in sent and "nonsense" not in sent and "blue" not in sent
+
+    def test_a_brief_alone_still_drafts(self, client, personas_root, monkeypatch):
+        # The dials and details are optional; the original one-box flow
+        # must keep working for anyone posting without them.
+        _stub_completion(monkeypatch, DRAFT_REPLY)
+        assert client.post(
+            "/api/personas/draft", json={"brief": "a harbourmaster"}
+        ).status_code == 200
+
     def test_a_name_collision_is_resolved_against_the_cast(self, client, personas_root, monkeypatch):
         _stub_completion(monkeypatch, DRAFT_REPLY.replace("NAME: Rennick", "NAME: Luna"))
 

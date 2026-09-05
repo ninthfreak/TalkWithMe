@@ -214,17 +214,46 @@
                 <h2 id="pd-title">Draft a persona</h2>
                 <button id="pd-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
             </div>
-            <div class="modal-intro field-hint">One or two lines is enough. The draft is built on the levers below, which is what makes it distinct &mdash; open them to see what a brief can carry.</div>
+            <div class="modal-intro field-hint">Say who they are in a line or two, then set the dials. Each dial is a separate axis on purpose &mdash; a single word in the brief gets read as all of them at once, which is how &ldquo;crude&rdquo; ends up meaning &ldquo;hostile&rdquo;.</div>
             <div id="pd-error" class="pe-form-error hidden"></div>
             <div class="settings-body">
                 <div class="form-row">
-                    <label for="pd-brief">The brief</label>
+                    <label for="pd-brief">Who they are <span class="required">*</span></label>
                     <textarea id="pd-brief" maxlength="2000" rows="3" placeholder="A suspicious harbourmaster who thinks everyone is smuggling something"></textarea>
                 </div>
 
+                {% for group_title, dials in persona_dial_groups %}
+                <fieldset class="settings-section">
+                    <legend>{{ group_title }}</legend>
+                    {% for dial in dials %}
+                    <div class="form-row pd-dial-row">
+                        <label for="pd-dial-{{ dial.key }}">{{ dial.title }}</label>
+                        <select id="pd-dial-{{ dial.key }}" class="pd-dial" data-dial="{{ dial.key }}">
+                            {% for opt in dial.options %}
+                            <option value="{{ opt.value }}"{% if opt.value == dial.default %} selected{% endif %}>{{ opt.label }}</option>
+                            {% endfor %}
+                        </select>
+                        <span class="field-hint">{{ dial.hint }}</span>
+                    </div>
+                    {% endfor %}
+                </fieldset>
+                {% endfor %}
+
+                <details id="pd-details" class="pd-levers">
+                    <summary>Details &mdash; optional, and the fastest way to a character who is nobody else</summary>
+                    <p class="field-hint">Anything left blank is invented for you, and the notes say what was invented. Filling in even one or two of these does more than any amount of extra brief.</p>
+                    {% for detail in persona_details %}
+                    <div class="form-row">
+                        <label for="pd-detail-{{ detail.key }}">{{ detail.label }}</label>
+                        <input id="pd-detail-{{ detail.key }}" class="pd-detail" data-detail="{{ detail.key }}" type="text" maxlength="{{ persona_detail_max }}" placeholder="{{ detail.placeholder }}">
+                        <span class="field-hint">{{ detail.hint }}</span>
+                    </div>
+                    {% endfor %}
+                </details>
+
                 <details id="pd-levers" class="pd-levers">
-                    <summary>What actually makes personas behave differently</summary>
-                    <p class="field-hint">Mention any of these in the brief and the draft will use them; leave them out and it will invent them. They work just as well when you write a persona by hand.</p>
+                    <summary>What else the draft invents for you</summary>
+                    <p class="field-hint">The dials and details above are most of what makes a character behave distinctly. These are the rest &mdash; not on the form because they depend on who else is in the room, but the draft still writes them, and they are worth putting in a persona you write by hand.</p>
                     <dl id="pd-lever-list">
                         {% for lever in persona_levers %}
                         <dt>{{ lever.title }}</dt>

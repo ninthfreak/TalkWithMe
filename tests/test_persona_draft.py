@@ -12,10 +12,23 @@ from app.config import LengthBias
 from app.services import persona_draft
 from app.services.persona_draft import (
     PersonaDraft,
+    PersonaSpec,
     build_draft_prompt,
     critique,
     parse_draft,
 )
+
+
+def spec(brief="x", **kwargs):
+    """A spec built the way the route builds one, so tests exercise the
+    sanitising path rather than reaching around it."""
+    return PersonaSpec.from_request(
+        brief, kwargs.pop("dials", {}), kwargs.pop("details", {})
+    )
+
+
+def system_of(spec_):
+    return build_draft_prompt(spec_)[0]["content"]
 
 WELL_FORMED = """NAME: Rennick
 DESCRIPTION: A suspicious harbourmaster
@@ -123,29 +136,117 @@ class TestParseEnforcesFieldLimits:
 
 
 class TestDraftPrompt:
-    def test_every_lever_reaches_the_prompt(self):
-        system = build_draft_prompt("x")[0]["content"]
+    def test_only_the_levers_the_form_does_not_set_reach_the_prompt(self):
+        # A lever the dials or details already set is an instruction, not
+        # advice; restating it as advice invites the model to overrule it.
+        system = system_of(spec())
+        # Matched on the hint, not the title: several lever titles are also
+        # detail-field labels, which legitimately appear elsewhere.
         for lever in persona_draft.LEVERS:
-            assert lever.title in system
+            assert (lever.hint in system) is not bool(lever.superseded_by)
+
+    def test_every_superseded_lever_names_a_real_field(self):
+        for lever in persona_draft.LEVERS:
+            if lever.superseded_by:
+                assert (lever.superseded_by in persona_draft.DIALS_BY_KEY
+                        or lever.superseded_by in persona_draft.DETAILS_BY_KEY)
+
+    def test_something_is_still_left_for_the_model_to_invent(self):
+        # If the form ever covered every lever the block would be empty and
+        # the "invent whatever is left open" framing would be a lie.
+        assert any(not lv.superseded_by for lv in persona_draft.LEVERS)
 
     def test_the_anti_patterns_are_named_explicitly(self):
         # The model produces exactly these unless told not to.
-        system = build_draft_prompt("x")[0]["content"]
+        system = system_of(spec())
         assert "topic lists" in system
         assert "adjective piles" in system
 
-    def test_the_brief_is_the_user_turn(self):
-        messages = build_draft_prompt("a suspicious harbourmaster")
-        assert messages[1]["role"] == "user"
-        assert "a suspicious harbourmaster" in messages[1]["content"]
+    def test_the_brief_says_who_they_are(self):
+        system = system_of(spec("a suspicious harbourmaster"))
+        assert "a suspicious harbourmaster" in system
 
     def test_the_prompt_does_not_grow_with_the_cast(self):
-        # Distinctness comes from the levers, not from contrast with the
-        # existing personas — so the prompt is the same size whether there
-        # are none or fifty, and a draft costs the same either way.
-        system = build_draft_prompt("x")[0]["content"]
+        # Distinctness comes from the specification, not from contrast with
+        # the existing personas — so the prompt is the same size whether
+        # there are none or fifty, and a draft costs the same either way.
+        system = system_of(spec())
         assert "cast" not in system.lower()
-        assert len(system) < 4000
+        assert len(system) < 6000
+
+    def test_a_chosen_option_sends_its_instruction_not_its_label(self):
+        # "Coarse" on its own is exactly as vague as the brief was; the
+        # instruction behind it is what does the work.
+        system = system_of(spec(dials={"register": "coarse"}))
+        assert "crude turns of phrase" in system
+
+    def test_the_defaults_push_against_the_house_style(self):
+        # Left alone, the model writes every character as an essayist.
+        system = system_of(spec())
+        assert "clear and unshowy" in system          # vocabulary
+        assert "examples rather than principles" in system   # abstraction
+
+    def test_an_unspecified_dial_is_handed_back_to_the_model(self):
+        system = system_of(spec(dials={"stance": ""}))
+        assert "decide for yourself" in system
+        assert "Stance" in system
+
+    def test_the_dials_are_declared_independent(self):
+        # The failure this whole feature exists for: one word bleeding
+        # across word choice, temper and cooperativeness at once.
+        system = system_of(spec(dials={"register": "coarse"}))
+        assert "must not bleed together" in system
+        assert "does not make a character hostile" in system
+
+    def test_a_given_detail_is_quoted_and_a_blank_one_is_left_open(self):
+        system = system_of(spec(details={"never": "never guesses at cargo"}))
+        assert "never guesses at cargo" in system
+        assert "NOT GIVEN" in system
+
+    def test_the_user_turn_is_a_constant(self):
+        # Everything the user typed is in the system turn, so the user turn
+        # carries no instruction a model could mistake for the brief.
+        messages = build_draft_prompt(spec("a harbourmaster"))
+        assert messages[1] == {"role": "user", "content": "Write the character."}
+
+
+class TestPersonaSpec:
+    def test_unknown_dial_keys_are_dropped(self):
+        assert "colour" not in spec(dials={"colour": "blue"}).dials
+
+    def test_an_unknown_dial_value_becomes_unspecified(self):
+        # Passing the bare word through would send an option the prompt has
+        # no instruction for — the vagueness the dials exist to remove.
+        s = spec(dials={"register": "sassy"})
+        assert s.dials["register"] == persona_draft.UNSPECIFIED
+        assert s.instruction_for("register") is None
+
+    def test_an_unset_dial_falls_back_to_its_default(self):
+        assert "unshowy" in spec().instruction_for("vocabulary")
+
+    def test_every_dial_offers_an_opt_out(self):
+        for dial in persona_draft.DIALS:
+            assert dial.options[0].value == persona_draft.UNSPECIFIED
+            assert not dial.options[0].instruction
+
+    def test_every_dial_default_is_a_real_option(self):
+        for dial in persona_draft.DIALS:
+            assert dial.option(dial.default) is not None
+
+    def test_every_dial_is_in_a_rendered_group(self):
+        grouped = [d.key for _, dials in persona_draft.DIAL_GROUPS for d in dials]
+        assert grouped == [d.key for d in persona_draft.DIALS]
+
+    def test_unknown_detail_keys_are_dropped(self):
+        assert spec(details={"favourite_colour": "blue"}).details == {}
+
+    def test_blank_details_are_dropped_rather_than_sent_empty(self):
+        assert spec(details={"wants": "   "}).details == {}
+
+    def test_details_are_capped_and_flattened(self):
+        s = spec(details={"wants": "a\nb " + "x" * 1000})
+        assert len(s.details["wants"]) <= persona_draft.MAX_DETAIL_CHARS
+        assert "\n" not in s.details["wants"]
 
 
 class TestCritique:

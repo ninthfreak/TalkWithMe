@@ -497,16 +497,52 @@ sentence on one of the levers above are the target.
 
 ## Drafting a persona with the LLM
 
-**Draft with AI…** at the top of the persona editor takes a line or two — "a suspicious
-harbourmaster who thinks everyone is smuggling" — and fills in every field.
+**Draft with AI…** at the top of the persona editor takes a line or two about who the
+character is — "a suspicious harbourmaster who thinks everyone is smuggling" — and fills
+in every field.
 
-The draft is built on the levers in the table above, and only on those. Your existing
-personas are not sent to the model — a character is defined by what it is, not by what
-the others are, and a draft costs the same whether you have two personas or fifty.
+The brief on its own is not enough, and the reason is worth knowing: a model reads every
+word of it as a *global* dial. Ask for a "crude" harbourmaster and "crude" colours the
+word choice, the temper and the willingness to hold a conversation all at once, and what
+comes back is somebody belligerent who is bad at talking. Left with no instruction at
+all, the same model writes everyone as a mild essayist, which is why hand-written
+personas converge on the same pseudo-intellectual voice.
 
-Each draft explains itself. **What the draft did** names which levers it used and which
-ones your brief already supplied — so you can see what a good brief contains and write
-the next one by hand. **Worth a look** flags the failures the model is the wrong judge of:
+So the brief is followed by **dials** — one dropdown per axis, each with a fixed set of
+options, and each option carrying its own instruction into the prompt:
+
+| Dial | Decides |
+|------|---------|
+| Vocabulary | Which words they reach for, from blunt everyday to ornate or technical |
+| Sentence shape | Clipped, short, neutral, flowing, rambling |
+| Register | Politeness and profanity — **word choice only** |
+| Abstraction | Whether they argue from cases or from principles |
+| Temperament | How easily they are provoked — this, and nothing else, decides whether a rough character is merely rough or actually belligerent |
+| Certainty | How much they qualify what they say |
+| Stance | What they do with a turn: ask, respond, assert, correct |
+
+The prompt tells the model in as many words that these do not bleed into each other. It
+also says nothing about how the character feels toward any *particular* person: that
+varies by who they are talking to, so writing it as a dial would produce someone
+uniformly warm or uniformly hostile to everyone in the room.
+
+Every dial has a **Let the draft decide** option, and the notes say what the model chose
+when you use it. The defaults deliberately sit below the model's house style — plain
+vocabulary, concrete rather than theoretical — because that is the failure that shows up
+without asking for it.
+
+Under **Details** are five optional free-text boxes: what they want, what they never do,
+where they are wrong, a verbal tic, and background. Anything left blank is invented, and
+the notes say so. One or two of these does more for a character than any amount of extra
+brief.
+
+Your existing personas are not sent to the model — a character is defined by what it is,
+not by what the others are, and a draft costs the same whether you have two personas or
+fifty.
+
+Each draft explains itself. **What the draft did** names which settings it followed, what
+it invented, and what it chose for anything left open — so you can see what a good
+specification contains and write the next one by hand. **Worth a look** flags the failures the model is the wrong judge of:
 generic assistant vocabulary, a prompt too short to outweigh the room preamble, no
 negative space.
 

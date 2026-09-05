@@ -122,6 +122,11 @@ const pfMemoriesClearBtn = document.getElementById("pf-memories-clear");
 // Persona drafting (used by persona-draft.js)
 const pdOverlay = document.getElementById("pd-overlay");
 const pdBrief = document.getElementById("pd-brief");
+// Queried as lists rather than by id: the dials and detail fields are
+// rendered from the server's constants, so the JS must not hold a
+// hand-written copy of which ones exist.
+const pdDials = document.querySelectorAll("select.pd-dial");
+const pdDetails = document.querySelectorAll("input.pd-detail");
 const pdErrorEl = document.getElementById("pd-error");
 const pdResult = document.getElementById("pd-result");
 const pdNotesEl = document.getElementById("pd-notes");

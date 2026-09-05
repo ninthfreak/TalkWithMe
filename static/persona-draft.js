@@ -3,14 +3,19 @@
  *
  * The dialog does three things, in order of how much they matter:
  *
- *  1. Teaches. The levers list (rendered server-side from the same
- *     constant the drafting prompt is built from) is what makes the next
- *     hand-written persona better, whether or not this tool is used again.
- *  2. Drafts. A brief comes back as every field.
+ *  1. Specifies. A brief on its own makes every word a global intensity
+ *     dial — "crude" comes back as hostile, uncooperative and rude at
+ *     once. The dropdowns and detail fields split that into independent
+ *     axes, which is the whole reason they exist.
+ *  2. Drafts. The specification comes back as every field.
  *  3. Proves it. The same question answered by the draft and by a persona
  *     you already have, side by side — because a draft read on its own
  *     always sounds distinctive, and read beside its neighbour often
  *     doesn't.
+ *
+ * The dials and details are rendered server-side from the constants the
+ * drafting prompt is built from, so this file never names one: it reads
+ * whatever is on the page and posts it back by key.
  *
  * Nothing reaches disk here. "Use this draft" fills the editor form and
  * the normal Save is still the only thing that writes a persona.
@@ -22,6 +27,11 @@ let pdDraft = null;
 function openPersonaDraft() {
     pdDraft = null;
     pdBrief.value = "";
+    // The dials keep whatever they were left on — they are settings, and
+    // re-picking seven of them for every draft is the tedium the dialog
+    // exists to remove. The details are about one specific character, so
+    // carrying them into the next one would be wrong.
+    for (const input of pdDetails) input.value = "";
     pdResult.classList.add("hidden");
     pdUseBtn.classList.add("hidden");
     pdRepliesEl.classList.add("hidden");
@@ -85,11 +95,19 @@ async function requestPersonaDraft() {
     pdDraftBtn.disabled = true;
     pdDraftBtn.textContent = "Drafting…";
 
+    const dials = {};
+    for (const select of pdDials) dials[select.dataset.dial] = select.value;
+    const details = {};
+    for (const input of pdDetails) {
+        const value = input.value.trim();
+        if (value) details[input.dataset.detail] = value;
+    }
+
     try {
         const resp = await fetch("/api/personas/draft", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ brief }),
+            body: JSON.stringify({ brief, dials, details }),
         });
         if (!resp.ok) {
             const detail = await resp.json().catch(() => null);
