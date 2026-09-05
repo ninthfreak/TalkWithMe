@@ -181,7 +181,7 @@ function usePersonaRefinement() {
 }
 
 function setupPersonaRefineEventListeners() {
-    document.getElementById("pf-btn-refine").addEventListener("click", openPersonaRefine);
+    pfRefineBtn.addEventListener("click", openPersonaRefine);
     prRefineBtn.addEventListener("click", requestPersonaRefinement);
     prTryBtn.addEventListener("click", tryPersonaRefinement);
     prUseBtn.addEventListener("click", usePersonaRefinement);

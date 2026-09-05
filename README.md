@@ -497,7 +497,7 @@ sentence on one of the levers above are the target.
 
 ## Drafting a persona with the LLM
 
-**Draft with AI…** at the top of the persona editor takes a line or two about who the
+**Draft with AI…** at the top of **New Persona** takes a line or two about who the
 character is — "a suspicious harbourmaster who thinks everyone is smuggling" — and fills
 in every field.
 
@@ -555,10 +555,11 @@ Nothing is saved until you press Save. The draft lands in the form to be argued 
 
 ## Refining a persona you already have
 
-**Refine with AI…** sits beside **Draft with AI…** when you are editing a saved
-persona. It takes the character whole and one sentence about what should change —
-"less nautical jargon, and he should let an argument go instead of pressing it" — and
-gives back a revision.
+**Refine with AI…** takes the place of **Draft with AI…** when you are editing a saved
+persona — drafting writes a character from nothing and would overwrite one you already
+have, so the two never appear together. It takes the character whole and one sentence
+about what should change — "less nautical jargon, and he should let an argument go
+instead of pressing it" — and gives back a revision.
 
 The risk here is the opposite of drafting's. A draft fails by having no shape; a
 refinement fails by losing a shape that already worked, because a model handed a prompt

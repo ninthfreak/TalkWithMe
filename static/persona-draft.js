@@ -209,7 +209,7 @@ function usePersonaDraft() {
 }
 
 function setupPersonaDraftEventListeners() {
-    document.getElementById("pf-btn-draft").addEventListener("click", openPersonaDraft);
+    pfDraftBtn.addEventListener("click", openPersonaDraft);
     pdDraftBtn.addEventListener("click", requestPersonaDraft);
     pdTryBtn.addEventListener("click", tryPersonaDraft);
     pdUseBtn.addEventListener("click", usePersonaDraft);

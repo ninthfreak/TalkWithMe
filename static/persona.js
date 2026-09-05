@@ -369,10 +369,16 @@ async function openPersonaForm(name) {
     }
 
     // "Clear saved memories" only makes sense when editing an existing
-    // persona — a new one has nothing to clear. Same for refining: there
-    // is nothing to refine until there is a character, and drafting is
-    // the tool for getting one.
+    // persona — a new one has nothing to clear.
     pfMemoriesClearBtn.classList.toggle("hidden", !name);
+
+    // Drafting and refining are the same tool at two moments, and only
+    // one of them applies at a time: drafting writes a character from
+    // nothing, so it belongs to New Persona and would overwrite an
+    // existing one wholesale; refining changes one thing about a
+    // character that already exists, so it needs one to exist.
+    pfDraftBtn.classList.toggle("hidden", !!name);
+    pfDraftHint.classList.toggle("hidden", !!name);
     pfRefineBtn.classList.toggle("hidden", !name);
     pfRefineHint.classList.toggle("hidden", !name);
 

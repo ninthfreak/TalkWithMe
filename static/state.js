@@ -118,6 +118,8 @@ const speakAsOverlay = document.getElementById("speak-as-overlay");
 const saTextEl = document.getElementById("sa-text");
 const pfMemorySize = document.getElementById("pf-memory-size");
 const pfMemoriesClearBtn = document.getElementById("pf-memories-clear");
+const pfDraftBtn = document.getElementById("pf-btn-draft");
+const pfDraftHint = document.getElementById("pf-draft-hint");
 const pfRefineBtn = document.getElementById("pf-btn-refine");
 const pfRefineHint = document.getElementById("pf-refine-hint");
 
