@@ -28,7 +28,7 @@ field.
 import logging
 import re
 from dataclasses import dataclass, field, replace
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from app.config import LengthBias
 
@@ -507,7 +507,7 @@ def kept_fraction(brief: str, prompt: str) -> float:
     return len(wanted & _content_words(prompt)) / len(wanted)
 
 
-def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
+def build_draft_prompt(spec: PersonaSpec, taken_names: Iterable[str] = ()) -> List[dict]:
     """The messages that ask the LLM to finish a persona the user started.
 
     **This asks for paperwork, not authorship, and that is a correction.**
@@ -535,6 +535,14 @@ def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
     has written over the brief is discarded in favour of
     ``prompt_from_brief()``.
     """
+    # Names only, and only so the model does not pick one that is taken.
+    # This is not the cast being sent for the model to write *against* —
+    # that was a different feature, it made the prompt grow with the
+    # roster, and it is staying gone. A list of words costs a handful of
+    # tokens and saves a persona called "Alex_2".
+    taken = ", ".join(sorted({n.strip() for n in taken_names if n.strip()}))
+    not_taken = f", and not one of these, which are in use: {taken}" if taken else ""
+
     dial_lines = [line for line in
                   (spec.instruction_for(d.key) for d in DIALS) if line]
     dial_block = ""
@@ -560,7 +568,7 @@ Fill in what they did not write.
 
 Reply in exactly this format, with these labels, and nothing else:
 
-NAME: <one ordinary given name, capitalised, up to {MAX_NAME} characters — theirs if they named the character, otherwise one that suits>
+NAME: <the name they gave this character, or if they gave none, one that fits this particular person and the world they live in — capitalised, up to {MAX_NAME} characters{not_taken}>
 DESCRIPTION: <up to {MAX_DESCRIPTION} characters, shown in the room roster>
 ROUTER_HINTS: <comma-separated topics this character should be picked for>
 LENGTH_BIAS: <match, unless they said this character is terser or wordier than everyone else>

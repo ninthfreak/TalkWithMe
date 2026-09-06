@@ -603,9 +603,10 @@ Under **What to put in the description, if you are stuck** is a list of the thin
 change how a character behaves rather than how they are described. Nothing on it is added
 for you; it is there to help you write.
 
-Your existing personas are not sent to the model — a character is defined by what it is,
-not by what the others are, and a draft costs the same whether you have two personas or
-fifty.
+Your existing personas' **names** are sent, and nothing else about them — so the draft
+does not hand you a second Alex. Their descriptions and prompts are not: a character is
+defined by what it is, not by what the others are, and drafting should not cost more the
+more personas you have.
 
 Each draft explains itself. **What the draft did** names which settings it followed, what
 it invented, and what it chose for anything left open — so you can see what a good

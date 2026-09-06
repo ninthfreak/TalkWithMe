@@ -9,6 +9,7 @@ no files are attached, which FastAPI's Form fields parse identically.
 import pytest
 
 import app.config as app_config
+from app.config import Persona, PersonasConfig
 from app.services import persona_store
 from tests.factories import make_personas_in_dir, rescan_personas
 
@@ -867,15 +868,45 @@ class TestDraftPersona:
 
         assert "never lets anyone leave empty-handed" in body["system_prompt"]
 
-    def test_the_existing_cast_is_not_sent_to_the_model(self, client, personas_root, monkeypatch):
-        # Diversity comes from the levers, not from contrast: the prompt
-        # must not grow with the cast, and a character is defined by what
-        # it is rather than by what the others are.
+    def test_the_cast_goes_as_names_and_nothing_more(
+        self, client, personas_root, monkeypatch
+    ):
+        # The line moved, and this is where it is now. Names go, so the
+        # model does not hand back one that is already taken — four of
+        # seven drafts came back "Alex", the one male persona on the
+        # roster, because nothing told it that name was spoken for.
+        #
+        # What stays gone is the cast as *material*: descriptions, prompts,
+        # anything defining a new character by contrast with the old ones.
+        # That made the prompt grow with the roster and defined a
+        # character by what the others were.
         seen = _stub_completion(monkeypatch, DRAFT_REPLY)
         client.post("/api/personas/draft", json={"brief": DRAFT_BRIEF})
 
         sent = " ".join(m["content"] for m in seen[0]["messages"])
-        assert "Alex" not in sent and "Luna" not in sent
+        assert "Alex" in sent and "Luna" in sent
+        assert "A friendly assistant" not in sent      # description
+        assert "You are Alex" not in sent              # system prompt
+        assert "general questions" not in sent         # router hints
+
+    def test_the_prompt_barely_grows_with_the_cast(
+        self, client, personas_root, monkeypatch
+    ):
+        # A list of names is a handful of tokens. A list of characters was
+        # the thing that made drafting cost more the more personas you had.
+        seen = _stub_completion(monkeypatch, DRAFT_REPLY, DRAFT_REPLY)
+        client.post("/api/personas/draft", json={"brief": DRAFT_BRIEF})
+        small = len(seen[0]["messages"][0]["content"])
+
+        many = PersonasConfig(personas=[
+            Persona(name=f"Person{i:02d}", system_prompt="p " * 120, router_hints="r")
+            for i in range(40)
+        ])
+        app_config.set_personas_cache(many)
+        client.post("/api/personas/draft", json={"brief": DRAFT_BRIEF})
+        large = len(seen[1]["messages"][0]["content"])
+
+        assert large - small < 500
 
     def test_prose_temperature_and_timeout_not_the_routers(self, client, personas_root, monkeypatch):
         # At the router's 0.1 every draft is the same draft, and at the
@@ -929,6 +960,19 @@ class TestDraftPersona:
 
         assert body["name"] != "Luna"
         assert body["name"].startswith("Luna")
+
+    def test_a_collision_says_so_rather_than_handing_over_a_suffix(
+        self, client, personas_root, monkeypatch
+    ):
+        # The model is told which names are taken, so a collision means it
+        # ignored that — and "Luna_2" is a poor name to receive with no
+        # explanation of where it came from.
+        _stub_completion(monkeypatch, DRAFT_REPLY.replace("NAME: Rennick", "NAME: Luna"))
+
+        body = client.post("/api/personas/draft", json={"brief": "x"}).json()
+
+        assert any("already in use" in n and "Worth renaming" in n
+                   for n in body["notes"])
 
     def test_warnings_come_back_with_the_draft(self, client, personas_root, monkeypatch):
         _stub_completion(monkeypatch, "NAME: R\nSYSTEM_PROMPT:\nYou are a friendly assistant.")

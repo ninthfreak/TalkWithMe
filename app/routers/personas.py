@@ -606,7 +606,9 @@ async def draft_persona(req: PersonaDraftRequest):
     spec = persona_draft.PersonaSpec.from_request(req.brief, req.dials, req.details)
 
     text = await chat_completion(
-        persona_draft.build_draft_prompt(spec),
+        # The existing names go in so the model does not land on one that
+        # is taken; the rename below is the backstop, not the plan.
+        persona_draft.build_draft_prompt(spec, [p.name for p in existing]),
         max_tokens=_DRAFT_MAX_TOKENS,
         # Prose, not routing: the router's 0.1 produces four drafts that
         # are the same draft, and the router's timeout is sized for
@@ -647,13 +649,19 @@ async def draft_persona(req: PersonaDraftRequest):
             ),
         )
 
-    # Names must be unique, and the model cannot know what is taken.
+    # Names must be unique. The model is told which are taken, so reaching
+    # here means it ignored that — and "Alex_2" is a poor name to hand
+    # somebody without saying why they got it.
     taken = {p.name.lower() for p in existing}
     if draft.name.lower() in taken:
         base = draft.name[: persona_draft.MAX_NAME - 2].rstrip()
         suffix = 2
         while f"{base}_{suffix}".lower() in taken:
             suffix += 1
+        draft.notes.append(
+            f"The draft chose the name {draft.name}, which is already in use, "
+            f"so it became {base}_{suffix}. Worth renaming by hand."
+        )
         draft.name = f"{base}_{suffix}"
 
     return PersonaDraftResponse(
