@@ -239,11 +239,10 @@ DIALS: List[Dial] = [
             DialOption("blunt", "Blunt",
                        "says the unwelcome thing without cushioning it; no profanity"),
             DialOption("coarse", "Coarse",
-                       "crude turns of phrase and mild profanity. WORD CHOICE ONLY: this "
-                       "does not make them hostile, impatient or uncooperative"),
+                       "crude turns of phrase and mild profanity — word choice only"),
             DialOption("profane", "Profane",
-                       "swears freely and casually. WORD CHOICE ONLY: swearing is how they "
-                       "talk to everyone, including people they like"),
+                       "swears freely and casually, with the people they like as much as "
+                       "anyone else"),
         ],
         "neutral",
     ),
@@ -272,7 +271,7 @@ DIALS: List[Dial] = [
             DialOption("unflappable", "Unflappable",
                        "nothing gets a rise out of them; rudeness and disagreement land without effect"),
             DialOption("steady", "Steady",
-                       "slow to provoke; reacts to real provocation, not to tone"),
+                       "hard to rattle; reacts to what is said, not to how it is said"),
             DialOption("reactive", "Reactive",
                        "takes things personally and shows it quickly"),
             DialOption("volatile", "Volatile",
@@ -450,13 +449,11 @@ class PersonaDraft:
 # actor. Kept as constants so a fix to one path cannot miss the other.
 
 INDEPENDENCE_NOTE = (
-    "These settings are independent of one another and must not bleed together. A "
-    "coarse or profane register is about WORD CHOICE and nothing else: it does not "
-    "make a character hostile, impatient, uncooperative or bad at conversation. "
-    "Whether they escalate is Temperament, and nothing else. How this character "
-    "feels about any *particular* person is NOT set here at all — that comes out of "
-    "who they are and who they are talking to, so do not write them as uniformly "
-    "warm or uniformly hostile toward everyone."
+    "These settings are independent. Register is word choice and nothing else: it "
+    "says which words they reach for, never how they treat people. Temperament "
+    "alone decides whether they escalate. How they feel about any *particular* "
+    "person is not set here — that comes out of who they are and who they are "
+    "talking to."
 )
 
 WRITING_RULES = (
@@ -594,7 +591,7 @@ Change what the instruction asks for and nothing else. Everything the instructio
 
 Do not change the name. Keep the description, router hints and reply length as they are unless the change makes them wrong.
 
-Read the instruction narrowly. A word about how they SPEAK changes their word choice and nothing else: asking for a coarser or blunter character does not make them hostile, impatient, uncooperative or bad at conversation, and asking for a warmer one does not make them agree with everybody. {INDEPENDENCE_NOTE}
+Read the instruction narrowly, and change one thing with it. A word about how they SPEAK changes their word choice and nothing else. A word about how they FEEL toward one person says nothing about how they treat everyone. {INDEPENDENCE_NOTE}
 
 If the instruction is vague, apply it to the smallest part of the character it could reasonably mean, and say in your notes what you took it to mean.
 

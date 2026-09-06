@@ -197,10 +197,16 @@ class TestDraftPrompt:
 
     def test_the_dials_are_declared_independent(self):
         # The failure this whole feature exists for: one word bleeding
-        # across word choice, temper and cooperativeness at once.
+        # across word choice, temper and cooperativeness at once. Made
+        # without naming the words — "does not make them hostile" put
+        # *hostile* in front of the model writing the character, and the
+        # drafts came back hostile.
         system = system_of(spec(dials={"register": "coarse"}))
-        assert "must not bleed together" in system
-        assert "does not make a character hostile" in system
+        assert "These settings are independent" in system
+        assert "Register is word choice and nothing else" in system
+        assert "Temperament alone decides whether they escalate" in system
+        for word in ("hostile", "uncooperative", "bad at conversation"):
+            assert word not in system.lower()
 
     def test_a_given_detail_is_quoted_and_the_blanks_are_named_once(self):
         # One line naming what is open, not five telling the model how to
@@ -352,10 +358,11 @@ class TestRefinePrompt:
 
     def test_the_independence_note_is_repeated_here(self):
         # A free-text instruction is the same global-dial trap the dials
-        # exist to remove: "make him crude" must not make him hostile.
+        # exist to remove: "make him crude" must not make him coarser in
+        # temper as well as in vocabulary.
         system = self.system("make him crude")
-        assert "does not make a character hostile" in system
-        assert "word choice and nothing else" in system.lower()
+        assert "Register is word choice and nothing else" in system
+        assert "hostile" not in system.lower()
 
     def test_the_name_is_not_up_for_revision(self):
         system = self.system()

@@ -228,16 +228,27 @@ def _build_room_preamble(
 ) -> str:
     """The app-generated block appended to a persona's system prompt.
 
-    Three things depend on it. The roster is what makes "never invent a
-    character" enforceable — you cannot forbid inventing people without
-    saying who exists. The rules name the two observed failure modes
-    explicitly, including continuing a cut-off message, because a truncated
-    line in the history reads to a model as a prompt to complete. And the
-    player block is how a persona knows who it is talking to.
+    The roster is what makes "nobody else exists" enforceable — you cannot
+    forbid inventing people without saying who is here. The rules name the
+    observed failure modes, including continuing a cut-off message,
+    because a truncated line reads to a model as a prompt to complete. The
+    player block is how a persona knows who it is talking to. The length
+    line is the *only* thing shaping reply length; the derived token cap is
+    a runaway guard, not a style control.
 
-    The length line is the *only* thing shaping reply length. The derived
-    token cap is a runaway guard, not a style control — that distinction is
-    the whole point of the tier.
+    **Kept short on purpose, and the reason is two-sided.** This block sits
+    above every persona in every room: at 330 words it was 96% of what the
+    model read for a stock persona, so the character could not outvote its
+    own instructions. And it was almost entirely prohibition — nine
+    "never"s — which does not read as neutral. A prompt that is a list of
+    things not to do produces a terse, adversarial voice, and one that
+    illustrates them with "bored, angry, fixated" produces characters who
+    arrive bored and call each other boring. Both were reported.
+
+    So: no affect words anywhere in here, no example moods, and every rule
+    that the stop sequences and ReplyGuard already enforce mechanically
+    gets one clause rather than a sentence. Those two layers are the
+    guarantee; this is the explanation.
     """
     # A named player character is a better thing to address than "the user",
     # and it is what the personas are told to call them.
@@ -259,11 +270,10 @@ def _build_room_preamble(
         "",
         # Every voice in the transcript is tagged, including the human's.
         # Leaving the human untagged made "untagged text" the model's only
-        # example of how they write, and personas answering third or fourth
-        # copied it.
-        'Every message you can see is tagged with who said it, as "[Name]: text" — '
-        f"{speaker}'s included. Your own reply is the one untagged voice: write "
-        f"only what {persona.name} says, with no tag.",
+        # example of how they write, and personas answering third or
+        # fourth copied it.
+        f'Lines are tagged "[Name]: text", {speaker}\'s included. Yours is the '
+        f"untagged one: write what {persona.name} says, and nothing else.",
     ]
 
     if player is not None:
@@ -271,45 +281,32 @@ def _build_room_preamble(
 
     lines += [
         "",
-        f"- Write only as {persona.name}. Never write a line, a reply, or a name "
-        "prefix for anyone else.",
-        f"- You are not {speaker}. Never speak or write as {speaker}, never answer "
-        f"on their behalf, and never write {speaker}'s next message — not even to "
-        "move the conversation along.",
-        "- Never invent a new character or speak as one.",
-        "- Never continue, complete, or rewrite someone else's message, even if it "
-        "looks cut off. Respond to it as it stands.",
-        # Named shape by shape because the abstract rule above was not
-        # enough on its own: models that would never write "Luna:" write
+        # Shapes named one by one because the abstract rule was not enough
+        # on its own: a model that would never write "Luna:" writes
         # "**Luna:**" happily, having learnt it as formatting rather than
         # as taking someone else's turn.
-        "- Never start a line with a name and a colon, in any form — not "
-        "\"Luna:\", not \"**Luna:**\", not \"[Luna]:\", not \"### Luna\". Each of "
-        "those opens somebody else's turn.",
-        "- You are writing one message, not a transcript. It has one speaker, "
-        "you, and it ends when you stop talking.",
-        "- Do not begin your reply with your own name.",
-        # The failure this one exists for is not authorship but influence:
-        # nobody writes another persona's line, and yet a room where one
-        # character is bored ends up with everybody bored. A model
-        # continues a transcript, so whatever is salient in it — a mood, a
-        # grievance, a favourite word — is the likeliest next thing to
-        # generate, and the rules above all permit it. Naming the moods
-        # rather than saying "stay in character" is deliberate: the
-        # abstract version reads as advice, the concrete one as a rule.
-        f"- The others are not you. Their moods, opinions, obsessions and turns "
-        f"of phrase are theirs: never drift into echoing them. If someone here "
-        f"is bored, or angry, or fixated on one subject, that is a fact about "
-        f"them, not about you — react to it as {persona.name}, who may well feel "
-        f"nothing of the kind.",
+        "- One message, one speaker. No name prefix on it in any form — not "
+        "\"Name:\", not \"**Name:**\", not \"[Name]:\" — and no lines for "
+        f"anyone else, {speaker} included.",
+        "- Take each message as it stands, even one that looks cut off. "
+        "Finishing someone's sentence is taking their turn.",
+        # Trait bleed: a model continues a transcript, so whatever is
+        # salient in it is the likeliest next thing to generate, and the
+        # rules above all permit it. Said without naming any particular
+        # mood, because a prompt cannot mention one without suggesting it
+        # — an earlier version listed "bored, angry, fixated" here as
+        # examples of what not to copy, and personas started arriving
+        # bored and calling each other boring.
+        f"- What the others feel, want and keep going on about is theirs, not "
+        f"{persona.name}'s.",
     ]
 
     spec = TYPICAL_LENGTH_SPECS[length]
     if spec.words:
         lines.append(
-            f"- This is a chat room, not an essay: aim for about {spec.phrasing} "
-            f"(~{spec.words} words). Go longer only when the thought genuinely "
-            "needs it. Stop at a natural end — never break off mid-word."
+            f"- This is a chat room, not an essay: about {spec.phrasing} "
+            f"(~{spec.words} words), longer when the thought needs it. Finish "
+            "your last sentence."
         )
 
     # Stated last so it is the final thing before the transcript. A persona
@@ -329,12 +326,11 @@ def _build_room_preamble(
     if voice:
         lines += [
             "",
-            f"It is {persona.name}'s turn. Reply as {persona.name} and no one else, "
-            f"in {persona.name}'s own voice rather than a neutral one:",
+            f"It is {persona.name}'s turn, in {persona.name}'s own voice:",
             voice,
         ]
     else:
-        lines += ["", f"It is {persona.name}'s turn. Reply as {persona.name}, and no one else."]
+        lines += ["", f"It is {persona.name}'s turn."]
 
     return "\n".join(lines)
 

@@ -852,14 +852,44 @@ class TestRoomPreamble:
         # The speaker is not listed among the others.
         assert "Alex (A friendly assistant)" not in system
 
-    def test_preamble_states_the_three_prohibitions(self, client, monkeypatch):
+    def test_preamble_states_the_prohibitions(self, client, monkeypatch):
+        # Every guarantee still stated, in a fraction of the words. The
+        # roster carries "nobody else exists"; the rest is three clauses.
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="TNG")
 
         system = _system_prompt(calls[0])
-        assert "Never invent a new character" in system
-        assert "Never continue, complete, or rewrite someone else's message" in system
-        assert "Write only as Alex" in system
+        assert "There is nobody else." in system
+        assert "Take each message as it stands, even one that looks cut off" in system
+        assert "One message, one speaker" in system
+        assert "no lines for anyone else" in system
+
+    def test_the_preamble_stays_small_enough_for_the_persona_to_outweigh(
+        self, client, monkeypatch
+    ):
+        # It sits above every persona in every room. At 330 words it was
+        # 96% of what the model read for a stock persona, and the
+        # character could not outvote its own instructions.
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        preamble = _system_prompt(calls[0]).split("\n\n", 1)[1]
+        assert len(preamble.split()) < 200
+
+    def test_the_preamble_names_no_moods_and_forbids_nothing_by_name(
+        self, client, monkeypatch
+    ):
+        # A prompt cannot mention a mood without suggesting it. This block
+        # listed "bored, angry, fixated" as things not to copy, and
+        # personas started arriving bored and calling each other boring.
+        # The nine "never"s did the same for the register as a whole.
+        calls = _capture(monkeypatch)
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        preamble = _system_prompt(calls[0]).lower()
+        for word in ("bored", "angry", "hostile", "impatient", "fixated", "obsession"):
+            assert word not in preamble
+        assert "never" not in preamble
 
     def test_solo_room_says_so_rather_than_listing_nobody(self, client, monkeypatch):
         _patch_chatrooms(monkeypatch, [ChatRoom(name="Solo", persona_names=["Luna"])])
@@ -884,7 +914,7 @@ class TestTypicalLength:
         # The register is stated outright — this is chat, not prose.
         assert "This is a chat room, not an essay" in system
         # The escape hatch must survive: typical is a target, not a ceiling.
-        assert "Go longer only when the thought genuinely needs it" in system
+        assert "longer when the thought needs it" in system
 
     def test_normal_room_asks_for_a_sentence_or_two(self, client, monkeypatch):
         calls = _capture(monkeypatch)
@@ -1177,18 +1207,19 @@ class TestPersonasDoNotAbsorbEachOther:
     happening in a new room with a single persona in it.
     """
 
-    def test_the_rule_names_the_failure_rather_than_saying_stay_in_character(
-        self, client, monkeypatch
-    ):
+    def test_the_rule_says_whose_feelings_are_whose(self, client, monkeypatch):
+        # Said without naming a single mood. The first version listed
+        # "bored, angry, fixated" as examples of what not to copy, on the
+        # theory that the concrete version reads as a rule where the
+        # abstract one reads as advice. It does — and it also plants the
+        # moods: personas started arriving bored and calling each other
+        # boring, which is the failure it was written to prevent.
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex")
 
         system = _system_prompt(calls[0])
-        assert "The others are not you" in system
-        assert "never drift into echoing them" in system
-        # Concrete, because the abstract version reads as advice.
-        assert "is bored, or angry, or fixated" in system
-        assert "react to it as Alex" in system
+        assert "What the others feel, want and keep going on about is theirs" in system
+        assert "not Alex's" in system
 
     def test_the_rule_is_there_even_in_a_room_of_one(self, client, monkeypatch):
         # Where it still matters: the transcript is empty, but the adopted
@@ -1197,7 +1228,7 @@ class TestPersonasDoNotAbsorbEachOther:
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="Solo")
 
-        assert "The others are not you" in _system_prompt(calls[0])
+        assert "is theirs, not Alex's" in _system_prompt(calls[0])
 
 
 class TestAdoptedPersonaInPrompt:
@@ -1253,7 +1284,9 @@ class TestAdoptedPersonaInPrompt:
         system = _system_prompt(calls[0])
         assert "Kira's included" in system
         assert "and Kira. There is nobody else." in system
-        assert "You are not Kira. Never speak or write as Kira" in system
+        # The human is one of the people a persona must not write lines
+        # for, and is named rather than described.
+        assert "no lines for anyone else, Kira included" in system
         assert "the user" not in system
 
     def test_the_adopted_persona_does_not_also_answer(self, client, monkeypatch):
@@ -1285,7 +1318,7 @@ class TestAdoptedPersonaInPrompt:
         system = _system_prompt(calls[0])
         assert "You are talking with" not in system
         assert "the user's included" in system
-        assert "You are not the user. Never speak or write as the user" in system
+        assert "no lines for anyone else, the user included" in system
 
     def test_a_deleted_persona_degrades_to_playing_yourself(self, client, monkeypatch):
         # Adopted, then deleted from the persona list. Half-applying — a
@@ -1490,7 +1523,7 @@ class TestNeverSpeakAsTheUser:
         # and repeats the persona's own words after it, which is the last
         # thing the model reads before the transcript.
         system = _system_prompt(calls[0]).rstrip()
-        assert "It is Alex's turn. Reply as Alex and no one else" in system
+        assert "It is Alex's turn, in Alex's own voice:" in system
         assert system.endswith("You are Alex, a friendly assistant.")
 
 
@@ -1526,9 +1559,7 @@ class TestTheVoiceSurvivesThePreamble:
         preamble = chat_router._build_room_preamble(
             persona, "TNG", ["Alex"], TypicalLength.NORMAL
         )
-        assert preamble.rstrip().endswith(
-            "It is Alex's turn. Reply as Alex, and no one else."
-        )
+        assert preamble.rstrip().endswith("It is Alex's turn.")
 
     def test_the_voice_outweighs_a_bare_name_mention(self, client, monkeypatch):
         # The point of the change: a persona with a real voice should not

@@ -529,11 +529,22 @@ everyone in the room. A 13-word persona prompt was therefore about **5%** of wha
 model read, sitting as far from the point of generation as it is possible to be. Your
 personas were being outvoted by their own instructions.
 
-Two things address it. The preamble now ends by repeating the persona's own words, so
-the voice occupies the recency position as well as the opening — that alone takes a stock
-persona from 5% to 9%. And writing a persona with real substance does the rest: a
-genuine 60-word voice lands at **31%**. Prompts of 80–150 words that spend every
-sentence on one of the levers above are the target.
+Three things address it. The preamble now ends by repeating the persona's own words, so
+the voice occupies the recency position as well as the opening. The preamble itself was
+cut from 330 words to about 160 — it is the same set of guarantees said in a fraction of
+the words, which doubles the persona's share of the prompt for nothing. And writing a
+persona with real substance does the rest: a genuine 60-word voice now lands near
+**45%**. Prompts of 80–150 words that spend every sentence on one of the levers above
+are the target.
+
+The other half of that edit was tone, and it is worth knowing about if you write prompts
+yourself. The preamble was almost entirely prohibition — nine sentences beginning
+"Never" — and a prompt that is a list of things not to do produces a terse, adversarial
+voice regardless of the character on top of it. Worse, it *illustrated* the rules:
+"if someone here is bored, or angry, or fixated on one subject…". You cannot mention a
+mood without suggesting it, and personas duly started arriving bored and calling each
+other boring. The rules are now stated without naming a single mood, and without the
+word "never" appearing anywhere in the block.
 
 ## Drafting a persona with the LLM
 
