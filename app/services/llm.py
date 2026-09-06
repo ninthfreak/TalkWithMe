@@ -309,6 +309,7 @@ async def _text_completion(
     max_tokens: int,
     temperature: float,
     timeout: float,
+    stop: Optional[List[str]] = None,
 ) -> Optional[str]:
     """One non-streaming /v1/completions call.
 
@@ -325,6 +326,8 @@ async def _text_completion(
         "temperature": temperature,
         "stream": False,
     }
+    if stop:
+        payload["stop"] = stop
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, json=payload)
@@ -343,8 +346,14 @@ async def chat_completion(
     temperature: Optional[float] = None,
     timeout: float = ROUTER_TIMEOUT,
     persona_name: Optional[str] = None,
+    stop: Optional[List[str]] = None,
 ) -> str:
     """Non-streaming LLM call. Used for the persona router and suggestions.
+
+    *stop* carries the other speakers' prefixes, exactly as the streaming
+    path does. Without it a transcript-mode prompt ends at "[Leo]:" and
+    the model has no reason to stop after one turn — it writes the rest of
+    the scene, both halves of it, and invents whoever else it needs.
 
     *temperature* defaults to 0.1, which is what the router wants — it is
     picking a name, not writing. Callers producing prose (the suggested
@@ -372,6 +381,8 @@ async def chat_completion(
         "temperature": 0.1 if temperature is None else temperature,
         "stream": False,
     }
+    if stop:
+        payload["stop"] = stop
 
     if persona_name and settings.llm.prompt_format is PromptFormat.TRANSCRIPT:
         text = await _text_completion(
@@ -379,6 +390,7 @@ async def chat_completion(
             max_tokens=max_tokens,
             temperature=payload["temperature"],
             timeout=timeout,
+            stop=stop,
         )
         if text is not None:
             return text

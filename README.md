@@ -587,7 +587,9 @@ generic assistant vocabulary, a prompt too short to outweigh the room preamble, 
 negative space.
 
 **Try it before you keep it** asks the draft a question and shows the answer beside a
-persona you already have answering the same one. This is the part worth using every
+persona you already have answering the same one. It runs the persona exactly as a room
+would — same preamble, same stop sequences, same containment — so what you hear in the
+audition is what you get in the room. This is the part worth using every
 time: a draft read on its own always sounds distinctive, and read beside its neighbour it
 often doesn't.
 

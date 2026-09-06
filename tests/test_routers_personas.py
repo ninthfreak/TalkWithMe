@@ -810,10 +810,10 @@ def _stub_completion(monkeypatch, *replies):
     queue = list(replies)
 
     async def fake(messages, max_tokens=64, temperature=None, timeout=15.0,
-                   persona_name=None):
+                   persona_name=None, stop=None):
         seen.append({"messages": messages, "max_tokens": max_tokens,
                      "temperature": temperature, "timeout": timeout,
-                     "persona_name": persona_name})
+                     "persona_name": persona_name, "stop": stop})
         return queue.pop(0) if queue else ""
 
     monkeypatch.setattr(personas_router, "chat_completion", fake)
@@ -957,6 +957,53 @@ class TestPreviewPersona:
         assert body["draft"] == {"persona": "Rennick", "text": "Depends whose boat."}
         assert body["comparison"] is None
         assert not (personas_root / "Rennick").exists()
+
+    def test_a_reply_that_writes_the_whole_scene_is_cut_back_to_one_turn(
+        self, client, personas_root, monkeypatch
+    ):
+        # Reported from the wild. Transcript mode ends the prompt at
+        # "[Leo]:", so with nothing to stop it the model wrote the user's
+        # next line, its own answer to that, and invented a character
+        # (Ben) to be about — and the preview showed all of it as though
+        # the persona had said it.
+        leaked = (
+            "That's a classic ethical morass, and you're not equipped for it. "
+            "Ben, on the other hand, is.\n"
+            "[User]: You're the one who said he was a sweet idiot.\n"
+            "[Rennick]: I said he was a sweet idiot. I didn't say he was a bad choice.\n"
+            "[User]: I'm not asking about Ben.\n"
+            "[Rennick]: I am. I have a plan. You're not in it."
+        )
+        _stub_completion(monkeypatch, leaked)
+
+        body = client.post("/api/personas/preview", json=self._req()).json()
+
+        assert body["draft"]["text"] == (
+            "That's a classic ethical morass, and you're not equipped for it. "
+            "Ben, on the other hand, is."
+        )
+
+    def test_an_invented_speaker_is_cut_even_though_no_stop_string_knows_it(
+        self, client, personas_root, monkeypatch
+    ):
+        # A stop string can only name a speaker we know about, so the
+        # guard is what catches the made-up ones. Both layers, same as the
+        # room — the preview is worthless if it shows something the room
+        # would never let through.
+        _stub_completion(monkeypatch, "Whose boat.\nBen: Mine, actually.")
+
+        body = client.post("/api/personas/preview", json=self._req()).json()
+
+        assert "Ben" not in body["draft"]["text"]
+
+    def test_the_stop_strings_name_the_human_and_not_the_persona(
+        self, client, personas_root, monkeypatch
+    ):
+        seen = _stub_completion(monkeypatch, "Whose boat.")
+        client.post("/api/personas/preview", json=self._req())
+
+        assert "\n[User]:" in seen[0]["stop"]
+        assert not any("Rennick" in s for s in seen[0]["stop"])
 
     def test_the_preview_gets_the_prose_timeout(self, client, personas_root, monkeypatch):
         seen = _stub_completion(monkeypatch, "Depends whose boat.")

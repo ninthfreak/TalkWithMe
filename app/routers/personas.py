@@ -48,6 +48,7 @@ from app.models import (
 )
 from app.services import persona_draft, persona_store
 from app.services.llm import PROSE_TIMEOUT, chat_completion
+from app.services.reply_guard import ReplyGuard, stop_sequences
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/personas", tags=["personas"])
@@ -584,6 +585,12 @@ _DRAFT_MAX_TOKENS = 1400
 # cut off mid-demonstration, which would misrepresent it.
 _PREVIEW_MAX_TOKENS = 400
 
+# What the human is called in a preview. One constant, because the same
+# name has to reach the transcript tag, the stop strings and the guard —
+# a persona told not to speak as "User" while the tag says something else
+# is the bug this names away.
+_PREVIEW_USER = "User"
+
 
 @router.post("/draft", response_model=PersonaDraftResponse)
 async def draft_persona(req: PersonaDraftRequest):
@@ -725,9 +732,15 @@ async def _preview_reply(persona: Persona, question: str) -> str:
     preamble = _build_room_preamble(persona, "default", [persona.name], length)
     messages = [
         {"role": "system", "content": f"{persona.system_prompt}\n\n{preamble}"},
-        {"role": "user", "content": f"[User]: {question}"},
+        {"role": "user", "content": f"[{_PREVIEW_USER}]: {question}"},
     ]
-    return await chat_completion(
+    # Both layers the room uses, for the same reason it uses them: without
+    # the stop strings a transcript-mode prompt ends at "[Leo]:" and the
+    # model writes the whole scene — the user's next line, its own reply to
+    # that, and any character it needs to invent to fill the room. The
+    # guard then catches what the stop strings cannot, which is exactly the
+    # invented ones, since a stop string can only name a speaker we know.
+    text = await chat_completion(
         messages,
         max_tokens=derive_max_tokens(length, min(settings.llm.max_tokens, _PREVIEW_MAX_TOKENS)),
         temperature=settings.llm.temperature,
@@ -736,7 +749,10 @@ async def _preview_reply(persona: Persona, question: str) -> str:
         # through the instruct template and then run as a transcript is a
         # preview of a different character.
         persona_name=persona.name,
+        stop=stop_sequences(persona.name, [_PREVIEW_USER]),
     )
+    guard = ReplyGuard(persona.name, [_PREVIEW_USER])
+    return guard.feed(text) + guard.flush()
 
 
 @router.post("/preview", response_model=PersonaPreviewResponse)

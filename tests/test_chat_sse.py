@@ -106,14 +106,14 @@ def _tool_persona_dir(tmp_path: Path, *, name="ToolUser", memory_size=8192) -> P
 
 
 def _stub_completion(monkeypatch, result: str):
-    async def fake_completion(prompt, max_tokens=16, timeout=15.0):
+    async def fake_completion(prompt, max_tokens=16, timeout=15.0, **kwargs):
         return result
 
     monkeypatch.setattr(chat_router, "chat_completion", fake_completion)
 
 
 def _stub_completion_error(monkeypatch):
-    async def fake_completion(prompt, max_tokens=16, timeout=15.0):
+    async def fake_completion(prompt, max_tokens=16, timeout=15.0, **kwargs):
         raise RuntimeError("llm down")
 
     monkeypatch.setattr(chat_router, "chat_completion", fake_completion)
@@ -1630,9 +1630,10 @@ class TestSuggestReply:
     def _stub(self, monkeypatch, result="Aye, that'll be tuppence."):
         seen = []
 
-        async def fake(messages, max_tokens=64, temperature=None, timeout=15.0):
+        async def fake(messages, max_tokens=64, temperature=None, timeout=15.0,
+                       stop=None, persona_name=None):
             seen.append({"messages": messages, "max_tokens": max_tokens,
-                         "temperature": temperature})
+                         "temperature": temperature, "stop": stop})
             return result
 
         monkeypatch.setattr(chat_router, "chat_completion", fake)
@@ -1642,6 +1643,18 @@ class TestSuggestReply:
         resp = client.post("/api/chat/suggest", json={"chat_room": room})
         assert resp.status_code == 200, resp.text
         return resp.json()["text"]
+
+
+    def test_the_personas_prefixes_stop_the_draft_server_side(self, client, monkeypatch):
+        # The guard already cleans this up, but only after the model has
+        # written the whole exchange — the player's line, then a persona
+        # answering it — and thrown most of it away.
+        seen = self._stub(monkeypatch)
+        self._suggest(client)
+
+        assert "\n[Luna]:" in seen[0]["stop"]
+        assert "\n[Alex]:" in seen[0]["stop"]
+        assert not any("User" in s for s in seen[0]["stop"])
 
     def test_returns_a_draft(self, client, monkeypatch):
         self._stub(monkeypatch)

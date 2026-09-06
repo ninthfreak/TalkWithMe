@@ -850,6 +850,8 @@ async def suggest_reply(req: SuggestReplyRequest):
     room = _find_room(req.chat_room)
     settings = get_settings()
     length = resolve_typical_length(None, room, settings.general.typical_length)
+    user_label = _user_label()
+    eligible = _resolve_room_personas(req.chat_room)
 
     text = await chat_completion(
         _build_suggestion_prompt(req.chat_room),
@@ -859,6 +861,11 @@ async def suggest_reply(req: SuggestReplyRequest):
         # the time prose takes.
         temperature=settings.llm.temperature,
         timeout=PROSE_TIMEOUT,
+        # Cheaper than letting the guard clean up afterwards: the model
+        # stops before writing a persona's answer to the line it is
+        # drafting, instead of writing the whole exchange and having most
+        # of it thrown away.
+        stop=stop_sequences(user_label, eligible),
     )
 
     if not text.strip():
@@ -870,8 +877,7 @@ async def suggest_reply(req: SuggestReplyRequest):
     # The same guard the personas get, pointed the other way: strip a
     # "[Tony]: " prefix the model added, and cut it off if it carries on
     # into a persona's reply.
-    user_label = _user_label()
-    guard = ReplyGuard(user_label, _resolve_room_personas(req.chat_room))
+    guard = ReplyGuard(user_label, eligible)
     cleaned = (guard.feed(text) + guard.flush()).strip()
 
     if not cleaned:
