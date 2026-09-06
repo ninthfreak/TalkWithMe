@@ -440,9 +440,10 @@ WRITING_RULES = (
     "nobody is paying for\").\n\n"
     "Write who they are and what they care about — not a list of rules to follow. "
     "An actor improvises from a sketch; a decision table only gets executed, the "
-    "same way every time, whatever is actually being said. Leave gaps for them to "
-    "fill, and trust that what they would do in a situation you have not thought "
-    "of follows from who they are.\n\n"
+    "same way every time, whatever is actually being said. Leave gaps.\n\n"
+    "But a sketch of a person still says how they hold a conversation. They answer "
+    "what they were actually asked, in their own way and in their own words, and a "
+    "question with a yes or a no in it gets one.\n\n"
     "Plain language: a note to an actor, not an essay, and not a demonstration of "
     "the character's own vocabulary — an ornate character still gets a "
     "plainly-written note.\n\n"
@@ -527,10 +528,10 @@ Around {TARGET_PROMPT_WORDS} words. {WRITING_RULES}
 
 Reply in exactly this format, with these labels, and nothing else:
 
-NAME: <up to {MAX_NAME} characters, no slashes>
+NAME: <one ordinary given name, capitalised, up to {MAX_NAME} characters>
 DESCRIPTION: <up to {MAX_DESCRIPTION} characters, shown in the room roster>
 ROUTER_HINTS: <comma-separated topics this character should be picked for>
-LENGTH_BIAS: <one of: much_shorter, shorter, match, longer, much_longer>
+LENGTH_BIAS: <match, unless they are genuinely terser or more long-winded than everyone else. It shifts against the room's own setting, so "much_longer" is the one who monologues>
 AVATAR_COLOR: <a hex colour like #4A90D9>
 NOTES:
 - <one line per choice you made: which settings you followed, which details you invented, and what you chose for anything left open>
@@ -596,7 +597,7 @@ Reply in exactly this format, with these labels, and nothing else. Omit a label 
 
 DESCRIPTION: <up to {MAX_DESCRIPTION} characters, shown in the room roster>
 ROUTER_HINTS: <comma-separated topics this character should be picked for>
-LENGTH_BIAS: <one of: much_shorter, shorter, match, longer, much_longer>
+LENGTH_BIAS: <match, unless they are genuinely terser or more long-winded than everyone else. It shifts against the room's own setting, so "much_longer" is the one who monologues>
 NOTES:
 - <what you changed, and what you deliberately left alone>
 SYSTEM_PROMPT:
@@ -676,6 +677,13 @@ def parse_draft(text: str, base: Optional[PersonaDraft] = None) -> PersonaDraft:
     name = _clean_one_line(blocks.get("NAME", ""), MAX_NAME)
     # A slash makes the persona unreachable on /api/personas/{name}/...
     name = name.replace("/", " ").replace("\\", " ").strip()
+    # A name is a proper noun everywhere it appears — the roster, the
+    # "[Name]:" transcript tags, the stop strings — and a model that
+    # returns "thessaly" should not put a lowercase person in the room.
+    # Only the first character is touched: title-casing would flatten
+    # McTavish and O'Neill, which are names spelled the way they are spelled.
+    if name[:1].islower():
+        name = name[0].upper() + name[1:]
     if name:
         draft.name = name
 

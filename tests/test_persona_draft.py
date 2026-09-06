@@ -212,7 +212,27 @@ class TestDraftPrompt:
         system = system_of(spec())
         assert "Around 60 words" in system
         assert "not a list of rules to follow" in system
-        assert "Leave gaps for them to fill" in system
+        assert "Leave gaps" in system
+
+    def test_a_sketch_is_still_asked_to_hold_a_conversation(self):
+        # "Leave gaps" on its own bought vagueness, and a vague character
+        # monologues past the question instead of answering it.
+        system = system_of(spec())
+        assert "answer what they were actually asked" in system
+        assert "a question with a yes or a no in it gets one" in system
+
+    def test_the_name_is_asked_for_as_a_name(self):
+        # A draft came back called "thessaly".
+        system = system_of(spec())
+        assert "one ordinary given name, capitalised" in system
+
+    def test_the_length_bias_is_guided_rather_than_a_free_choice(self):
+        # Five options and no guidance, on a field that multiplies the
+        # room's tier: "longer" and "much_longer" both land on the longest
+        # tier there is, which is a short paragraph for a yes/no question.
+        system = system_of(spec())
+        assert "LENGTH_BIAS: <match, unless" in system
+        assert "the one who monologues" in system
 
     def test_the_brief_leads_and_is_named_as_the_point(self):
         # It used to sit below the dial block, outnumbered by settings the
