@@ -529,7 +529,7 @@ What does change behaviour, roughly in order of effect:
 | How the sentences are built | Length, vocabulary, contractions, jargon, whether they finish their thoughts. |
 | A verbal tic | One repeatable construction — how they open, a word they overuse. |
 | What they want | What they are pushing for or defending. A character with a stake argues; one without comments. |
-| What they never do | Refusals and avoidances. Negative space differentiates hardest, because it cuts off the generic reply. |
+| What they never do | Refusals and avoidances — one is worth having, and it is the fastest way to cut off the generic reply. |
 | What they think of the others | A named opinion about another persona gives the model something to play. |
 | Where they are wrong | A blind spot or an out-of-date belief. Perfect characters converge on the assistant voice. |
 | The mood they arrive in | Impatient, delighted, wary, bored — before anything is said to them. |
@@ -544,10 +544,17 @@ personas were being outvoted by their own instructions.
 Three things address it. The preamble now ends by repeating the persona's own words, so
 the voice occupies the recency position as well as the opening. The preamble itself was
 cut from 330 words to about 160 — it is the same set of guarantees said in a fraction of
-the words, which doubles the persona's share of the prompt for nothing. And writing a
-persona with real substance does the rest: a genuine 60-word voice now lands near
-**45%**. Prompts of 80–150 words that spend every sentence on one of the levers above
-are the target.
+the words, which doubles the persona's share of the prompt for nothing. And a persona no
+longer has to be bulky to be heard: sixty words now lands near **45%** of the prompt.
+
+Sixty is the target, and it used to be a hundred and twenty. Length was chasing that
+arithmetic — a persona had to be big to compete with the preamble — and the cost only
+became visible once the preamble shrank. A hundred and twenty words of "you do this, you
+never that" is not a character, it is a decision table, and a decision table gets
+executed: the same moves every turn, whatever was actually said. Heavy-handed,
+predictable and static, which is exactly how it read. An actor improvises from a sketch.
+Write who they are and what they care about, leave gaps, and let what they would do in a
+situation nobody thought of follow from that.
 
 The other half of that edit was tone, and it is worth knowing about if you write prompts
 yourself. The preamble was almost entirely prohibition — nine sentences beginning
@@ -612,8 +619,8 @@ fifty.
 Each draft explains itself. **What the draft did** names which settings it followed, what
 it invented, and what it chose for anything left open — so you can see what a good
 specification contains and write the next one by hand. **Worth a look** flags the failures the model is the wrong judge of:
-generic assistant vocabulary, a prompt too short to outweigh the room preamble, no
-negative space.
+assistant vocabulary, a pile of adjectives standing in for a person, and a prompt long
+enough to read as a rulebook.
 
 **Try it before you keep it** asks the draft a question and shows the answer beside a
 persona you already have answering the same one. It runs the persona exactly as a room

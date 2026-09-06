@@ -132,8 +132,8 @@ ANTI_PATTERNS = [
     "a person",
     "\"You are a helpful X\" framing — it collapses straight back to the "
     "default assistant register",
-    "biography with no behavioural consequence — a backstory only matters "
-    "if it changes how they answer",
+    "biography for its own sake — a past is worth a line when it shows in "
+    "how they answer, and worth none when it does not",
 ]
 
 
@@ -394,10 +394,17 @@ MAX_DESCRIPTION = 30
 MAX_ROUTER_HINTS = 256
 MAX_SYSTEM_PROMPT = 8192
 
-# Long enough to carry every lever, short enough to stay inside the room's
-# length budget. Wildly over-long prompts drown the room preamble instead,
-# which is the same failure pointing the other way.
-TARGET_PROMPT_WORDS = 120
+# A sketch, not a specification. 120 words of "you do X, you never Y"
+# produces a character who does X and never does Y — reliably, every
+# turn, whatever is actually said to them, which reads as heavy-handed
+# and static because it is. An actor improvises from a few lines; a
+# decision table only gets executed.
+#
+# The old number existed for an arithmetic reason that has since gone
+# away: a persona had to be bulky to compete with a 330-word room
+# preamble. The preamble is 160 words now, so sixty words of character is
+# already more than a quarter of what the model reads.
+TARGET_PROMPT_WORDS = 60
 
 
 @dataclass
@@ -429,18 +436,21 @@ class PersonaDraft:
 # actor. Kept as constants so a fix to one path cannot miss the other.
 
 WRITING_RULES = (
-    "Second person, addressed to the character (\"You interrupt when...\"). Every "
-    "sentence should say something the character does or does not do; cut anything "
-    "that is only description.\n\n"
-    "Write the prompt itself in the plainest language that will do the job. It is a "
-    "set of instructions to an actor, not an essay about a character, and not a "
-    "demonstration of the character's own vocabulary — an ornate character still "
-    "gets a plainly-written prompt.\n\n"
-    # Replaces what the old non-neutral dial defaults were for. One line
-    # against the model's house style, rather than ninety-four words of
-    # settings the user never chose.
-    "Unless the specification says otherwise, give them ordinary words and concrete "
-    "examples rather than an essayist's vocabulary and abstractions.\n\n"
+    "Second person, addressed to the character (\"You keep the good glue for jobs "
+    "nobody is paying for\").\n\n"
+    "Write who they are and what they care about — not a list of rules to follow. "
+    "An actor improvises from a sketch; a decision table only gets executed, the "
+    "same way every time, whatever is actually being said. Leave gaps for them to "
+    "fill, and trust that what they would do in a situation you have not thought "
+    "of follows from who they are.\n\n"
+    "Plain language: a note to an actor, not an essay, and not a demonstration of "
+    "the character's own vocabulary — an ornate character still gets a "
+    "plainly-written note.\n\n"
+    # Aimed at the model's essayist house style. Kept to vocabulary: an
+    # earlier version asked for "concrete examples" too, and got prompts
+    # that were nothing but examples.
+    "Ordinary words rather than an essayist's, unless the specification says "
+    "otherwise.\n\n"
     "Distinct is not the same as difficult. Warm, kind, delighted, loyal and "
     "generous are specific ways to be; write someone unpleasant only if you were "
     "asked for one."
@@ -492,7 +502,8 @@ def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
     blank = [d.label for d in DETAILS if not spec.details.get(d.key, "").strip()]
     if blank:
         detail_lines.append(
-            "- Invent the rest, and make each one specific: " + ", ".join(blank)
+            "- Not given. Invent only what earns its place, and leave the rest "
+            "out: " + ", ".join(blank)
         )
 
     system = f"""You write characters for a group chat where several of them talk to one human and to each other. Write ONE character from this specification.
@@ -505,7 +516,7 @@ WHO THEY ARE — the whole point, and everything below is subordinate to it
 HOW THEY SPEAK
 {dial_block}
 
-WHAT ELSE MAKES A CHARACTER BEHAVE DISTINCTLY (invent whatever the specification leaves open)
+WORTH HAVING IF THERE IS ROOM
 {lever_block}
 
 WHAT DOES NOT WORK, AND MUST NOT APPEAR IN YOUR OUTPUT
@@ -720,6 +731,10 @@ _BLAND_WORDS = (
 )
 _BLAND_PILE = 3
 
+# Past this, a prompt has stopped describing someone and started
+# specifying them.
+_RULEBOOK_WORDS = 110
+
 
 def critique(draft: PersonaDraft) -> List[str]:
     """Warnings about a draft, in the user's terms rather than the model's."""
@@ -727,11 +742,22 @@ def critique(draft: PersonaDraft) -> List[str]:
     prompt = draft.system_prompt
     words = prompt.split()
 
-    if len(words) < 40:
+    if len(words) < 20:
         warnings.append(
-            f"The prompt is only {len(words)} words. Short prompts lose to the "
-            "room's shared instructions — aim for something nearer "
-            f"{TARGET_PROMPT_WORDS}."
+            f"The prompt is only {len(words)} words — probably too little to be "
+            "anyone in particular."
+        )
+    elif len(words) > _RULEBOOK_WORDS:
+        # The warning used to point the other way, at anything under 40
+        # words, because a persona had to be bulky to compete with a
+        # 330-word room preamble. The preamble is 160 words now, and the
+        # real failure has changed ends: a long prompt is a list of rules,
+        # and a character given rules executes them identically every turn
+        # instead of reacting to what was said.
+        warnings.append(
+            f"At {len(words)} words this is closer to a rulebook than a "
+            "character. Long prompts get performed the same way every turn — "
+            f"nearer {TARGET_PROMPT_WORDS} words leaves them room to react."
         )
     lowered = prompt.lower()
     assistant = sorted({w for w in _ASSISTANT_WORDS if w in lowered})
@@ -746,11 +772,6 @@ def critique(draft: PersonaDraft) -> List[str]:
             "Leans on a pile of adjectives (" + ", ".join(bland) + ") rather than "
             "on things this character does. Any one of them is fine; several "
             "together describe nobody in particular."
-        )
-    if "never" not in prompt.lower() and "refus" not in prompt.lower():
-        warnings.append(
-            "Nothing here says what this character will not do. Negative "
-            "space differentiates harder than anything positive."
         )
     if not re.search(r"\byou\b", prompt.lower()):
         warnings.append(

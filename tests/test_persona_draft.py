@@ -198,9 +198,21 @@ class TestDraftPrompt:
                     assert option.instruction not in system
 
     def test_the_house_style_is_pushed_back_on_in_one_line_instead(self):
-        # What the old non-neutral defaults were for, at 1/5 the cost.
+        # What the old non-neutral defaults were for, at a fraction of the
+        # cost — and kept to vocabulary. Asking for "concrete examples"
+        # too produced prompts that were nothing but examples.
         system = system_of(spec())
-        assert "ordinary words and concrete examples" in system
+        assert "Ordinary words rather than an essayist's" in system
+        assert "concrete" not in system.lower()
+
+    def test_the_draft_is_asked_for_a_sketch_rather_than_a_rulebook(self):
+        # 120 words of "you do X, you never Y" produces a character who
+        # does X and never does Y, identically, every turn, whatever was
+        # actually said — heavy-handed and static because it is.
+        system = system_of(spec())
+        assert "Around 60 words" in system
+        assert "not a list of rules to follow" in system
+        assert "Leave gaps for them to fill" in system
 
     def test_the_brief_leads_and_is_named_as_the_point(self):
         # It used to sit below the dial block, outnumbered by settings the
@@ -242,7 +254,7 @@ class TestDraftPrompt:
         # fill one in — the prompt is competing for attention with itself.
         system = system_of(spec(details={"never": "never guesses at cargo"}))
         assert "never guesses at cargo" in system
-        assert system.count("Invent the rest") == 1
+        assert system.count("Invent only what earns its place") == 1
         assert "What they want" in system and "Background" in system
 
     def test_warmth_is_offered_as_an_option(self):
@@ -447,16 +459,31 @@ class TestCritique:
         )
         assert any("pile of adjectives" in w for w in critique(draft))
 
-    def test_missing_negative_space_is_flagged(self):
-        draft = PersonaDraft(name="R", system_prompt="You ask about cargo. " * 20)
-        assert any("will not do" in w for w in critique(draft))
+    def test_a_prompt_with_no_refusal_in_it_is_not_a_fault(self):
+        # This used to warn that "nothing here says what this character
+        # will not do", which put a refusal into every persona the app
+        # ever drafted — heavy-handed, and a steady source of characters
+        # announcing what they do not do.
+        draft = PersonaDraft(
+            name="Bess",
+            system_prompt=(
+                "You have bound books for thirty years and you can tell how someone "
+                "was loved by how their bible was handled. You keep the good glue "
+                "for jobs nobody is paying for."
+            ),
+        )
+        assert critique(draft) == []
 
-    def test_negative_space_satisfies_the_check(self):
+    def test_a_long_prompt_is_flagged_as_a_rulebook(self):
         draft = PersonaDraft(
             name="R",
-            system_prompt="You ask about cargo. " * 20 + "You never speculate.",
+            system_prompt="You always ask who signed for it. You never speculate. " * 12,
         )
-        assert not any("will not do" in w for w in critique(draft))
+        assert any("rulebook" in w for w in critique(draft))
+
+    def test_a_sketch_length_prompt_draws_no_length_warning(self):
+        draft = PersonaDraft(name="R", system_prompt="You ask about cargo. " * 15)
+        assert not any("rulebook" in w or "too little" in w for w in critique(draft))
 
     def test_a_third_person_prompt_is_flagged(self):
         draft = PersonaDraft(
