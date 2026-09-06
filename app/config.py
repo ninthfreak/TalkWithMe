@@ -241,7 +241,14 @@ class GeneralConfig(BaseModel):
     show_tool_calls: bool = True
     # Fallback tier, and the only one the implicit "default" room can use
     # (it has no chatrooms.yaml entry to carry an override).
-    typical_length: TypicalLength = TypicalLength.NORMAL
+    #
+    # DETAILED rather than NORMAL since the transcript prompt format
+    # arrived. NORMAL's twenty words was calibrated when a turn was an
+    # assistant answering a question, where short is a virtue. Read as one
+    # line of a script it is clipped, and a room of clipped lines reads as
+    # a room of people being short with each other — which is what it was
+    # taken for.
+    typical_length: TypicalLength = TypicalLength.DETAILED
     # Global kill-switch for the persona memory feature (docs/
     # feature_persona_memory.md). False disables the add_memory tool AND
     # stops injecting saved memories into system prompts — without touching
@@ -389,7 +396,11 @@ class ChatRoom(BaseModel):
     """A named grouping of personas."""
     name: str
     persona_names: List[str] = Field(default_factory=list)
-    typical_length: TypicalLength = TypicalLength.NORMAL
+    # Matches GeneralConfig's default, and has to: resolve_typical_length()
+    # reads a named room's own value and never falls through to the global
+    # one, so a room created with the old default would keep it forever
+    # while the "default" room moved.
+    typical_length: TypicalLength = TypicalLength.DETAILED
     # A property of the room: whether it insists on knowing who you are
     # before you can chat. *Who* you are playing is not the room's —
     # that lives in player.yaml.

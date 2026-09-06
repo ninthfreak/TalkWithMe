@@ -406,9 +406,16 @@ class TestTypicalLengthDefaults:
     def test_persona_defaults_to_matching_the_room(self):
         assert Persona(name="A", system_prompt="p").length_bias is LengthBias.MATCH
 
-    def test_room_and_global_default_to_normal(self):
-        assert ChatRoom(name="R").typical_length is TypicalLength.NORMAL
-        assert GeneralConfig().typical_length is TypicalLength.NORMAL
+    def test_room_and_global_default_to_detailed(self):
+        assert ChatRoom(name="R").typical_length is TypicalLength.DETAILED
+        assert GeneralConfig().typical_length is TypicalLength.DETAILED
+
+    def test_a_new_room_starts_where_the_app_does(self):
+        # resolve_typical_length() reads a named room's own value and never
+        # falls through to the global one, so a room created with a
+        # different default would keep it forever while the "default" room
+        # moved.
+        assert ChatRoom(name="R").typical_length is GeneralConfig().typical_length
 
 
 class TestChatCalibration:
@@ -526,7 +533,7 @@ class TestTypicalLengthPersistence:
         rooms = load_chatrooms(tmp_path / "chatrooms.yaml")
 
         assert personas[0].length_bias is LengthBias.MATCH
-        assert rooms.chat_rooms[0].typical_length is TypicalLength.NORMAL
+        assert rooms.chat_rooms[0].typical_length is TypicalLength.DETAILED
 
     def test_round_trips_as_a_plain_string(self, tmp_path):
         target = tmp_path / "chatrooms.yaml"

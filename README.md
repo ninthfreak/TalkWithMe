@@ -405,14 +405,26 @@ So length is set by telling the persona how long to be, not by cutting it off. P
 |------|---------|-------------|
 | Terse | ~4 words | a few words — often not even a full sentence |
 | Brief | ~10 words | one short sentence |
-| Normal (default) | ~20 words | a sentence or two |
-| Detailed | ~45 words | two or three sentences |
+| Normal | ~20 words | a sentence or two |
+| Detailed (default) | ~45 words | two or three sentences |
 | Verbose | ~110 words | a short paragraph |
 | Unrestricted | — | no guidance at all |
 
 The scale is calibrated for **chat, not prose**. People in a chat room write a fragment,
-sometimes a whole sentence, occasionally two when the thought needs it — so "normal" is a
-sentence or two, and even "verbose" is only a short paragraph.
+sometimes a whole sentence, occasionally two when the thought needs it — so even
+"verbose" is only a short paragraph.
+
+The default is **Detailed**, and it used to be Normal. Twenty words was calibrated when
+a turn was an assistant answering a question, where short is a virtue. Read as one line
+of a script — which is what the transcript prompt format makes it — twenty words is
+clipped, and a room of clipped lines reads as a room of people being short with each
+other. It was consistently taken for exactly that.
+
+**An existing install keeps whatever its `config/settings.yaml` says**, defaults
+included: a file that names a tier chose it, as far as this app can tell, and nothing
+migrates it behind your back. If your rooms still feel curt, the value is one dropdown
+away in General Settings — and note that each named room carries its *own* tier, set in
+the room editor, so moving the global one only moves the "All Personas" room.
 
 It is a *target*, not a limit. A persona is explicitly told it may go longer when the
 thought genuinely needs it, so a terse persona can still give you a real answer when you

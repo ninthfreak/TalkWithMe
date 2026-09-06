@@ -37,7 +37,7 @@ class TestCreateChatroom:
         assert resp.json() == {
             "name": "Enterprise",
             "persona_names": [],
-            "typical_length": "normal",
+            "typical_length": "detailed",
             "require_player_persona": False,
         }
         assert [r["name"] for r in client.get("/api/chatrooms").json()] == ["TNG", "Enterprise"]

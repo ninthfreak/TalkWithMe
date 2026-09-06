@@ -44,7 +44,7 @@ class TestGetSettings:
             "max_persona_replies": 1,
             "max_turns_for_context": 6,
             "show_tool_calls": True,
-            "typical_length": "normal",
+            "typical_length": "detailed",
             "enable_persona_memories": True,
         }
 
@@ -105,7 +105,7 @@ class TestUpdateSettings:
             "max_persona_replies": 3,         # preserved
             "max_turns_for_context": 12,      # preserved
             "show_tool_calls": False,         # updated
-            "typical_length": "normal",       # preserved
+            "typical_length": "detailed",     # preserved
             "enable_persona_memories": False, # preserved
         }
 
@@ -131,7 +131,7 @@ class TestUpdateSettings:
             "max_persona_replies": 4,
             "max_turns_for_context": 9,
             "show_tool_calls": False,
-            "typical_length": "normal",
+            "typical_length": "detailed",
             "enable_persona_memories": False,
         }
 

@@ -916,13 +916,17 @@ class TestTypicalLength:
         # The escape hatch must survive: typical is a target, not a ceiling.
         assert "longer when the thought needs it" in system
 
-    def test_normal_room_asks_for_a_sentence_or_two(self, client, monkeypatch):
+    def test_a_default_room_asks_for_a_conversational_turn(self, client, monkeypatch):
+        # Twenty words was calibrated when a turn was an assistant
+        # answering a question. Read as one line of a script it is clipped,
+        # and a room of clipped lines reads as people being short with
+        # each other.
         calls = _capture(monkeypatch)
         _chat(client, who_answers="Alex", chat_room="TNG")
 
         system = _system_prompt(calls[0])
-        assert "a sentence or two" in system
-        assert "~20 words" in system
+        assert "two or three sentences" in system
+        assert "~45 words" in system
 
     def test_persona_bias_shifts_within_the_rooms_scale(self, client, monkeypatch):
         # Relative, not absolute: "shorter" in a DETAILED room means NORMAL,

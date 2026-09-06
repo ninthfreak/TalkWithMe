@@ -128,7 +128,7 @@ class TestLegacyChatroomsAndSettings:
         target.write_text(LEGACY_CHATROOMS)
         room = load_chatrooms(target).chat_rooms[0]
         assert room.persona_names == ["Alex", "Luna"]          # preserved
-        assert room.typical_length is TypicalLength.NORMAL     # defaulted
+        assert room.typical_length is TypicalLength.DETAILED   # defaulted
         assert room.require_player_persona is False
 
     def test_legacy_settings_load_and_keep_their_values(self, tmp_path):
@@ -138,7 +138,16 @@ class TestLegacyChatroomsAndSettings:
         assert cfg.llm.base_url == "http://legacy:8080"
         assert cfg.general.max_persona_replies == 2
         assert cfg.general.show_tool_calls is False
-        assert cfg.general.typical_length is TypicalLength.NORMAL
+        # Absent from the legacy file, so it takes the current default.
+        assert cfg.general.typical_length is TypicalLength.DETAILED
+
+    def test_a_file_that_pins_the_old_length_keeps_it(self, tmp_path):
+        # The shipped default moved from NORMAL to DETAILED. A config that
+        # names a tier chose it, and nothing here may quietly overrule that
+        # — the setting is one dropdown away in General Settings.
+        target = tmp_path / "settings.yaml"
+        target.write_text(LEGACY_SETTINGS + "\n  typical_length: normal\n")
+        assert load_settings(target).general.typical_length is TypicalLength.NORMAL
 
 
 class TestSchemaVersioning:
