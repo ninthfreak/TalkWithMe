@@ -621,6 +621,22 @@ async def draft_persona(req: PersonaDraftRequest):
         )
 
     draft = persona_draft.parse_draft(text)
+
+    # The floor, enforced rather than asked for. The brief used as-is beat
+    # everything the generator ever wrote from it, so a reply that has
+    # written its own character over the top is not an improvement to
+    # weigh up — it is a regression, and the user's words go back in.
+    kept = persona_draft.kept_fraction(req.brief, draft.system_prompt)
+    if draft.system_prompt.strip() and kept < persona_draft._KEPT_WORDS_FLOOR:
+        logger.info(
+            "Draft kept only %.0f%% of the brief; using the brief itself", kept * 100
+        )
+        draft.system_prompt = persona_draft.prompt_from_brief(spec)
+        draft.notes.append(
+            "The draft rewrote your description rather than putting it in the "
+            "second person, so your own words were kept instead."
+        )
+
     if not draft.is_usable():
         logger.info("Unusable persona draft returned: %.400s", text)
         raise HTTPException(

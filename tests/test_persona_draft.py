@@ -141,161 +141,101 @@ class TestParseEnforcesFieldLimits:
 
 
 class TestDraftPrompt:
-    def test_only_the_levers_the_form_does_not_set_reach_the_prompt(self):
-        # A lever the dials or details already set is an instruction, not
-        # advice; restating it as advice invites the model to overrule it.
+    """The draft does paperwork, not authorship.
+
+    Built forwards from a theory of what makes a character distinct, this
+    file spent a long time asking a model to *write* one. Every failure
+    was the theory wrong somewhere new, and every fix was another
+    paragraph of counter-instruction. Checked at last against a
+    description known to work, the brief used as-is beat everything the
+    generator wrote from it — so it stopped writing them.
+    """
+
+    def test_the_brief_is_what_the_prompt_is_about(self):
+        system = system_of(spec("a bookbinder who repairs family bibles"))
+        assert "a bookbinder who repairs family bibles" in system
+        assert "The character is theirs and is not yours to improve" in system
+
+    def test_it_asks_for_the_words_back_in_the_second_person(self):
         system = system_of(spec())
-        # Matched on the prompt hint, not the title: several lever titles
-        # are also detail-field labels, which legitimately appear elsewhere.
-        for lever in persona_draft.LEVERS:
-            text = lever.prompt_hint or lever.hint
-            assert (text in system) is not bool(lever.superseded_by)
+        assert "Give their words back" in system
+        assert "Put them in the second person" in system
 
-    def test_every_superseded_lever_names_a_real_field(self):
-        for lever in persona_draft.LEVERS:
-            if lever.superseded_by:
-                assert (lever.superseded_by in persona_draft.DIALS_BY_KEY
-                        or lever.superseded_by in persona_draft.DETAILS_BY_KEY)
-
-    def test_something_is_still_left_for_the_model_to_invent(self):
-        # If the form ever covered every lever the block would be empty and
-        # the "invent whatever is left open" framing would be a lie.
-        assert any(not lv.superseded_by for lv in persona_draft.LEVERS)
-
-    def test_the_anti_patterns_are_named_explicitly(self):
-        # The model produces exactly these unless told not to.
+    def test_it_forbids_the_embellishment_that_used_to_be_the_job(self):
         system = system_of(spec())
-        assert "topic lists" in system
-        assert "pile of adjectives" in system
+        assert "Do not add traits, habits, opinions, mannerisms or backstory" in system
+        assert "do not make it longer" in system
+        assert "A short description stays a short prompt" in system
 
-    def test_the_brief_says_who_they_are(self):
-        system = system_of(spec("a suspicious harbourmaster"))
-        assert "a suspicious harbourmaster" in system
+    def test_details_are_carried_as_written(self):
+        system = system_of(spec(details={"never": "never lets anyone leave empty-handed"}))
+        assert "never lets anyone leave empty-handed" in system
 
-    def test_the_prompt_does_not_grow_with_the_cast(self):
-        # Distinctness comes from the specification, not from contrast with
-        # the existing personas — so the prompt is the same size whether
-        # there are none or fifty, and a draft costs the same either way.
+    def test_a_blank_detail_is_not_something_to_invent(self):
+        # It used to say "invent only what earns its place", which is
+        # still an invitation to invent.
         system = system_of(spec())
-        assert "cast" not in system.lower()
-        assert len(system) < 6000
+        assert "invent" not in system.lower()
 
-    def test_a_chosen_option_sends_its_instruction_not_its_label(self):
-        # "Crude" on its own is exactly as vague as the brief was; the
-        # instruction behind it is what does the work.
+    def test_a_set_dial_is_an_instruction_and_an_unset_one_is_silence(self):
         system = system_of(spec(dials={"vocabulary": "crude"}))
         assert "crude turns of phrase" in system
+        assert "Sentence shape" not in system
 
-    def test_an_untouched_form_sends_no_dial_text_at_all(self):
-        # The complaint this answers: seven dials emitted 94 words of
-        # settings against a 12-word brief, none of them chosen. A dial
-        # that has not been set now contributes nothing but its name on
-        # the "choose for yourself" line.
-        system = system_of(spec("a bookbinder"))
-        for dial in persona_draft.DIALS:
-            for option in dial.options:
-                if option.instruction:
-                    assert option.instruction not in system
-
-    def test_the_house_style_is_pushed_back_on_in_one_line_instead(self):
-        # What the old non-neutral defaults were for, at a fraction of the
-        # cost — and kept to vocabulary. Asking for "concrete examples"
-        # too produced prompts that were nothing but examples.
+    def test_the_theory_blocks_are_gone_from_the_prompt(self):
+        # Levers, anti-patterns and the writing rules were all
+        # instructions for writing a character. Nobody is writing one.
         system = system_of(spec())
-        assert "Ordinary words rather than an essayist's" in system
-        assert "concrete" not in system.lower()
+        for lever in persona_draft.LEVERS:
+            assert (lever.prompt_hint or lever.hint) not in system
+        for anti in persona_draft.ANTI_PATTERNS:
+            assert anti not in system
 
-    def test_the_draft_is_asked_for_a_sketch_rather_than_a_rulebook(self):
-        # 120 words of "you do X, you never Y" produces a character who
-        # does X and never does Y, identically, every turn, whatever was
-        # actually said — heavy-handed and static because it is.
-        system = system_of(spec())
-        assert "Around 60 words" in system
-        assert "not a list of rules to follow" in system
-        assert "Leave gaps" in system
-
-    def test_a_sketch_is_still_asked_to_hold_a_conversation(self):
-        # "Leave gaps" on its own bought vagueness, and a vague character
-        # monologues past the question instead of answering it.
-        system = system_of(spec())
-        assert "answer what they were actually asked" in system
-        assert "a question with a yes or a no in it gets one" in system
-
-    def test_the_name_is_asked_for_as_a_name(self):
-        # A draft came back called "thessaly".
-        system = system_of(spec())
-        assert "one ordinary given name, capitalised" in system
-
-    def test_the_length_bias_is_guided_rather_than_a_free_choice(self):
-        # Five options and no guidance, on a field that multiplies the
-        # room's tier: "longer" and "much_longer" both land on the longest
-        # tier there is, which is a short paragraph for a yes/no question.
-        system = system_of(spec())
-        assert "LENGTH_BIAS: <match, unless" in system
-        assert "the one who monologues" in system
-
-    def test_the_brief_leads_and_is_named_as_the_point(self):
-        # It used to sit below the dial block, outnumbered by settings the
-        # user never chose.
-        system = system_of(spec("a bookbinder who repairs family bibles"))
-        head = system[:system.index("HOW THEY SPEAK")]
-        assert "a bookbinder who repairs family bibles" in head
-        assert "everything below is subordinate to it" in head
-
-    def test_an_unspecified_dial_is_handed_back_to_the_model(self):
-        system = system_of(spec(dials={"stance": ""}))
-        assert "choose for yourself" in system
-        assert "Stance" in system
-
-    def test_no_dial_describes_a_disposition(self):
-        # The rule the dial set is built on. Politeness, temper, certainty
-        # and warmth are what "Who they are" is for: a model caricatures a
-        # disposition label ("blunt" comes back rude, whatever the prompt
-        # says alongside it), and two attempts to hold that line with
-        # prose failed — the second by putting *hostile* in front of the
-        # model it was trying to keep hostility out of.
-        words = set(re.findall(r"[a-z]+", " ".join(
-            o.label + " " + o.instruction
-            for d in persona_draft.DIALS for o in d.options
-        ).lower()))
-        for word in ("polite", "politeness", "hostile", "rude", "warm", "cold",
-                     "patient", "impatient", "angry", "confident", "dogmatic",
-                     "provoke", "temper", "escalate"):
-            assert word not in words
-
-    def test_the_dial_set_stays_small(self):
-        # Instructions compete: seven simultaneous style constraints get
-        # averaged into a generically stylised voice, where one gets
-        # applied.
-        assert len(persona_draft.DIALS) <= 4
-
-    def test_a_given_detail_is_quoted_and_the_blanks_are_named_once(self):
-        # One line naming what is open, not five telling the model how to
-        # fill one in — the prompt is competing for attention with itself.
-        system = system_of(spec(details={"never": "never guesses at cargo"}))
-        assert "never guesses at cargo" in system
-        assert system.count("Invent only what earns its place") == 1
-        assert "What they want" in system and "Background" in system
-
-    def test_warmth_is_offered_as_an_option(self):
-        # Without this the prompt is a list of things not to be — bland,
-        # helpful, friendly, agreeable — and the shortest road away from
-        # all of them is unpleasant. Which is where the whole cast ended up.
-        system = system_of(spec())
-        assert "Distinct is not the same as difficult" in system
-        assert "unpleasant only if you were asked" in system
-
-    def test_the_prompt_does_not_ban_being_pleasant(self):
-        # "Avoid friendly" taught the model that warmth was the mistake.
-        # The mistake is the adjective pile, and the wording has to say so.
-        system = system_of(spec())
-        assert "any one of those can be true of someone" in system
+    def test_the_prompt_is_a_fraction_of_what_it_was(self):
+        # 534 words of instruction for writing a character, against a
+        # twelve-word brief. Asking for paperwork needs far less.
+        assert len(system_of(spec("a bookbinder")).split()) < 300
 
     def test_the_user_turn_is_a_constant(self):
-        # Everything the user typed is in the system turn, so the user turn
-        # carries no instruction a model could mistake for the brief.
         messages = build_draft_prompt(spec("a harbourmaster"))
         assert messages[1] == {"role": "user", "content": "Write the character."}
+
+
+class TestKeepingTheUsersWords:
+    """The floor, enforced in code rather than asked for in a prompt."""
+
+    BRIEF = "A bookbinder who repairs family bibles and remembers every story"
+
+    def test_the_brief_alone_makes_a_usable_prompt(self):
+        assert persona_draft.prompt_from_brief(spec(self.BRIEF)) == self.BRIEF
+
+    def test_details_are_appended_in_the_users_words(self):
+        built = persona_draft.prompt_from_brief(
+            spec(self.BRIEF, details={"never": "never lets anyone leave empty-handed"})
+        )
+        assert built.startswith(self.BRIEF)
+        assert "never lets anyone leave empty-handed" in built
+
+    def test_a_second_person_rewrite_counts_as_kept(self):
+        # The one change the draft is asked to make must not read as a
+        # rewrite, or the fallback would fire on every good draft.
+        rewritten = ("You are a bookbinder. You repair family bibles and you "
+                     "remember every story behind them.")
+        assert persona_draft.kept_fraction(self.BRIEF, rewritten) >= \
+            persona_draft._KEPT_WORDS_FLOOR
+
+    def test_a_replacement_character_does_not(self):
+        invented = ("You run a harbour and you assume everyone is smuggling. You "
+                    "answer a question with a question about who signed for it.")
+        assert persona_draft.kept_fraction(self.BRIEF, invented) < \
+            persona_draft._KEPT_WORDS_FLOOR
+
+    def test_an_empty_brief_cannot_fail_the_check(self):
+        assert persona_draft.kept_fraction("", "anything at all") == 1.0
+
+    def test_filler_words_do_not_prop_up_the_score(self):
+        # "the a and of" overlapping is not the brief surviving.
+        assert persona_draft.kept_fraction(self.BRIEF, "the and of a to in it") == 0.0
 
 
 class TestPersonaSpec:

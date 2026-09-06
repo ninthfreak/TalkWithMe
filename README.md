@@ -567,50 +567,41 @@ word "never" appearing anywhere in the block.
 
 ## Drafting a persona with the LLM
 
-**Draft with AI…** at the top of **New Persona** takes a few lines about who the
-character is and fills in every field.
+**Draft with AI…** at the top of **New Persona** does the paperwork around a character
+you wrote. It does not write the character.
 
-**Who they are is the box that matters.** What they care about, how they treat people,
-what sort of person they are, how easily they are rattled — all of it belongs there, in
-your own words. A model caricatures a one-word disposition and plays a described one:
-tell it a character is "blunt" and you get somebody rude, because in everything it was
-trained on blunt characters are rude. Tell it she is generous with her time and sharp
-about anyone who mistreats a book, and you get her.
+That is a correction, and it is worth being blunt about why. This feature was built
+forwards from a theory — a list of levers that ought to make a character distinct, a list
+of anti-patterns that ought not to appear, and a page of rules for turning a sentence
+into a behavioural specification. It was never checked against a description that was
+known to work. When it finally was, the finding was that **the description typed into the
+box outperformed everything the generator wrote from it**, consistently. So the generator
+stopped writing characters.
 
-Below the brief are four **dials**, and they cover only the mechanics of speech — the
-part a sentence about someone expresses badly:
+What it does now:
 
-| Dial | Decides |
-|------|---------|
-| Vocabulary | Which words they reach for: blunt everyday, trade talk, plain, bookish, ornate, technical, crude, foul-mouthed |
-| Sentence shape | Clipped, short, flowing, rambling |
-| Abstraction | Whether they argue from cases or from principles |
-| Stance | What they do with a turn: ask, respond, assert, correct, tell a story |
+- **Your description becomes the system prompt**, put into the second person ("You bind
+  books" for "She binds books") and otherwise left alone. No traits, habits, opinions or
+  backstory you did not write. A short description stays a short prompt.
+- **Details you filled in are folded in as you wrote them.** Blanks stay blank — a line
+  you did not write is a line the character does not get.
+- **A dial you set adds one line** in your own register. A dial you left alone adds
+  nothing.
+- **It fills in the fields nobody wants to write by hand**: a name, the 30-character
+  roster description, routing topics, an avatar colour, and the reply-length bias.
 
-**A dial you do not touch contributes nothing.** Every one starts at *Let the draft
-decide*, and an untouched dial puts no text in the prompt at all — so a brief on its own
-is read against almost nothing else. That is deliberate, and it is the correction to a
-version that had seven dials sitting at opinionated defaults: they emitted 94 words of
-settings the user had never chosen, against a 12-word brief, and drowned it.
+Extraction and classification, which models are reliable at, instead of writing to a
+specification, which they are not.
 
-There used to be dials for Register (politeness and profanity), Temperament and
-Certainty. They are gone, and the reasoning is the rule for what belongs here at all:
+**If it rewrites you anyway, your words go back.** The app compares what came back
+against what you typed, and a reply that has written its own character over the top is
+discarded in favour of your description — with a note saying so. The floor is your own
+text, enforced rather than hoped for, because your own text is the thing that measurably
+works.
 
-- **Instructions compete.** Seven simultaneous style constraints get averaged into a
-  generically "stylised" voice; one constraint gets applied. A dial resting at a neutral
-  value — "ordinary sentence lengths, varied" — says nothing and dilutes everything else.
-- **Disposition labels get caricatured**, and no amount of surrounding prose fixes it.
-  Two attempts to keep "coarse" from meaning "hostile" failed, and the second made things
-  worse by putting the word *hostile* in the prompt of a model whose next job was
-  inventing a person.
-- So a dial may describe **how someone speaks**. How someone *is* goes in the brief,
-  where your own words carry it and nothing has to be flattened into a label. Profanity
-  moved into Vocabulary, where it belongs — it is a vocabulary, not a temperament.
-
-Under **Details** are five optional free-text boxes: what they want, what they never do,
-where they are wrong, a verbal tic, and background. Anything left blank is invented, and
-the notes say so. One or two of these does more for a character than any amount of extra
-brief.
+Under **What to put in the description, if you are stuck** is a list of the things that
+change how a character behaves rather than how they are described. Nothing on it is added
+for you; it is there to help you write.
 
 Your existing personas are not sent to the model — a character is defined by what it is,
 not by what the others are, and a draft costs the same whether you have two personas or

@@ -462,81 +462,113 @@ def _anti_pattern_block() -> str:
     return "\n".join(f"- Avoid {a}" for a in ANTI_PATTERNS)
 
 
-def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
-    """The messages that ask the LLM for a persona.
+def prompt_from_brief(spec: PersonaSpec) -> str:
+    """The user's own words as a system prompt, assembled in code.
 
-    Written as an instruction to a *casting director*, not to an assistant
-    filling in a form: the framing matters, because "fill in these fields"
-    produces field-shaped filler and "write this person so they could not
-    be mistaken for anyone" produces a character.
+    No model involved. This is the floor the drafting endpoint falls back
+    to, and it is the floor because it is measurably the best thing on
+    offer: the brief used as-is outperformed everything the generator
+    wrote from it.
     """
-    # Only the levers nothing on the form sets. The rest are already in
-    # the block above as instructions, and restating them as advice makes
-    # the model treat a setting as a suggestion.
-    open_levers = [lv for lv in LEVERS if not lv.superseded_by]
-    lever_block = "\n".join(
-        f"- {lv.title}: {lv.prompt_hint or lv.hint}" for lv in open_levers
-    )
-    anti_block = _anti_pattern_block()
+    parts = [spec.brief.strip()]
+    for detail in DETAILS:
+        given = spec.details.get(detail.key, "").strip()
+        if given:
+            parts.append(f"{detail.label}: {given}")
+    return "\n".join(parts)
 
-    set_lines = [line for line in
-                 (spec.instruction_for(d.key) for d in DIALS) if line]
-    open_dials = [d.title for d in DIALS if spec.instruction_for(d.key) is None]
 
-    # An unset dial contributes nothing but the one line below naming it as
-    # open. This is the whole point of the redesign: fill in only the brief
-    # and the brief is what the model reads.
-    dial_block = "\n".join(set_lines)
-    if open_dials:
-        if dial_block:
-            dial_block += "\n"
-        dial_block += ("- Not set, so choose for yourself and say what you chose: "
-                       + ", ".join(open_dials))
+# Content words of the brief that must survive into the drafted prompt.
+# Below this the model has written its own character over the top of the
+# user's, and the user's is the one that works.
+_KEPT_WORDS_FLOOR = 0.6
 
-    # Blanks collapse into one line rather than five "NOT GIVEN" ones: the
-    # model needs to know which are open, not to be told five times how to
-    # fill one in, and the prompt is competing for attention with itself.
-    detail_lines = [
-        f"- {d.label}: {spec.details[d.key].strip()}"
-        for d in DETAILS if spec.details.get(d.key, "").strip()
-    ]
-    blank = [d.label for d in DETAILS if not spec.details.get(d.key, "").strip()]
-    if blank:
-        detail_lines.append(
-            "- Not given. Invent only what earns its place, and leave the rest "
-            "out: " + ", ".join(blank)
+_FILLER_WORDS = frozenset("""
+a an and are as at be been but by for from has have he her hers him his i in is it its
+me my of on or our she that the their them they this to was we were who whom with you
+your
+""".split())
+
+
+def _content_words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z']{3,}", text.lower())} - _FILLER_WORDS
+
+
+def kept_fraction(brief: str, prompt: str) -> float:
+    """How much of the brief's vocabulary survived into *prompt*.
+
+    Crude on purpose. It is not judging quality — it is answering one
+    question the app has no other way to answer: did the model keep what
+    it was given, or replace it?
+    """
+    wanted = _content_words(brief)
+    if not wanted:
+        return 1.0
+    return len(wanted & _content_words(prompt)) / len(wanted)
+
+
+def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
+    """The messages that ask the LLM to finish a persona the user started.
+
+    **This asks for paperwork, not authorship, and that is a correction.**
+
+    The first version of this file was built forwards from a theory: a
+    list of levers that ought to make characters distinct, a list of
+    anti-patterns that ought not to appear, and a page of rules for
+    turning a brief into a hundred and twenty words of behavioural
+    specification. Every failure since was that theory being wrong in a
+    new place — characters that were uniformly unpleasant, then
+    uniformly terse, then rulebooks that executed the same moves every
+    turn — and every fix was another paragraph of counter-instruction.
+
+    None of it was ever checked against a description that was known to
+    work. When it finally was, the answer was that the brief used as-is
+    beat everything the generator produced from it. So the generator
+    stops writing characters. It puts the user's words into second
+    person, folds in what they filled in, and fills the fields nobody
+    wants to write by hand: a name, a roster description, routing
+    topics, a colour, a reply length. Extraction and classification,
+    which models are good at, instead of writing to a spec, which they
+    are not.
+
+    ``draft_persona`` enforces this rather than trusting it: a reply that
+    has written over the brief is discarded in favour of
+    ``prompt_from_brief()``.
+    """
+    dial_lines = [line for line in
+                  (spec.instruction_for(d.key) for d in DIALS) if line]
+    dial_block = ""
+    if dial_lines:
+        dial_block = (
+            "\n\nThey also asked for these, so add a line for each in their "
+            "own register:\n" + "\n".join(dial_lines)
         )
 
-    system = f"""You write characters for a group chat where several of them talk to one human and to each other. Write ONE character from this specification.
+    system = f"""The user has written a character. The character is theirs and is not yours to improve; your job is the paperwork around it.
 
-WHO THEY ARE — the whole point, and everything below is subordinate to it
-{spec.brief.strip()}
+WHAT THEY WROTE
+{prompt_from_brief(spec)}
 
-{chr(10).join(detail_lines)}
+THE SYSTEM PROMPT
+Give their words back, changed only in these ways:
+- Put them in the second person — "You bind books" where they wrote "She binds books" — keeping their phrasing everywhere else.
+- Fold any labelled details above into the flow of it.
+- Fix nothing else. Do not add traits, habits, opinions, mannerisms or backstory they did not write, do not make it longer, and do not make it tidier. A short description stays a short prompt.{dial_block}
 
-HOW THEY SPEAK
-{dial_block}
-
-WORTH HAVING IF THERE IS ROOM
-{lever_block}
-
-WHAT DOES NOT WORK, AND MUST NOT APPEAR IN YOUR OUTPUT
-{anti_block}
-
-WRITING THE SYSTEM PROMPT
-Around {TARGET_PROMPT_WORDS} words. {WRITING_RULES}
+THE REST
+Fill in what they did not write.
 
 Reply in exactly this format, with these labels, and nothing else:
 
-NAME: <one ordinary given name, capitalised, up to {MAX_NAME} characters>
+NAME: <one ordinary given name, capitalised, up to {MAX_NAME} characters — theirs if they named the character, otherwise one that suits>
 DESCRIPTION: <up to {MAX_DESCRIPTION} characters, shown in the room roster>
 ROUTER_HINTS: <comma-separated topics this character should be picked for>
-LENGTH_BIAS: <match, unless they are genuinely terser or more long-winded than everyone else. It shifts against the room's own setting, so "much_longer" is the one who monologues>
+LENGTH_BIAS: <match, unless they said this character is terser or wordier than everyone else>
 AVATAR_COLOR: <a hex colour like #4A90D9>
 NOTES:
-- <one line per choice you made: which settings you followed, which details you invented, and what you chose for anything left open>
+- <what you changed, and what you filled in>
 SYSTEM_PROMPT:
-<the prompt itself, second person, no name prefix, no quotes>"""
+<their character, second person, no name prefix, no quotes>"""
 
     return [
         {"role": "system", "content": system},

@@ -788,17 +788,19 @@ class TestLengthBiasRoundTrips:
 # POST /api/personas/draft  and  POST /api/personas/preview
 # ---------------------------------------------------------------------------
 
+# What a good draft looks like now: the brief below, in the second person,
+# with nothing added and nothing padded.
+DRAFT_BRIEF = "a suspicious harbourmaster who thinks everyone is smuggling"
+
 DRAFT_REPLY = """NAME: Rennick
 DESCRIPTION: A suspicious harbourmaster
 ROUTER_HINTS: boats, cargo
 LENGTH_BIAS: shorter
 AVATAR_COLOR: #2E7D32
 NOTES:
-- Stance: answers questions with questions about provenance.
-- Negative space: never speculates about unlogged cargo.
+- Put it in the second person; filled in the name, roster line and topics.
 SYSTEM_PROMPT:
-You run the harbour and assume everyone is smuggling. You never speculate
-about cargo you have not seen logged.
+You are a suspicious harbourmaster and you think everyone is smuggling.
 """
 
 
@@ -824,7 +826,7 @@ class TestDraftPersona:
     def test_a_brief_comes_back_as_a_full_persona(self, client, personas_root, monkeypatch):
         _stub_completion(monkeypatch, DRAFT_REPLY)
 
-        resp = client.post("/api/personas/draft", json={"brief": "a suspicious harbourmaster"})
+        resp = client.post("/api/personas/draft", json={"brief": DRAFT_BRIEF})
 
         assert resp.status_code == 200
         body = resp.json()
@@ -832,15 +834,45 @@ class TestDraftPersona:
         assert body["description"] == "A suspicious harbourmaster"
         assert body["length_bias"] == "shorter"
         assert body["avatar_color"] == "#2E7D32"
-        assert body["system_prompt"].startswith("You run the harbour")
-        assert len(body["notes"]) == 2
+        assert body["system_prompt"] == (
+            "You are a suspicious harbourmaster and you think everyone is smuggling."
+        )
+        assert len(body["notes"]) == 1
+
+    def test_a_draft_that_rewrites_the_brief_is_discarded_for_it(
+        self, client, personas_root, monkeypatch
+    ):
+        # The measured floor: the brief used as-is beat everything the
+        # generator wrote from it, so a reply that has written its own
+        # character over the top is a regression, not a judgement call.
+        _stub_completion(monkeypatch, DRAFT_REPLY)
+
+        body = client.post("/api/personas/draft", json={
+            "brief": "A bookbinder who repairs family bibles",
+        }).json()
+
+        assert body["system_prompt"] == "A bookbinder who repairs family bibles"
+        assert any("your own words were kept" in n for n in body["notes"])
+        # The paperwork it was actually asked for still comes through.
+        assert body["name"] == "Rennick"
+        assert body["avatar_color"] == "#2E7D32"
+
+    def test_the_details_survive_the_fallback(self, client, personas_root, monkeypatch):
+        _stub_completion(monkeypatch, DRAFT_REPLY)
+
+        body = client.post("/api/personas/draft", json={
+            "brief": "A bookbinder who repairs family bibles",
+            "details": {"never": "never lets anyone leave empty-handed"},
+        }).json()
+
+        assert "never lets anyone leave empty-handed" in body["system_prompt"]
 
     def test_the_existing_cast_is_not_sent_to_the_model(self, client, personas_root, monkeypatch):
         # Diversity comes from the levers, not from contrast: the prompt
         # must not grow with the cast, and a character is defined by what
         # it is rather than by what the others are.
         seen = _stub_completion(monkeypatch, DRAFT_REPLY)
-        client.post("/api/personas/draft", json={"brief": "a harbourmaster"})
+        client.post("/api/personas/draft", json={"brief": DRAFT_BRIEF})
 
         sent = " ".join(m["content"] for m in seen[0]["messages"])
         assert "Alex" not in sent and "Luna" not in sent
@@ -851,7 +883,7 @@ class TestDraftPersona:
         # comes back as "", and the server finishes generating into a
         # closed connection.
         seen = _stub_completion(monkeypatch, DRAFT_REPLY)
-        client.post("/api/personas/draft", json={"brief": "a harbourmaster"})
+        client.post("/api/personas/draft", json={"brief": DRAFT_BRIEF})
         assert seen[0]["temperature"] == 0.8
         assert seen[0]["timeout"] >= 60
 
@@ -887,7 +919,7 @@ class TestDraftPersona:
         # must keep working for anyone posting without them.
         _stub_completion(monkeypatch, DRAFT_REPLY)
         assert client.post(
-            "/api/personas/draft", json={"brief": "a harbourmaster"}
+            "/api/personas/draft", json={"brief": DRAFT_BRIEF}
         ).status_code == 200
 
     def test_a_name_collision_is_resolved_against_the_cast(self, client, personas_root, monkeypatch):
@@ -923,7 +955,7 @@ class TestDraftPersona:
 
     def test_nothing_is_written_to_disk(self, client, personas_root, monkeypatch):
         _stub_completion(monkeypatch, DRAFT_REPLY)
-        client.post("/api/personas/draft", json={"brief": "a harbourmaster"})
+        client.post("/api/personas/draft", json={"brief": DRAFT_BRIEF})
 
         # Drafting is not saving: the form is the review step.
         assert not (personas_root / "Rennick").exists()

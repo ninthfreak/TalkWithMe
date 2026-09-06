@@ -216,13 +216,13 @@
                 <h2 id="pd-title">Draft a persona</h2>
                 <button id="pd-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
             </div>
-            <div class="modal-intro field-hint">Who they are is the important box &mdash; what they care about, how they treat people, what sort of person they are. The dials below only cover the mechanics of speech, which a sentence about someone says badly; leave one alone and it says nothing at all.</div>
+            <div class="modal-intro field-hint">You write the character; this fills in the paperwork. Your description comes back as the system prompt in the second person, with a name, a roster line, routing topics and a colour attached &mdash; it does not rewrite you, add traits you did not ask for, or pad it out.</div>
             <div id="pd-error" class="pe-form-error hidden"></div>
             <div class="settings-body">
                 <div class="form-row">
                     <label for="pd-brief">Who they are <span class="required">*</span></label>
                     <textarea id="pd-brief" maxlength="2000" rows="4" placeholder="A bookbinder who repairs family bibles and remembers every story behind them. Generous with her time, sharp about anyone who mistreats a book."></textarea>
-                    <span class="field-hint">Temper, warmth, patience, certainty &mdash; all of that belongs here rather than in a dropdown. A model caricatures a one-word disposition; it plays a described one.</span>
+                    <span class="field-hint">Everything that matters goes here, in your own words &mdash; temper, warmth, what they care about, how they treat people. This text becomes the prompt more or less as you wrote it, so write it the way you want them played.</span>
                 </div>
 
                 {% for group_title, dials in persona_dial_groups %}
@@ -243,8 +243,8 @@
                 {% endfor %}
 
                 <details id="pd-details" class="pd-levers">
-                    <summary>Details &mdash; optional, and the fastest way to a character who is nobody else</summary>
-                    <p class="field-hint">Anything left blank is invented for you, and the notes say what was invented. Filling in even one or two of these does more than any amount of extra brief.</p>
+                    <summary>Details &mdash; optional, and folded into the prompt as you write them</summary>
+                    <p class="field-hint">Blanks stay blank. Nothing here is invented for you &mdash; a line you did not write is a line the character does not get.</p>
                     {% for detail in persona_details %}
                     <div class="form-row">
                         <label for="pd-detail-{{ detail.key }}">{{ detail.label }}</label>
@@ -255,8 +255,8 @@
                 </details>
 
                 <details id="pd-levers" class="pd-levers">
-                    <summary>What else the draft invents for you</summary>
-                    <p class="field-hint">The dials and details above are most of what makes a character behave distinctly. These are the rest &mdash; not on the form because they depend on who else is in the room, but the draft still writes them, and they are worth putting in a persona you write by hand.</p>
+                    <summary>What to put in the description, if you are stuck</summary>
+                    <p class="field-hint">Things that change how a character actually behaves, as opposed to how they are described. Nothing here is added for you &mdash; this is a list of what is worth writing yourself.</p>
                     <dl id="pd-lever-list">
                         {% for lever in persona_levers %}
                         <dt>{{ lever.title }}</dt>

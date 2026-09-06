@@ -157,9 +157,10 @@ async def index(request: Request):
     hand-copied list in the JS would start sending options the prompt has
     no instruction for within a release or two.
 
-    The levers list is filtered the same way the prompt filters it: a
-    lever the form now sets directly is a control, not advice, and listing
-    it twice reads as two ways to set the same thing.
+    The levers list is advice to the person writing the description — the
+    draft no longer invents any of it — and is filtered to drop anything
+    the form already sets, which would otherwise read as two ways to say
+    the same thing.
     """
     return templates.TemplateResponse("index.html", {
         "request": request,
