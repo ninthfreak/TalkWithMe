@@ -75,7 +75,7 @@ LEVERS: List[Lever] = [
         "Length, vocabulary, contractions, jargon, profanity, whether they "
         "finish their thoughts. Two characters with identical opinions read "
         "as different people if the prose is shaped differently.",
-        superseded_by="register",
+        superseded_by="vocabulary",
     ),
     Lever(
         "signature",
@@ -180,14 +180,38 @@ class Dial:
 
 
 SPEECH = "How they talk"
-ENGAGEMENT = "How they engage"
+ENGAGEMENT = "What they do with a turn"
 
+
+# Four, not seven, and every one of them silent until it is set. The
+# reasoning, since it decides what belongs here and what does not:
+#
+#   * Instructions compete. Seven simultaneous style constraints get
+#     averaged into a generically "stylised" voice; one constraint gets
+#     applied. A dial sitting at a neutral default ("ordinary sentence
+#     lengths, varied") says nothing and dilutes everything else, and
+#     seven of those buried a twelve-word brief under ninety-four words
+#     the user never chose.
+#   * Models caricature disposition labels. "Blunt" does not produce
+#     blunt, it produces rude, because in the training distribution blunt
+#     characters are rude. Two attempts to hold that line with prose
+#     ("WORD CHOICE ONLY: this does not make them hostile") failed, and
+#     the second one made things worse by putting *hostile* in front of
+#     the model.
+#   * So: a dial may cover the MECHANICS OF SPEECH, which a brief
+#     expresses badly. Disposition — politeness, temper, certainty, warmth
+#     — belongs in "Who they are", where the user's own words carry it and
+#     nothing has to be caricatured to be understood.
+#
+# Dropped on that rule: Register (its lexical half lives in Vocabulary
+# now; politeness is relational, which is why Warmth went the same way),
+# Temperament (existed to stop Register bleeding into temper, so it went
+# with it), and Certainty.
 
 DIALS: List[Dial] = [
     Dial(
         "vocabulary", "Vocabulary",
-        "Named registers rather than a vague scale — \"plain\" is exactly the "
-        "kind of adjective a model reads loosely.",
+        "Which words they reach for. The one thing a brief says badly.",
         SPEECH,
         [
             DialOption(UNSPECIFIED, "Let the draft decide", ""),
@@ -203,14 +227,20 @@ DIALS: List[Dial] = [
                        "long clauses, metaphor, rhetorical shape"),
             DialOption("technical", "Technical",
                        "domain jargon used precisely, accessibility second"),
+            # Profanity is a vocabulary, and only a vocabulary. It used to
+            # live on a politeness dial next to "courteous" and "blunt",
+            # where the model read the whole axis as how they treat people.
+            DialOption("crude", "Crude",
+                       "crude turns of phrase and mild profanity, with everyone alike"),
+            DialOption("foul_mouthed", "Foul-mouthed",
+                       "swears constantly and without thinking about it, at people they "
+                       "like as much as anyone"),
         ],
-        # Defaults deliberately below the model's house style. Left to
-        # itself it writes everyone as an essayist; this pushes back
-        # unless you ask for otherwise.
-        "plain_literate",
+        UNSPECIFIED,
     ),
     Dial(
-        "sentences", "Sentence shape", "How the prose is built, independent of the words in it.",
+        "sentences", "Sentence shape",
+        "How the prose is built, whatever the words in it are.",
         SPEECH,
         [
             DialOption(UNSPECIFIED, "Let the draft decide", ""),
@@ -218,33 +248,12 @@ DIALS: List[Dial] = [
                        "fragments, often no verb; stops as soon as the point is made"),
             DialOption("short", "Short",
                        "short complete sentences, one idea in each"),
-            DialOption("neutral", "Neutral", "ordinary sentence lengths, varied"),
             DialOption("flowing", "Flowing",
                        "longer sentences whose subordinate clauses connect ideas"),
             DialOption("rambling", "Rambling",
                        "runs on and digresses; arrives at the point late, or not at all"),
         ],
-        "neutral",
-    ),
-    Dial(
-        "register", "Register",
-        "Politeness and profanity. This is about WORD CHOICE only — see Temperament for whether they escalate.",
-        SPEECH,
-        [
-            DialOption(UNSPECIFIED, "Let the draft decide", ""),
-            DialOption("courteous", "Courteous",
-                       "polite and careful; softens bad news"),
-            DialOption("neutral", "Neutral",
-                       "neither polite nor rough; says the thing"),
-            DialOption("blunt", "Blunt",
-                       "says the unwelcome thing without cushioning it; no profanity"),
-            DialOption("coarse", "Coarse",
-                       "crude turns of phrase and mild profanity — word choice only"),
-            DialOption("profane", "Profane",
-                       "swears freely and casually, with the people they like as much as "
-                       "anyone else"),
-        ],
-        "neutral",
+        UNSPECIFIED,
     ),
     Dial(
         "abstraction", "Abstraction",
@@ -253,50 +262,17 @@ DIALS: List[Dial] = [
         [
             DialOption(UNSPECIFIED, "Let the draft decide", ""),
             DialOption("concrete", "Concrete",
-                       "talks about specific things, people and events; examples rather than principles"),
-            DialOption("neutral", "Neutral",
-                       "moves between the specific and the general as the topic needs"),
+                       "talks about specific things, people and events; examples rather "
+                       "than principles"),
             DialOption("theoretical", "Theoretical",
                        "reaches for principles, systems and generalisations"),
         ],
-        "concrete",
+        UNSPECIFIED,
     ),
     Dial(
-        "temperament", "Temperament",
-        "How easily they are provoked. This is the axis that decides whether a rough "
-        "character is merely rough or actually belligerent.",
-        ENGAGEMENT,
-        [
-            DialOption(UNSPECIFIED, "Let the draft decide", ""),
-            DialOption("unflappable", "Unflappable",
-                       "nothing gets a rise out of them; rudeness and disagreement land without effect"),
-            DialOption("steady", "Steady",
-                       "hard to rattle; reacts to what is said, not to how it is said"),
-            DialOption("reactive", "Reactive",
-                       "takes things personally and shows it quickly"),
-            DialOption("volatile", "Volatile",
-                       "escalates fast and out of proportion"),
-        ],
-        "steady",
-    ),
-    Dial(
-        "certainty", "Certainty", "How much they qualify what they say.",
-        ENGAGEMENT,
-        [
-            DialOption(UNSPECIFIED, "Let the draft decide", ""),
-            DialOption("hedging", "Hedging",
-                       "qualifies everything; says \"probably\", admits what they do not know"),
-            DialOption("measured", "Measured",
-                       "states what they are sure of and flags what they are not"),
-            DialOption("confident", "Confident",
-                       "asserts without qualifying; rarely says \"I think\""),
-            DialOption("dogmatic", "Dogmatic",
-                       "treats their own view as settled fact and will not entertain alternatives"),
-        ],
-        "measured",
-    ),
-    Dial(
-        "stance", "Stance", "What they do with a turn — the single biggest differentiator.",
+        "stance", "Stance",
+        "What they do with a turn — mechanics, not mood, and the biggest "
+        "single differentiator.",
         ENGAGEMENT,
         [
             DialOption(UNSPECIFIED, "Let the draft decide", ""),
@@ -307,9 +283,12 @@ DIALS: List[Dial] = [
             DialOption("asserts", "Asserts",
                        "leads with their own position whether or not it was asked for"),
             DialOption("corrects", "Corrects",
-                       "interrupts to correct errors, including small ones"),
+                       "picks up errors, including small ones"),
+            DialOption("tells", "Tells a story",
+                       "answers by way of something that happened to them or to someone "
+                       "they know"),
         ],
-        "responds",
+        UNSPECIFIED,
     ),
 ]
 
@@ -321,6 +300,7 @@ DIALS_BY_KEY: Dict[str, Dial] = {d.key: d for d in DIALS}
 DIAL_GROUPS: List[Tuple[str, List[Dial]]] = [
     (group, [d for d in DIALS if d.group == group])
     for group in (SPEECH, ENGAGEMENT)
+    if any(d.group == group for d in DIALS)
 ]
 
 
@@ -448,14 +428,6 @@ class PersonaDraft:
 # written as an essay about the character rather than instructions to an
 # actor. Kept as constants so a fix to one path cannot miss the other.
 
-INDEPENDENCE_NOTE = (
-    "These settings are independent. Register is word choice and nothing else: it "
-    "says which words they reach for, never how they treat people. Temperament "
-    "alone decides whether they escalate. How they feel about any *particular* "
-    "person is not set here — that comes out of who they are and who they are "
-    "talking to."
-)
-
 WRITING_RULES = (
     "Second person, addressed to the character (\"You interrupt when...\"). Every "
     "sentence should say something the character does or does not do; cut anything "
@@ -464,6 +436,11 @@ WRITING_RULES = (
     "set of instructions to an actor, not an essay about a character, and not a "
     "demonstration of the character's own vocabulary — an ornate character still "
     "gets a plainly-written prompt.\n\n"
+    # Replaces what the old non-neutral dial defaults were for. One line
+    # against the model's house style, rather than ninety-four words of
+    # settings the user never chose.
+    "Unless the specification says otherwise, give them ordinary words and concrete "
+    "examples rather than an essayist's vocabulary and abstractions.\n\n"
     "Distinct is not the same as difficult. Warm, kind, delighted, loyal and "
     "generous are specific ways to be; write someone unpleasant only if you were "
     "asked for one."
@@ -495,9 +472,14 @@ def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
                  (spec.instruction_for(d.key) for d in DIALS) if line]
     open_dials = [d.title for d in DIALS if spec.instruction_for(d.key) is None]
 
-    dial_block = "\n".join(set_lines) or "- (nothing specified; choose all of it yourself)"
+    # An unset dial contributes nothing but the one line below naming it as
+    # open. This is the whole point of the redesign: fill in only the brief
+    # and the brief is what the model reads.
+    dial_block = "\n".join(set_lines)
     if open_dials:
-        dial_block += ("\n- Not specified, so decide for yourself and say what you chose: "
+        if dial_block:
+            dial_block += "\n"
+        dial_block += ("- Not set, so choose for yourself and say what you chose: "
                        + ", ".join(open_dials))
 
     # Blanks collapse into one line rather than five "NOT GIVEN" ones: the
@@ -513,17 +495,15 @@ def build_draft_prompt(spec: PersonaSpec) -> List[dict]:
             "- Invent the rest, and make each one specific: " + ", ".join(blank)
         )
 
-    system = f"""You write characters for a group chat where several of them talk to one human and to each other. You are given a specification. Write ONE character who follows it exactly.
+    system = f"""You write characters for a group chat where several of them talk to one human and to each other. Write ONE character from this specification.
 
-HOW THIS CHARACTER SPEAKS AND ENGAGES
-{dial_block}
-
-{INDEPENDENCE_NOTE}
-
-WHO THEY ARE
+WHO THEY ARE — the whole point, and everything below is subordinate to it
 {spec.brief.strip()}
 
 {chr(10).join(detail_lines)}
+
+HOW THEY SPEAK
+{dial_block}
 
 WHAT ELSE MAKES A CHARACTER BEHAVE DISTINCTLY (invent whatever the specification leaves open)
 {lever_block}
@@ -591,7 +571,7 @@ Change what the instruction asks for and nothing else. Everything the instructio
 
 Do not change the name. Keep the description, router hints and reply length as they are unless the change makes them wrong.
 
-Read the instruction narrowly, and change one thing with it. A word about how they SPEAK changes their word choice and nothing else. A word about how they FEEL toward one person says nothing about how they treat everyone. {INDEPENDENCE_NOTE}
+Read the instruction narrowly, and change one thing with it. A word about how they SPEAK changes their word choice and nothing else. A word about how they FEEL toward one person says nothing about how they treat everyone.
 
 If the instruction is vague, apply it to the smallest part of the character it could reasonably mean, and say in your notes what you took it to mean.
 

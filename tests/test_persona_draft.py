@@ -6,6 +6,8 @@ produce — a code fence, a chatty preamble, a missing label, a quoted
 value, an invented enum member.
 """
 
+import re
+
 import pytest
 
 from dataclasses import replace
@@ -179,34 +181,61 @@ class TestDraftPrompt:
         assert len(system) < 6000
 
     def test_a_chosen_option_sends_its_instruction_not_its_label(self):
-        # "Coarse" on its own is exactly as vague as the brief was; the
+        # "Crude" on its own is exactly as vague as the brief was; the
         # instruction behind it is what does the work.
-        system = system_of(spec(dials={"register": "coarse"}))
+        system = system_of(spec(dials={"vocabulary": "crude"}))
         assert "crude turns of phrase" in system
 
-    def test_the_defaults_push_against_the_house_style(self):
-        # Left alone, the model writes every character as an essayist.
+    def test_an_untouched_form_sends_no_dial_text_at_all(self):
+        # The complaint this answers: seven dials emitted 94 words of
+        # settings against a 12-word brief, none of them chosen. A dial
+        # that has not been set now contributes nothing but its name on
+        # the "choose for yourself" line.
+        system = system_of(spec("a bookbinder"))
+        for dial in persona_draft.DIALS:
+            for option in dial.options:
+                if option.instruction:
+                    assert option.instruction not in system
+
+    def test_the_house_style_is_pushed_back_on_in_one_line_instead(self):
+        # What the old non-neutral defaults were for, at 1/5 the cost.
         system = system_of(spec())
-        assert "clear and unshowy" in system          # vocabulary
-        assert "examples rather than principles" in system   # abstraction
+        assert "ordinary words and concrete examples" in system
+
+    def test_the_brief_leads_and_is_named_as_the_point(self):
+        # It used to sit below the dial block, outnumbered by settings the
+        # user never chose.
+        system = system_of(spec("a bookbinder who repairs family bibles"))
+        head = system[:system.index("HOW THEY SPEAK")]
+        assert "a bookbinder who repairs family bibles" in head
+        assert "everything below is subordinate to it" in head
 
     def test_an_unspecified_dial_is_handed_back_to_the_model(self):
         system = system_of(spec(dials={"stance": ""}))
-        assert "decide for yourself" in system
+        assert "choose for yourself" in system
         assert "Stance" in system
 
-    def test_the_dials_are_declared_independent(self):
-        # The failure this whole feature exists for: one word bleeding
-        # across word choice, temper and cooperativeness at once. Made
-        # without naming the words — "does not make them hostile" put
-        # *hostile* in front of the model writing the character, and the
-        # drafts came back hostile.
-        system = system_of(spec(dials={"register": "coarse"}))
-        assert "These settings are independent" in system
-        assert "Register is word choice and nothing else" in system
-        assert "Temperament alone decides whether they escalate" in system
-        for word in ("hostile", "uncooperative", "bad at conversation"):
-            assert word not in system.lower()
+    def test_no_dial_describes_a_disposition(self):
+        # The rule the dial set is built on. Politeness, temper, certainty
+        # and warmth are what "Who they are" is for: a model caricatures a
+        # disposition label ("blunt" comes back rude, whatever the prompt
+        # says alongside it), and two attempts to hold that line with
+        # prose failed — the second by putting *hostile* in front of the
+        # model it was trying to keep hostility out of.
+        words = set(re.findall(r"[a-z]+", " ".join(
+            o.label + " " + o.instruction
+            for d in persona_draft.DIALS for o in d.options
+        ).lower()))
+        for word in ("polite", "politeness", "hostile", "rude", "warm", "cold",
+                     "patient", "impatient", "angry", "confident", "dogmatic",
+                     "provoke", "temper", "escalate"):
+            assert word not in words
+
+    def test_the_dial_set_stays_small(self):
+        # Instructions compete: seven simultaneous style constraints get
+        # averaged into a generically stylised voice, where one gets
+        # applied.
+        assert len(persona_draft.DIALS) <= 4
 
     def test_a_given_detail_is_quoted_and_the_blanks_are_named_once(self):
         # One line naming what is open, not five telling the model how to
@@ -244,12 +273,18 @@ class TestPersonaSpec:
     def test_an_unknown_dial_value_becomes_unspecified(self):
         # Passing the bare word through would send an option the prompt has
         # no instruction for — the vagueness the dials exist to remove.
-        s = spec(dials={"register": "sassy"})
-        assert s.dials["register"] == persona_draft.UNSPECIFIED
-        assert s.instruction_for("register") is None
+        s = spec(dials={"vocabulary": "sassy"})
+        assert s.dials["vocabulary"] == persona_draft.UNSPECIFIED
+        assert s.instruction_for("vocabulary") is None
 
-    def test_an_unset_dial_falls_back_to_its_default(self):
-        assert "unshowy" in spec().instruction_for("vocabulary")
+    def test_a_dial_dropped_from_the_form_is_ignored_not_an_error(self):
+        # Register, Temperament and Certainty were removed; a stale page
+        # still posting them must draft, not 500.
+        s = spec(dials={"register": "coarse", "temperament": "volatile"})
+        assert s.dials == {}
+
+    def test_an_unset_dial_says_nothing(self):
+        assert spec().instruction_for("vocabulary") is None
 
     def test_every_dial_offers_an_opt_out(self):
         for dial in persona_draft.DIALS:
@@ -356,12 +391,12 @@ class TestRefinePrompt:
     def test_a_vague_instruction_is_read_narrowly(self):
         assert "smallest part" in self.system("make him better")
 
-    def test_the_independence_note_is_repeated_here(self):
-        # A free-text instruction is the same global-dial trap the dials
-        # exist to remove: "make him crude" must not make him coarser in
-        # temper as well as in vocabulary.
+    def test_a_word_about_speech_changes_only_speech(self):
+        # A free-text instruction is the same trap a disposition dial is:
+        # "make him crude" must not make him coarser in temper as well as
+        # in vocabulary.
         system = self.system("make him crude")
-        assert "Register is word choice and nothing else" in system
+        assert "changes their word choice and nothing else" in system
         assert "hostile" not in system.lower()
 
     def test_the_name_is_not_up_for_revision(self):

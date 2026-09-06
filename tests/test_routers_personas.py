@@ -859,13 +859,13 @@ class TestDraftPersona:
         seen = _stub_completion(monkeypatch, DRAFT_REPLY)
         client.post("/api/personas/draft", json={
             "brief": "a harbourmaster",
-            "dials": {"register": "coarse", "temperament": "unflappable"},
+            "dials": {"vocabulary": "crude", "sentences": "clipped"},
             "details": {"never": "never guesses at cargo"},
         })
 
         sent = seen[0]["messages"][0]["content"]
         assert "crude turns of phrase" in sent
-        assert "nothing gets a rise out of them" in sent
+        assert "stops as soon as the point is made" in sent
         assert "never guesses at cargo" in sent
 
     def test_a_junk_dial_does_not_reach_the_model_or_500(self, client, personas_root, monkeypatch):
@@ -874,7 +874,7 @@ class TestDraftPersona:
         seen = _stub_completion(monkeypatch, DRAFT_REPLY)
         resp = client.post("/api/personas/draft", json={
             "brief": "x",
-            "dials": {"register": "sassy", "nonsense": "yes"},
+            "dials": {"vocabulary": "sassy", "nonsense": "yes"},
             "details": {"favourite_colour": "blue"},
         })
 

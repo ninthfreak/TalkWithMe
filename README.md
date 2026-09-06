@@ -548,39 +548,45 @@ word "never" appearing anywhere in the block.
 
 ## Drafting a persona with the LLM
 
-**Draft with AI…** at the top of **New Persona** takes a line or two about who the
-character is — "a suspicious harbourmaster who thinks everyone is smuggling" — and fills
-in every field.
+**Draft with AI…** at the top of **New Persona** takes a few lines about who the
+character is and fills in every field.
 
-The brief on its own is not enough, and the reason is worth knowing: a model reads every
-word of it as a *global* dial. Ask for a "crude" harbourmaster and "crude" colours the
-word choice, the temper and the willingness to hold a conversation all at once, and what
-comes back is somebody belligerent who is bad at talking. Left with no instruction at
-all, the same model writes everyone as a mild essayist, which is why hand-written
-personas converge on the same pseudo-intellectual voice.
+**Who they are is the box that matters.** What they care about, how they treat people,
+what sort of person they are, how easily they are rattled — all of it belongs there, in
+your own words. A model caricatures a one-word disposition and plays a described one:
+tell it a character is "blunt" and you get somebody rude, because in everything it was
+trained on blunt characters are rude. Tell it she is generous with her time and sharp
+about anyone who mistreats a book, and you get her.
 
-So the brief is followed by **dials** — one dropdown per axis, each with a fixed set of
-options, and each option carrying its own instruction into the prompt:
+Below the brief are four **dials**, and they cover only the mechanics of speech — the
+part a sentence about someone expresses badly:
 
 | Dial | Decides |
 |------|---------|
-| Vocabulary | Which words they reach for, from blunt everyday to ornate or technical |
-| Sentence shape | Clipped, short, neutral, flowing, rambling |
-| Register | Politeness and profanity — **word choice only** |
+| Vocabulary | Which words they reach for: blunt everyday, trade talk, plain, bookish, ornate, technical, crude, foul-mouthed |
+| Sentence shape | Clipped, short, flowing, rambling |
 | Abstraction | Whether they argue from cases or from principles |
-| Temperament | How easily they are provoked — this, and nothing else, decides whether a rough character is merely rough or actually belligerent |
-| Certainty | How much they qualify what they say |
-| Stance | What they do with a turn: ask, respond, assert, correct |
+| Stance | What they do with a turn: ask, respond, assert, correct, tell a story |
 
-The prompt tells the model in as many words that these do not bleed into each other. It
-also says nothing about how the character feels toward any *particular* person: that
-varies by who they are talking to, so writing it as a dial would produce someone
-uniformly warm or uniformly hostile to everyone in the room.
+**A dial you do not touch contributes nothing.** Every one starts at *Let the draft
+decide*, and an untouched dial puts no text in the prompt at all — so a brief on its own
+is read against almost nothing else. That is deliberate, and it is the correction to a
+version that had seven dials sitting at opinionated defaults: they emitted 94 words of
+settings the user had never chosen, against a 12-word brief, and drowned it.
 
-Every dial has a **Let the draft decide** option, and the notes say what the model chose
-when you use it. The defaults deliberately sit below the model's house style — plain
-vocabulary, concrete rather than theoretical — because that is the failure that shows up
-without asking for it.
+There used to be dials for Register (politeness and profanity), Temperament and
+Certainty. They are gone, and the reasoning is the rule for what belongs here at all:
+
+- **Instructions compete.** Seven simultaneous style constraints get averaged into a
+  generically "stylised" voice; one constraint gets applied. A dial resting at a neutral
+  value — "ordinary sentence lengths, varied" — says nothing and dilutes everything else.
+- **Disposition labels get caricatured**, and no amount of surrounding prose fixes it.
+  Two attempts to keep "coarse" from meaning "hostile" failed, and the second made things
+  worse by putting the word *hostile* in the prompt of a model whose next job was
+  inventing a person.
+- So a dial may describe **how someone speaks**. How someone *is* goes in the brief,
+  where your own words carry it and nothing has to be flattened into a label. Profanity
+  moved into Vocabulary, where it belongs — it is a vocabulary, not a temperament.
 
 Under **Details** are five optional free-text boxes: what they want, what they never do,
 where they are wrong, a verbal tic, and background. Anything left blank is invented, and

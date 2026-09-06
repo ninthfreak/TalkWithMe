@@ -216,12 +216,13 @@
                 <h2 id="pd-title">Draft a persona</h2>
                 <button id="pd-btn-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
             </div>
-            <div class="modal-intro field-hint">Say who they are in a line or two, then set the dials. Each dial is a separate axis on purpose &mdash; a single word in the brief gets read as all of them at once, which is how &ldquo;crude&rdquo; ends up meaning &ldquo;hostile&rdquo;.</div>
+            <div class="modal-intro field-hint">Who they are is the important box &mdash; what they care about, how they treat people, what sort of person they are. The dials below only cover the mechanics of speech, which a sentence about someone says badly; leave one alone and it says nothing at all.</div>
             <div id="pd-error" class="pe-form-error hidden"></div>
             <div class="settings-body">
                 <div class="form-row">
                     <label for="pd-brief">Who they are <span class="required">*</span></label>
-                    <textarea id="pd-brief" maxlength="2000" rows="3" placeholder="A suspicious harbourmaster who thinks everyone is smuggling something"></textarea>
+                    <textarea id="pd-brief" maxlength="2000" rows="4" placeholder="A bookbinder who repairs family bibles and remembers every story behind them. Generous with her time, sharp about anyone who mistreats a book."></textarea>
+                    <span class="field-hint">Temper, warmth, patience, certainty &mdash; all of that belongs here rather than in a dropdown. A model caricatures a one-word disposition; it plays a described one.</span>
                 </div>
 
                 {% for group_title, dials in persona_dial_groups %}
