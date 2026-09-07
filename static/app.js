@@ -113,6 +113,7 @@ async function checkSTTHealth() {
 function setupEventListeners() {
     sendBtn.addEventListener("click", sendMessage);
     suggestBtn.addEventListener("click", suggestMessage);
+    continueBtn.addEventListener("click", continueConversation);
     inputEl.addEventListener("keydown", (e) => {
         // Enter sends; Shift+Enter for newline
         if (e.key === "Enter" && !e.shiftKey) {

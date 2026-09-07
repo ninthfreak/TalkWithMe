@@ -33,6 +33,21 @@ class ChatRequest(BaseModel):
 
 
 
+class ContinueRequest(BaseModel):
+    """Let the room carry on without the human saying anything.
+
+    Deliberately not a ChatRequest with an empty message: a blank message
+    reaching /api/chat is a bug in the caller, and the model should keep
+    saying so. This is a different request that happens to run the same
+    turn.
+    """
+    who_answers: str = Field(
+        default="router",
+        description='One of "router", "random", or a persona name',
+    )
+    chat_room: str = Field(default="default")
+
+
 class SpeakAsRequest(BaseModel):
     """Put words in a persona's mouth — the player writes their line."""
     persona: str = Field(..., min_length=1, description="Who says it")

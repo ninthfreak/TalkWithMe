@@ -766,6 +766,30 @@ from whichever persona happened to be picked, and stayed on until you remembered
 it off. Saying who speaks and what they say, one line at a time, turned out to be what was
 actually wanted.
 
+## Letting the room carry on without you
+
+The **↻** button beside the message box runs a turn with your half left out.
+Nothing is added to the conversation; the personas answer the transcript as it
+already stands, and you can press it as often as you like to watch a scene play
+out.
+
+It needed almost nothing at the prompt level, which is the nicest part. The
+prompt has always been a flat script ending on the next speaker's tag, and
+whether the line above it came from a person or a persona was never something
+the model could tell.
+
+Two things it does need. **Whoever spoke last is held back**: with nobody new to
+answer, the transcript's own momentum makes them the likeliest next speaker, and
+holding the button down would turn the room into one character talking to
+themselves. Naming somebody in *Who should answer* overrides that — asking for a
+persona is asking for them, even straight after their own line — and so does a
+room containing only one of them. And **the router is asked a different
+question**: not "who answers this?" but "who speaks next?", since there is no
+message to route on.
+
+An empty room is not an error here. With nothing said yet, this is a way to let
+the cast open the scene themselves.
+
 ## Writing your own lines with help
 
 The pencil button beside the send arrow drafts **your** next message and puts it in the

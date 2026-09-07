@@ -30,6 +30,7 @@ from app.config import (
 )
 from app.models import (
     ChatRequest,
+    ContinueRequest,
     SpeakAsRequest,
     SuggestReplyRequest,
     SuggestReplyResponse,
@@ -362,12 +363,29 @@ def _build_router_prompt(user_message: str, chat_room: str) -> list[dict]:
             context_lines.append(f"{msg.persona}: {msg.content}")
     context = "\n".join(context_lines)
 
+    # With no new message the job is a different question, and asking the
+    # original one would hand the model an empty "latest message" and let
+    # it route on nothing. Continuing a conversation is picking who speaks
+    # next, which the transcript alone can answer.
+    if user_message.strip():
+        task = (
+            "You are a conversation router. Your ONLY job is to pick the best "
+            "persona to respond to the user's latest message."
+        )
+        latest = f"User's latest message: {user_message}\n\n"
+    else:
+        task = (
+            "You are a conversation router. Nobody has said anything new — "
+            "your ONLY job is to pick who speaks next in the conversation "
+            "below."
+        )
+        latest = ""
+
     system = (
-        "You are a conversation router. Your ONLY job is to pick the best "
-        "persona to respond to the user's latest message.\n\n"
+        f"{task}\n\n"
         f"Available personas:\n{hints}\n\n"
         f"Recent conversation:\n{context}\n\n"
-        f"User's latest message: {user_message}\n\n"
+        f"{latest}"
         "Respond with ONLY the name of the best persona. Choose from: "
         f"{persona_choices}. Do not add any explanation."
     )
@@ -375,21 +393,34 @@ def _build_router_prompt(user_message: str, chat_room: str) -> list[dict]:
     return [{"role": "system", "content": system}, {"role": "user", "content": "Pick one persona."}]
 
 
-async def _pick_persona(who_answers: str, user_message: str, chat_room: str) -> str:
+async def _pick_persona(
+    who_answers: str, user_message: str, chat_room: str,
+    exclude: Optional[str] = None,
+) -> str:
     """Determine which persona should respond.
 
     - "router": ask the LLM to decide
     - "random": pick randomly from eligible room personas
     - explicit name: use that persona directly
     - anything else: fall back to random
+
+    *exclude* keeps one persona out of the automatic choices. It is how a
+    continued conversation avoids becoming a monologue: with nobody new to
+    answer, the likeliest next speaker is whoever was just speaking. An
+    explicit ``who_answers`` overrides it — asking for a persona by name
+    is asking for them, even straight after their own line — and so does a
+    room with nobody else in it, where excluding the last speaker would
+    leave nobody able to talk.
     """
     eligible = _resolve_room_personas(chat_room)
 
     if not eligible:
         raise ValueError(f"No eligible personas for room '{chat_room}'")
 
+    choices = [n for n in eligible if n != exclude] or eligible
+
     if who_answers == "random":
-        return random.choice(eligible)
+        return random.choice(choices)
 
     if who_answers == "router":
         try:
@@ -397,20 +428,30 @@ async def _pick_persona(who_answers: str, user_message: str, chat_room: str) -> 
             result = await chat_completion(prompt, max_tokens=16)
             chosen = result.strip().strip("\"'")
             # Validate the LLM actually returned an eligible name
-            if chosen in eligible:
+            if chosen in choices:
                 return chosen
-            logger.info("Router returned unknown name '%s', falling back to random", chosen)
+            if chosen == exclude:
+                # It picked the one being held back — a reasonable answer
+                # to "who speaks next" and not what a continue wants.
+                logger.info(
+                    "Router picked '%s', who just spoke; choosing somebody else", chosen,
+                )
+            else:
+                logger.info(
+                    "Router returned unknown name '%s', falling back to random", chosen,
+                )
         except Exception as exc:
             logger.warning("Router call failed (%s), falling back to random", exc)
-        return random.choice(eligible)
+        return random.choice(choices)
 
-    # Explicit persona name — validate it's in this room
+    # Explicit persona name — validate it's in this room. Not filtered by
+    # *exclude*: naming somebody is asking for them.
     if who_answers in eligible:
         return who_answers
 
     # Unknown value — fall back to random
     logger.info("Unrecognized who_answers='%s', falling back to random", who_answers)
-    return random.choice(eligible)
+    return random.choice(choices)
 
 
 # ---------------------------------------------------------------------------
@@ -509,13 +550,40 @@ def _system_prompt_with_memories(persona, settings, present: list[str]) -> str:
 # SSE streaming
 # ---------------------------------------------------------------------------
 
-async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
-    """Generator that yields SSE-formatted JSON lines."""
+def _last_speaker() -> Optional[str]:
+    """The persona whose line ends the conversation, if a persona's does.
+
+    None when the human spoke last, or when nothing has been said — in
+    both of those a continue has no monologue to avoid.
+    """
+    for message in reversed(session.history):
+        if message.role == "user":
+            return None
+        if message.persona:
+            return message.persona
+    return None
+
+
+async def _chat_stream(
+    chat_room: str,
+    who_answers: str,
+    message: str = "",
+    message_id: Optional[str] = None,
+) -> AsyncIterator[str]:
+    """Generator that yields SSE-formatted JSON lines.
+
+    Takes the turn's fields rather than a request object because there are
+    two ways to start one. Normally the human says something. With
+    *message* empty the room simply carries on: nothing is added to the
+    history, and the personas answer the conversation as it already
+    stands — which is all a transcript-mode prompt ever needed, since it
+    ends on the next speaker's tag either way.
+    """
     # Switch to the requested chat room for persistence. The name becomes a
     # directory, so an invalid one is refused here rather than reaching the
     # filesystem.
     try:
-        session.set_current_room(req.chat_room)
+        session.set_current_room(chat_room)
     except persistence.UnsafeRoomName as exc:
         yield f'data: {json.dumps({"type": "error", "message": str(exc)})}\n\n'
         yield f'data: {json.dumps({"type": "complete"})}\n\n'
@@ -528,7 +596,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
 
     # Resolve eligible personas from the chat room config — the authoritative source
     config = get_personas()
-    eligible = _resolve_room_personas(req.chat_room)
+    eligible = _resolve_room_personas(chat_room)
 
     if not eligible:
         yield f'data: {json.dumps({"type": "error", "message": "No eligible personas for this room"})}\n\n'
@@ -537,7 +605,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
 
     # Room-level config: None for "default" (no chatrooms.yaml entry), in
     # which case every room setting falls back to the global values.
-    room = _find_room(req.chat_room)
+    room = _find_room(chat_room)
 
     # A room that requires a player profile refuses messages until it has
     # one. Checked here, not only in the frontend, for the same reason
@@ -558,17 +626,28 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
         logger.info(
             "Room '%s' has %d persona(s), so at most %d can reply "
             "(max_persona_replies is %d)",
-            req.chat_room, len(eligible), max_replies, requested_replies,
+            chat_room, len(eligible), max_replies, requested_replies,
         )
 
+    # Whoever spoke last is held back when the room is carrying on by
+    # itself. With no new message the transcript's own momentum makes them
+    # the likeliest next speaker, and a persona answering their own line is
+    # a monologue rather than a conversation.
+    last_speaker = _last_speaker() if not message else None
+
     # Pick the first persona using the configured strategy
-    first_persona_name = await _pick_persona(req.who_answers, req.message, req.chat_room)
+    first_persona_name = await _pick_persona(
+        who_answers, message, chat_room, exclude=last_speaker,
+    )
 
-    # Use frontend-provided message ID or generate one
-    user_message_id = req.message_id or str(uuid.uuid4())
-
-    # Add user message to history (persisted automatically)
-    session.add_user_message(req.message, user_message_id, room=turn_room)
+    # Nothing is added to the history when the room is simply carrying on,
+    # so there is no user message and no ID for one. The frontend reads
+    # only the assistant message_id from these events.
+    user_message_id = None
+    if message:
+        user_message_id = message_id or str(uuid.uuid4())
+        # Add user message to history (persisted automatically)
+        session.add_user_message(message, user_message_id, room=turn_room)
 
     user_label = _user_label()
 
@@ -642,7 +721,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
             responding_persona=persona_name,
             max_turns_for_context=settings.general.max_turns_for_context,
             room_preamble=_build_room_preamble(
-                persona, req.chat_room, eligible, length,
+                persona, chat_room, eligible, length,
                 player=_adopted_persona(),
             ),
             user_label=user_label,
@@ -762,24 +841,48 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
         # which reads as the app having hung.
         logger.warning(
             "No persona produced a usable reply in room '%s' (tried %s)",
-            req.chat_room, ", ".join(attempts) or "nobody",
+            chat_room, ", ".join(attempts) or "nobody",
         )
         yield f'data: {json.dumps({"type": "error", "message": NO_USABLE_REPLY_MESSAGE})}\n\n'
 
     yield f'data: {json.dumps({"type": "complete"})}\n\n'
 
 
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",  # Disable nginx buffering
+}
+
+
 @router.post("")
 async def chat(req: ChatRequest):
     """Accept a user message and return an SSE stream of the AI response."""
     return StreamingResponse(
-        _chat_stream(req),
+        _chat_stream(req.chat_room, req.who_answers, req.message, req.message_id),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        },
+        headers=_SSE_HEADERS,
+    )
+
+
+@router.post("/continue")
+async def continue_conversation(req: ContinueRequest):
+    """Let the room carry on without the human saying anything.
+
+    The same turn as /api/chat with the human's half left out: nothing is
+    added to the history, and the personas answer the conversation as it
+    already stands. In transcript mode that needs no special handling at
+    all — the prompt has always been a script ending on the next speaker's
+    tag, and whether the line above it came from a person or a persona was
+    never something the model could tell.
+
+    An empty room is not an error here: with nothing said yet, this is a
+    way to let the cast open the scene.
+    """
+    return StreamingResponse(
+        _chat_stream(req.chat_room, req.who_answers),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
     )
 
 

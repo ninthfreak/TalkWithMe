@@ -10,6 +10,7 @@ from pathlib import Path
 
 import app.config as app_config
 import app.routers.chat as chat_router
+from app import persistence
 from app.session import session
 from app.config import (
     ChatRoom,
@@ -1867,3 +1868,185 @@ class TestSuggestReply:
         assert session.history == []
         from app.persistence import load_history
         assert load_history("TNG") == []
+
+
+# ---------------------------------------------------------------------------
+# POST /api/chat/continue — the room carries on by itself
+# ---------------------------------------------------------------------------
+
+class TestContinueConversation:
+    """The same turn as /api/chat with the human's half left out.
+
+    In transcript mode this needs no special handling at the prompt level
+    at all: the prompt has always been a script ending on the next
+    speaker's tag, and whether the line above it came from a person or a
+    persona was never something the model could tell. What does need
+    handling is everything around it — not recording a message that does
+    not exist, routing on a message that does not exist, and stopping the
+    persona who just spoke from answering themselves.
+    """
+
+    def _continue(self, client, **overrides):
+        payload = {"chat_room": "TNG", "who_answers": "random"}
+        payload.update(overrides)
+        resp = client.post("/api/chat/continue", json=payload)
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        return parse_sse_events(resp.text)
+
+    def _said(self, client, text="I have never been on a boat.", **overrides):
+        """A real user turn, so there is a conversation to continue."""
+        payload = {"message": text, "chat_room": "TNG", "who_answers": "random"}
+        payload.update(overrides)
+        client.post("/api/chat", json=payload)
+
+    def test_a_persona_speaks_with_no_user_message(self, client, monkeypatch):
+        _stub_stream(monkeypatch, ["Quite ", "so."])
+
+        events = self._continue(client)
+
+        assert sse_events_by_type(events, "done")[0]["text"] == "Quite so."
+
+    def test_nothing_is_added_to_the_conversation_for_the_human(
+        self, client, monkeypatch,
+    ):
+        # The point of the feature: the human said nothing, so the history
+        # gains a persona's line and no user turn.
+        _stub_stream(monkeypatch, ["Quite so."])
+
+        self._continue(client)
+
+        history = client.get("/api/session").json()["history"]
+        assert [m["role"] for m in history] == ["assistant"]
+
+    def test_the_reply_is_persisted_like_any_other(self, client, monkeypatch):
+        _stub_stream(monkeypatch, ["Quite so."])
+
+        self._continue(client)
+
+        assert [m["text"] for m in persistence.load_history("TNG")] == ["Quite so."]
+
+    def test_an_empty_room_can_open_the_scene(self, client, monkeypatch):
+        # Nothing said yet is not an error here — it is a way to let the
+        # cast start without being prompted.
+        _stub_stream(monkeypatch, ["Well then."])
+
+        events = self._continue(client)
+
+        assert sse_events_by_type(events, "done")[0]["text"] == "Well then."
+
+    def test_a_room_with_nobody_in_it_is_still_refused(self, client, monkeypatch):
+        _stub_stream(monkeypatch, ["..."])
+        _patch_chatrooms(monkeypatch, [ChatRoom(name="Empty", persona_names=[])])
+
+        events = self._continue(client, chat_room="Empty")
+
+        assert sse_events_by_type(events, "error")
+
+    def test_a_room_that_needs_a_character_still_needs_one(self, client, monkeypatch):
+        # The personas are told who they are talking to either way, so the
+        # requirement is not about who typed.
+        _stub_stream(monkeypatch, ["..."])
+        monkeypatch.setattr(app_config, "_chatrooms_cache", ChatRoomsConfig(
+            chat_rooms=[ChatRoom(name="TNG", persona_names=["Alex", "Luna"],
+                                 require_player_persona=True)]))
+
+        events = self._continue(client)
+
+        assert sse_events_by_type(events, "error")
+
+    # -- not talking to yourself ---------------------------------------------
+
+    def test_nobody_speaks_twice_in_a_row(self, client, monkeypatch):
+        # Without this the transcript's own momentum makes the last
+        # speaker the likeliest next one, and holding Continue down turns
+        # the room into one character talking to themselves.
+        _stub_stream(monkeypatch, ["Line."])
+        self._said(client, who_answers="Alex")
+
+        spoke = ["Alex"]
+        for _ in range(6):
+            events = self._continue(client)
+            spoke.append(sse_events_by_type(events, "start")[0]["persona"])
+
+        assert all(a != b for a, b in zip(spoke, spoke[1:])), spoke
+
+    def test_naming_somebody_overrides_that(self, client, monkeypatch):
+        # Asking for a persona by name is asking for them, even straight
+        # after their own line.
+        _stub_stream(monkeypatch, ["Line."])
+        self._said(client, who_answers="Alex")
+
+        events = self._continue(client, who_answers="Alex")
+
+        assert sse_events_by_type(events, "start")[0]["persona"] == "Alex"
+
+    def test_a_room_of_one_lets_them_carry_on_alone(self, client, monkeypatch):
+        # Excluding the last speaker in a one-persona room would leave
+        # nobody able to talk at all.
+        _stub_stream(monkeypatch, ["Line."])
+        monkeypatch.setattr(app_config, "_chatrooms_cache", ChatRoomsConfig(
+            chat_rooms=[ChatRoom(name="TNG", persona_names=["Alex"])]))
+        self._said(client)
+
+        events = self._continue(client)
+
+        assert sse_events_by_type(events, "start")[0]["persona"] == "Alex"
+
+    def test_after_the_human_speaks_nobody_is_held_back(self, client, monkeypatch):
+        # _last_speaker only holds back a persona whose line ENDS the
+        # conversation. A user message resets it.
+        assert chat_router._last_speaker() is None
+
+    # -- routing with no message ---------------------------------------------
+
+    def test_the_router_is_asked_who_speaks_next(self, client, monkeypatch):
+        # Asking the original question would hand the model an empty
+        # "User's latest message" and let it route on nothing.
+        seen = {}
+
+        async def fake_completion(prompt, **kwargs):
+            seen["system"] = prompt[0]["content"]
+            return "Luna"
+        monkeypatch.setattr(chat_router, "chat_completion", fake_completion)
+        _stub_stream(monkeypatch, ["Line."])
+
+        self._continue(client, who_answers="router")
+
+        assert "pick who speaks next" in seen["system"]
+        assert "User's latest message" not in seen["system"]
+
+    def test_a_sent_message_still_routes_on_the_message(self, client, monkeypatch):
+        seen = {}
+
+        async def fake_completion(prompt, **kwargs):
+            seen["system"] = prompt[0]["content"]
+            return "Luna"
+        monkeypatch.setattr(chat_router, "chat_completion", fake_completion)
+        _stub_stream(monkeypatch, ["Line."])
+
+        client.post("/api/chat", json={
+            "message": "Who sails?", "chat_room": "TNG", "who_answers": "router"})
+
+        assert "User's latest message: Who sails?" in seen["system"]
+        assert "pick who speaks next" not in seen["system"]
+
+    def test_the_router_choosing_the_last_speaker_is_overruled(
+        self, client, monkeypatch,
+    ):
+        _stub_stream(monkeypatch, ["Line."])
+        self._said(client, who_answers="Alex")
+
+        async def fake_completion(prompt, **kwargs):
+            return "Alex"     # who just spoke
+        monkeypatch.setattr(chat_router, "chat_completion", fake_completion)
+
+        events = self._continue(client, who_answers="router")
+
+        assert sse_events_by_type(events, "start")[0]["persona"] == "Luna"
+
+    # -- a blank message is still a bad request ------------------------------
+
+    def test_an_empty_message_to_the_normal_endpoint_is_still_refused(self, client):
+        resp = client.post("/api/chat", json={"message": "", "chat_room": "TNG"})
+        assert resp.status_code == 422

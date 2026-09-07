@@ -154,6 +154,75 @@ async function sendMessage() {
 }
 
 /* ==========================================================================
+   Continue — let the room carry on without me
+
+   The same turn as sending, minus the human's half. Nothing is added to
+   the conversation, so there is no user bubble; the personas answer the
+   transcript as it already stands. Guarded exactly as sendMessage() is,
+   because the server applies the same rules to both.
+   ========================================================================== */
+
+async function continueConversation() {
+    if (isStreaming) return;
+
+    const roomPersonaNames = roomPersonas[currentChatRoom] || [];
+    if (roomPersonaNames.length === 0) {
+        appendErrorBubble("No one is here.");
+        return;
+    }
+
+    // A room that requires a character requires one to watch it too: the
+    // personas are told who they are talking to, and the server refuses
+    // the turn either way.
+    if (personaRequiredButMissing()) {
+        appendErrorBubble("This room needs you to be playing as someone. Pick a character first.");
+        openPlayingAs();
+        return;
+    }
+
+    if (messagesEl.querySelector(".empty-state")) {
+        messagesEl.innerHTML = "";
+    }
+
+    isStreaming = true;
+    sendBtn.disabled = true;
+    continueBtn.disabled = true;
+
+    // Who answers is honoured exactly as it is for a sent message. Naming
+    // somebody means naming them, even straight after their own line —
+    // the server only holds the last speaker back when the choice was
+    // left to it.
+    const who = getWhoAnswers();
+    currentAssistantRow = createAssistantBubble(who);
+    messagesEl.appendChild(currentAssistantRow);
+    scrollToBottom();
+
+    try {
+        const resp = await fetch("/api/chat/continue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ who_answers: who, chat_room: currentChatRoom }),
+        });
+
+        if (!resp.ok || !resp.body) {
+            handleSSEEvent({ type: "error", message: `Could not continue (HTTP ${resp.status}).` });
+            return;
+        }
+
+        await consumeSSE(resp);
+    } catch (err) {
+        console.error("Continue error:", err);
+        handleSSEEvent({ type: "error", message: "Connection failed. Is the LLM server running?" });
+    } finally {
+        isStreaming = false;
+        sendBtn.disabled = false;
+        continueBtn.disabled = false;
+        inputEl.focus();
+    }
+}
+
+
+/* ==========================================================================
    Suggested message
 
    Drafts into the input box rather than sending. It is a writing aid, so
