@@ -2092,3 +2092,118 @@ class TestContinueConversation:
     def test_an_empty_message_to_the_normal_endpoint_is_still_refused(self, client):
         resp = client.post("/api/chat", json={"message": "", "chat_room": "TNG"})
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Who a message was for, and who said what
+# ---------------------------------------------------------------------------
+
+class TestWhoWasSpokenTo:
+    """A question put to one character was answered by the whole room.
+
+    The app has always known who a message was aimed at — naming somebody
+    makes them the first responder — and never passed it on, so every
+    other persona was handed the message with nothing marking it as
+    somebody else's. Confront one character and all of them answer as
+    though accused.
+    """
+
+    ROOM = ["Alex", "Luna", "Marv"]
+
+    def test_an_explicit_choice_is_the_addressee(self):
+        assert chat_router._addressed_persona(
+            "you said that last week", "Alex", self.ROOM) == "Alex"
+
+    def test_a_name_in_the_message_is_the_addressee(self):
+        # The backstop for "LLM decides" and for any caller that is not
+        # the browser.
+        assert chat_router._addressed_persona(
+            "Alex, you said that last week", "router", self.ROOM) == "Alex"
+
+    def test_two_names_is_a_message_to_the_room(self):
+        # Guessing which of them it was for is worse than saying nothing.
+        assert chat_router._addressed_persona(
+            "Alex and Luna both said that", "router", self.ROOM) is None
+
+    def test_nobody_named_is_nobody_addressed(self):
+        assert chat_router._addressed_persona(
+            "what does everyone think?", "router", self.ROOM) is None
+
+    def test_a_name_inside_a_longer_word_does_not_count(self):
+        assert chat_router._addressed_persona(
+            "alexandrite is a stone", "router", self.ROOM) is None
+
+    def test_a_continue_turn_addresses_nobody(self):
+        # No message at all, so nothing to be aimed at.
+        assert chat_router._addressed_persona("", "router", self.ROOM) is None
+
+    def test_somebody_not_in_the_room_is_not_the_addressee(self):
+        assert chat_router._addressed_persona(
+            "Ghost, are you there?", "router", self.ROOM) is None
+
+    # -- what each persona is told -------------------------------------------
+
+    def _preamble(self, persona_name, addressed_to):
+        by_name = {p.name: p for p in app_config.get_personas().personas}
+        return chat_router._build_room_preamble(
+            by_name[persona_name], "TNG", ["Alex", "Luna"],
+            TypicalLength.DETAILED, addressed_to=addressed_to,
+        )
+
+    def test_the_person_addressed_is_told_so(self):
+        assert "The user is speaking to you." in self._preamble("Alex", "Alex")
+
+    def test_everybody_else_is_told_it_was_not_them(self):
+        said = self._preamble("Luna", "Alex")
+        assert "The user is speaking to Alex, not to you." in said
+        assert "the question was not put to Luna" in said
+
+    def test_a_message_to_the_room_says_nothing_about_addressing(self):
+        # Most messages are to the room, and a line about it every time
+        # would be noise in a preamble kept deliberately short.
+        assert "speaking to" not in self._preamble("Alex", None)
+
+
+class TestThePersonaOwnsItsOwnLines:
+    """Denying something it just said reads as gaslighting, because that
+    is what it is."""
+
+    def test_the_transcript_is_named_as_the_record(self):
+        by_name = {p.name: p for p in app_config.get_personas().personas}
+        said = chat_router._build_room_preamble(
+            by_name["Alex"], "TNG", ["Alex", "Luna"], TypicalLength.DETAILED,
+        )
+        assert "The transcript is the record of what was said." in said
+        assert "A line tagged [Alex] is something Alex said." in said
+
+    def test_it_is_said_as_a_fact_not_a_prohibition(self):
+        # Naming the behaviour is how "bored, angry, fixated" ended up in
+        # every persona's head. The rule states what the transcript is.
+        by_name = {p.name: p for p in app_config.get_personas().personas}
+        said = chat_router._build_room_preamble(
+            by_name["Alex"], "TNG", ["Alex"], TypicalLength.DETAILED,
+        ).lower()
+        for word in ("deny", "denies", "gaslight", "lie", "lying"):
+            assert word not in said, f"the preamble says {word!r}"
+
+    def test_a_persona_sees_its_own_earlier_line_attributed_to_it(
+        self, client, monkeypatch,
+    ):
+        # The mechanical half: a persona cannot own a line it was never
+        # shown. Its own turns arrive as the untagged "assistant" role and
+        # are re-tagged by the transcript renderer — this is the guard on
+        # that still being true.
+        from app.services.llm import render_transcript
+
+        captured = []
+        _stub_stream(monkeypatch, ["Right."], capture=captured)
+
+        client.post("/api/chat", json={
+            "message": "Have we met before?", "chat_room": "TNG", "who_answers": "Alex"})
+        client.post("/api/chat", json={
+            "message": "Alex, you just said we had.", "chat_room": "TNG",
+            "who_answers": "Alex"})
+
+        script = render_transcript(captured[-1]["messages"], "Alex")
+        assert "[Alex]: Right." in script
+        assert "[Alex]: Alex, you just said we had." not in script  # that is the human's

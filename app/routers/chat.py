@@ -8,6 +8,7 @@ response to session history. Messages are persisted to disk per chat room.
 import json
 import logging
 import random
+import re
 import uuid
 from typing import AsyncIterator, Optional
 
@@ -219,12 +220,49 @@ def _voice_reminder(persona: Persona) -> str:
     return _trimmed_prompt(persona.system_prompt, _VOICE_REMINDER_CHARS)
 
 
+def _addressed_persona(
+    message: str, who_answers: str, eligible: list[str],
+) -> Optional[str]:
+    """Who this message was aimed at, when it was aimed at anybody.
+
+    The app has always known this and never passed it on. Naming somebody
+    in a message makes them the first responder (the frontend's mention
+    detection checks the "Selected persona" radio), and picking a name in
+    the sidebar does the same — but every *other* persona was then handed
+    the message with nothing marking it as somebody else's. Say "Alex, you
+    told me that last week" in a room of four and all four answer as
+    though accused, which is exactly what was reported.
+
+    Two signals, in order of confidence:
+
+    * ``who_answers`` naming a persona. This is explicit — the user chose
+      them, or typed their name and the frontend selected them.
+    * exactly one persona named in the message itself. A backstop for
+      "LLM decides" and for any caller that is not the browser. **Exactly
+      one**: two names is a message to the room about both of them, and
+      guessing which is worse than saying nothing.
+
+    Returns None for a message aimed at the room, which is most of them,
+    and for a continue turn, where there is no message at all.
+    """
+    if who_answers in eligible:
+        return who_answers
+
+    text = message or ""
+    named = [
+        name for name in eligible
+        if re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE)
+    ]
+    return named[0] if len(named) == 1 else None
+
+
 def _build_room_preamble(
     persona: Persona,
     chat_room: str,
     eligible: list[str],
     length: TypicalLength,
     player: Optional[Persona] = None,
+    addressed_to: Optional[str] = None,
 ) -> str:
     """The app-generated block appended to a persona's system prompt.
 
@@ -299,7 +337,31 @@ def _build_room_preamble(
         # bored and calling each other boring.
         f"- What the others feel, want and keep going on about is theirs, not "
         f"{persona.name}'s.",
+        # A persona challenged about its own words would sometimes simply
+        # deny them, which reads as gaslighting because that is what it
+        # is. Said as a positive fact about the transcript rather than as
+        # "do not deny": naming the behaviour is how "bored, angry,
+        # fixated" ended up in every persona's head.
+        f"- The transcript is the record of what was said. A line tagged "
+        f"[{persona.name}] is something {persona.name} said.",
     ]
+
+    # Who the last message was actually for. Without this every persona
+    # answers every message as though it were addressed to them, so a
+    # question put to one character is answered — and denied — by the
+    # whole room.
+    if addressed_to:
+        # Capitalised for the sentence start: with nobody adopted, the
+        # speaker is the literal string "the user".
+        who_spoke = speaker[0].upper() + speaker[1:]
+        if addressed_to == persona.name:
+            lines.append(f"- {who_spoke} is speaking to you.")
+        else:
+            lines.append(
+                f"- {who_spoke} is speaking to {addressed_to}, not to you. "
+                f"You are listening in. Answer as yourself, about what you "
+                f"heard — the question was not put to {persona.name}."
+            )
 
     spec = TYPICAL_LENGTH_SPECS[length]
     if spec.words:
@@ -656,6 +718,13 @@ async def _chat_stream(
     # a monologue rather than a conversation.
     last_speaker = _last_speaker() if not message else None
 
+    # Who the message was aimed at, if anybody. Worked out once for the
+    # whole turn: every persona that answers needs to know, not just the
+    # one who was asked.
+    addressed_to = _addressed_persona(message, who_answers, eligible)
+    if addressed_to:
+        logger.debug("Message addressed to '%s'", addressed_to)
+
     # Pick the first persona using the configured strategy
     first_persona_name = await _pick_persona(
         who_answers, message, chat_room, exclude=last_speaker,
@@ -744,6 +813,7 @@ async def _chat_stream(
             room_preamble=_build_room_preamble(
                 persona, chat_room, eligible, length,
                 player=_adopted_persona(),
+                addressed_to=addressed_to,
             ),
             user_label=user_label,
         )

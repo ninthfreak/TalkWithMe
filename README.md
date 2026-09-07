@@ -650,6 +650,30 @@ change is the one you asked for, and whether anything else moved with it.
 
 The name and the avatar colour are never touched. Nothing is saved until you press Save.
 
+## Knowing who was spoken to
+
+Say *"Alex, you told me that last week"* in a room of four and, until recently, all
+four answered as though accused — and the one who actually said it would sometimes
+deny it, which reads as gaslighting because that is what it is.
+
+The app has always known who a message was aimed at: naming somebody makes them the
+first responder. It just never passed that on, so every other persona was handed the
+message with nothing marking it as somebody else's. Now each one is told:
+
+> Alex: *The user is speaking to you.*
+> Luna: *The user is speaking to Alex, not to you. You are listening in. Answer as
+> yourself, about what you heard — the question was not put to Luna.*
+
+They still reply — being in a room means overhearing things — but as a bystander
+rather than as the accused. A message with no name in it, or with two, says nothing
+about addressing: most messages are to the room, and guessing which of two people
+you meant is worse than staying quiet.
+
+Separately, the preamble now states plainly that **the transcript is the record of
+what was said, and a line tagged with your name is something you said**. Phrased as
+a fact rather than "don't deny things", because naming a behaviour is how "bored,
+angry, fixated" ended up in every persona's head once before.
+
 ## Keeping personas in their own voice
 
 Three things personas do in a group chat that they should not:
