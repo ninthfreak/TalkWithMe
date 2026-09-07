@@ -194,45 +194,51 @@ function highlightAdoptedPersona() {
    Persona Editor — event listeners
    ========================================================================== */
 
-document.getElementById("btn-persona-editor").addEventListener("click", openPersonaEditor);
-document.getElementById("pe-btn-close").addEventListener("click", closePersonaEditor);
-document.getElementById("pe-btn-new").addEventListener("click", () => openPersonaForm(null));
-document.getElementById("pe-form-btn-cancel").addEventListener("click", showPersonaList);
-document.getElementById("pe-form-btn-cancel2").addEventListener("click", showPersonaList);
-peForm.addEventListener("submit", submitPersonaForm);
-pfAvatarImage.addEventListener("change", onPersonaAvatarFileSelected);
-pfAvatarRemoveBtn.addEventListener("click", () => resetPersonaAvatarField());
-pfReferenceAudio.addEventListener("change", onPersonaAudioFileSelected);
-pfAudioRemoveBtn.addEventListener("click", () => resetPersonaAudioField());
-pfAudioPlayBtn.addEventListener("click", playPersonaReferenceAudio);
-pfMemoriesClearBtn.addEventListener("click", () => {
-    peMemoriesClearRequested = true;
-});
-pfCondenseBtn.addEventListener("click", openCondenseDialog);
-pfCondenseClose.addEventListener("click", closeCondenseDialog);
-pfCondenseCancel.addEventListener("click", closeCondenseDialog);
-pfCondenseApply.addEventListener("click", applyCondense);
-pfCondenseOverlay.addEventListener("click", (e) => {
+// bind() rather than addEventListener(): these run at the top level of
+// this file, so one missing element used to stop every binding after it
+// — silently, and only for the controls further down the list.
+const _pe = (id) => document.getElementById(id);
+
+bind(_pe("btn-persona-editor"), "click", openPersonaEditor, "Personas");
+bind(_pe("pe-btn-close"), "click", closePersonaEditor, "the persona editor close button");
+bind(_pe("pe-btn-new"), "click", () => openPersonaForm(null), "New Persona");
+bind(_pe("pe-form-btn-cancel"), "click", showPersonaList, "the persona form cancel button");
+bind(_pe("pe-form-btn-cancel2"), "click", showPersonaList, "the persona form cancel button");
+bind(peForm, "submit", submitPersonaForm, "the persona form");
+bind(pfAvatarImage, "change", onPersonaAvatarFileSelected, "the avatar file field");
+bind(pfAvatarRemoveBtn, "click", () => resetPersonaAvatarField(), "Remove avatar");
+bind(pfReferenceAudio, "change", onPersonaAudioFileSelected, "the reference audio field");
+bind(pfAudioRemoveBtn, "click", () => resetPersonaAudioField(), "Remove reference audio");
+bind(pfAudioPlayBtn, "click", playPersonaReferenceAudio, "Play reference audio");
+bind(pfMemoriesClearBtn, "click", () => { peMemoriesClearRequested = true; },
+     "Clear saved memories");
+
+bind(pfCondenseBtn, "click", openCondenseDialog, "Condense memories");
+bind(pfCondenseClose, "click", closeCondenseDialog, "the condense close button");
+bind(pfCondenseCancel, "click", closeCondenseDialog, "the condense cancel button");
+bind(pfCondenseApply, "click", applyCondense, "the condense save button");
+bind(pfCondenseOverlay, "click", (e) => {
     if (e.target === pfCondenseOverlay) closeCondenseDialog();
-});
-pfRenameBtn.addEventListener("click", openRenameDialog);
-pfRenameForm.addEventListener("submit", submitRename);
-pfRenameClose.addEventListener("click", closeRenameDialog);
-pfRenameCancel.addEventListener("click", closeRenameDialog);
-pfRenameOverlay.addEventListener("click", (e) => {
+}, "the condense backdrop");
+
+bind(pfRenameBtn, "click", openRenameDialog, "Rename");
+bind(pfRenameForm, "submit", submitRename, "the rename form");
+bind(pfRenameClose, "click", closeRenameDialog, "the rename close button");
+bind(pfRenameCancel, "click", closeRenameDialog, "the rename cancel button");
+bind(pfRenameOverlay, "click", (e) => {
     if (e.target === pfRenameOverlay) closeRenameDialog();
-});
-document.getElementById("pe-confirm-cancel").addEventListener("click", () => {
-    peConfirmOverlay.classList.add("hidden");
-});
+}, "the rename backdrop");
+
+bind(_pe("pe-confirm-cancel"), "click",
+     () => peConfirmOverlay.classList.add("hidden"), "the delete cancel button");
 
 // Close modals on overlay backdrop click
-personaEditorOverlay.addEventListener("click", (e) => {
+bind(personaEditorOverlay, "click", (e) => {
     if (e.target === personaEditorOverlay) closePersonaEditor();
-});
-peConfirmOverlay.addEventListener("click", (e) => {
+}, "the persona editor backdrop");
+bind(peConfirmOverlay, "click", (e) => {
     if (e.target === peConfirmOverlay) peConfirmOverlay.classList.add("hidden");
-});
+}, "the persona delete backdrop");
 
 /* ==========================================================================
    Persona Editor — condensing memories

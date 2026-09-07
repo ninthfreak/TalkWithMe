@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TalkWithMe v6.0</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
 </head>
 <body>
     <div id="app">
@@ -846,19 +846,19 @@
     <!-- Load modules in dependency order -->
     <!-- Be careful with the load order!  -->
     <!-- state.js first, app.js last.     -->
-    <script src="/static/state.js"></script>
-    <script src="/static/utils.js"></script>
-    <script src="/static/theme.js"></script>
-    <script src="/static/persistence.js"></script>
-    <script src="/static/tts.js"></script>
-    <script src="/static/stt.js"></script>
-    <script src="/static/chat.js"></script>
-    <script src="/static/persona.js"></script>
-    <script src="/static/persona-draft.js"></script>
-    <script src="/static/persona-refine.js"></script>
-    <script src="/static/chatrooms.js"></script>
-    <script src="/static/settings.js"></script>
-    <script src="/static/gen-settings.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/state.js?v={{ asset_version }}"></script>
+    <script src="/static/utils.js?v={{ asset_version }}"></script>
+    <script src="/static/theme.js?v={{ asset_version }}"></script>
+    <script src="/static/persistence.js?v={{ asset_version }}"></script>
+    <script src="/static/tts.js?v={{ asset_version }}"></script>
+    <script src="/static/stt.js?v={{ asset_version }}"></script>
+    <script src="/static/chat.js?v={{ asset_version }}"></script>
+    <script src="/static/persona.js?v={{ asset_version }}"></script>
+    <script src="/static/persona-draft.js?v={{ asset_version }}"></script>
+    <script src="/static/persona-refine.js?v={{ asset_version }}"></script>
+    <script src="/static/chatrooms.js?v={{ asset_version }}"></script>
+    <script src="/static/settings.js?v={{ asset_version }}"></script>
+    <script src="/static/gen-settings.js?v={{ asset_version }}"></script>
+    <script src="/static/app.js?v={{ asset_version }}"></script>
 </body>
 </html>

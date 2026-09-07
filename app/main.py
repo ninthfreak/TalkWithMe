@@ -121,6 +121,29 @@ async def lifespan(app: FastAPI):
 # App factory
 # ---------------------------------------------------------------------------
 
+# Stamped onto every /static URL the page requests, so the browser cannot
+# serve yesterday's JavaScript against today's HTML. That mismatch is not
+# theoretical: a cached page missing a button the new scripts bind to
+# throws in the middle of startup, which used to silently cancel every
+# step after it — the chat room dropdown, the character picker and the
+# stored conversation all quietly doing nothing, with no error on screen.
+#
+# Derived from the newest modification time under static/ and templates/,
+# so it changes exactly when the assets do, with nothing to remember to
+# bump. Computed once at import: these files do not change under a
+# running server, and a dev reload restarts the process anyway.
+def _asset_version() -> str:
+    root = Path(__file__).resolve().parent.parent
+    newest = 0.0
+    for folder in ("static", "templates"):
+        for path in (root / folder).rglob("*"):
+            if path.is_file():
+                newest = max(newest, path.stat().st_mtime)
+    return str(int(newest))
+
+
+ASSET_VERSION = _asset_version()
+
 app = FastAPI(
     title="TalkWithMe",
     description="A local multi-persona group chat application",
@@ -164,6 +187,7 @@ async def index(request: Request):
     """
     return templates.TemplateResponse("index.html", {
         "request": request,
+        "asset_version": ASSET_VERSION,
         "persona_levers": [lv for lv in persona_draft.LEVERS if not lv.superseded_by],
         "persona_anti_patterns": persona_draft.ANTI_PATTERNS,
         "persona_dial_groups": persona_draft.DIAL_GROUPS,

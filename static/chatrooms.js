@@ -125,51 +125,58 @@ function renderChatRoomDropdown() {
    ========================================================================== */
 
 function setupChatRoomEventListeners() {
-    // Dropdown change: switch rooms
-    chatRoomDropdown.addEventListener("change", () => {
-        switchChatRoom(chatRoomDropdown.value);
-    });
+    // bind() throughout, and the sub-setups guarded individually: this
+    // function is a chain too. The room dropdown is bound first and the
+    // character picker several lines later, so one missing element used
+    // to disable everything below it — which is precisely how "rooms
+    // aren't loading" and "I can't pick who to play as" arrived together.
+    const byId = (id) => document.getElementById(id);
 
-    // Echo chamber toggle
-    // "Add persona" button in sidebar
-    btnAddPersona.addEventListener("click", openPersonaPicker);
+    bind(chatRoomDropdown, "change", () => switchChatRoom(chatRoomDropdown.value),
+         "the chat room dropdown");
+    bind(btnAddPersona, "click", openPersonaPicker, "Add persona");
 
-    setupPlayingAsEventListeners();
-    setupSpeakAsEventListeners();
-    setupRoomEditorEventListeners();
-    loadPlayer();
+    for (const [label, fn] of [
+        ["the character picker", setupPlayingAsEventListeners],
+        ["Speak as", setupSpeakAsEventListeners],
+        ["the room editor", setupRoomEditorEventListeners],
+        ["who you are playing", loadPlayer],
+    ]) {
+        try {
+            fn();
+        } catch (err) {
+            console.error(`Could not set up ${label}:`, err);
+        }
+    }
 
     // Chat rooms editor button in topbar
-    document.getElementById("btn-chat-rooms").addEventListener("click", openChatRoomsEditor);
-    document.getElementById("cr-btn-close").addEventListener("click", closeChatRoomsEditor);
+    bind(byId("btn-chat-rooms"), "click", openChatRoomsEditor, "Chat Rooms");
+    bind(byId("cr-btn-close"), "click", closeChatRoomsEditor, "the chat rooms close button");
 
     // New room form
-    document.getElementById("cr-btn-new").addEventListener("click", showNewRoomForm);
-    document.getElementById("cr-new-cancel").addEventListener("click", hideNewRoomForm);
-    document.getElementById("cr-new-save").addEventListener("click", createChatRoom);
+    bind(byId("cr-btn-new"), "click", showNewRoomForm, "New room");
+    bind(byId("cr-new-cancel"), "click", hideNewRoomForm, "the new room cancel button");
+    bind(byId("cr-new-save"), "click", createChatRoom, "the new room save button");
 
     // Delete confirmation
-    document.getElementById("cr-confirm-cancel").addEventListener("click", () => {
-        crConfirmOverlay.classList.add("hidden");
-    });
+    bind(byId("cr-confirm-cancel"), "click",
+         () => crConfirmOverlay.classList.add("hidden"), "the delete cancel button");
 
     // Backdrop click to close
-    chatroomsOverlay.addEventListener("click", (e) => {
+    bind(chatroomsOverlay, "click", (e) => {
         if (e.target === chatroomsOverlay) closeChatRoomsEditor();
-    });
-    crConfirmOverlay.addEventListener("click", (e) => {
-        if (e.target === crConfirmOverlay) {
-            crConfirmOverlay.classList.add("hidden");
-        }
-    });
+    }, "the chat rooms backdrop");
+    bind(crConfirmOverlay, "click", (e) => {
+        if (e.target === crConfirmOverlay) crConfirmOverlay.classList.add("hidden");
+    }, "the delete confirmation backdrop");
 
     // Persona picker
-    document.getElementById("pp-btn-close").addEventListener("click", closePersonaPicker);
-    document.getElementById("pp-btn-cancel").addEventListener("click", closePersonaPicker);
-    document.getElementById("pp-btn-add").addEventListener("click", addSelectedPersonasToRoom);
-    personaPickerOverlay.addEventListener("click", (e) => {
+    bind(byId("pp-btn-close"), "click", closePersonaPicker, "the persona picker close button");
+    bind(byId("pp-btn-cancel"), "click", closePersonaPicker, "the persona picker cancel button");
+    bind(byId("pp-btn-add"), "click", addSelectedPersonasToRoom, "the persona picker add button");
+    bind(personaPickerOverlay, "click", (e) => {
         if (e.target === personaPickerOverlay) closePersonaPicker();
-    });
+    }, "the persona picker backdrop");
 }
 
 /* ==========================================================================

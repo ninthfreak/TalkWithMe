@@ -14,20 +14,56 @@
    Initialization
    ========================================================================== */
 
+/**
+ * Run one startup step without letting it take the others down.
+ *
+ * Startup used to be a straight sequence, which meant the first failure
+ * silently cancelled everything after it: one missing element in
+ * setupEventListeners() left the room dropdown and the character picker
+ * unbound and the current room's history unrendered, with nothing on
+ * screen to say why. Each step is independent, so each gets to fail
+ * alone — loudly in the console, and visibly in the chat panel.
+ */
+async function step(label, fn) {
+    try {
+        return await fn();
+    } catch (err) {
+        console.error(`Startup step failed: ${label}`, err);
+        startupFailures.push(label);
+        return undefined;
+    }
+}
+
+/** Startup steps that threw, reported once at the end rather than per failure. */
+const startupFailures = [];
+
 async function init() {
-    initTheme();
-    await loadPersonas(); // Also loads chat rooms internally
-    await checkTTSHealth();
-    await checkSTTHealth();
-    await loadGeneralSettings();
-    setupEventListeners();
-    setupChatRoomEventListeners();
-    setupPersonaDraftEventListeners();
-    setupPersonaRefineEventListeners();
+    await step("theme", () => initTheme());
+    await step("personas and chat rooms", () => loadPersonas());
+    await step("text-to-speech health", () => checkTTSHealth());
+    await step("speech-to-text health", () => checkSTTHealth());
+    await step("general settings", () => loadGeneralSettings());
+    await step("chat controls", () => setupEventListeners());
+    await step("chat room controls", () => setupChatRoomEventListeners());
+    await step("persona drafting controls", () => setupPersonaDraftEventListeners());
+    await step("persona refining controls", () => setupPersonaRefineEventListeners());
 
     // Load persisted history for the current room
-    const history = await loadPersistedHistory(currentChatRoom);
-    renderPersistedHistory(history.messages, currentChatRoom);
+    await step("stored conversation", async () => {
+        const history = await loadPersistedHistory(currentChatRoom);
+        renderPersistedHistory(history.messages, currentChatRoom);
+    });
+
+    if (startupFailures.length) {
+        // Said in the chat panel, not only the console: the symptom of a
+        // half-initialised page is controls quietly doing nothing, which
+        // reads as the app being broken rather than as an error.
+        appendErrorBubble(
+            `Some of the page did not start up (${startupFailures.join(", ")}). ` +
+            `If the app was just updated, reload with Ctrl+Shift+R. ` +
+            `The browser console has the details.`
+        );
+    }
 }
 
 /**
@@ -111,9 +147,13 @@ async function checkSTTHealth() {
    ========================================================================== */
 
 function setupEventListeners() {
-    sendBtn.addEventListener("click", sendMessage);
-    suggestBtn.addEventListener("click", suggestMessage);
-    continueBtn.addEventListener("click", continueConversation);
+    // bind() rather than addEventListener() throughout: this function runs
+    // in the middle of init(), so a single missing element used to abort
+    // everything after it — the chat-room dropdown, the character picker
+    // and the history load all being bound or run later. See bind().
+    bind(sendBtn, "click", sendMessage, "Send");
+    bind(suggestBtn, "click", suggestMessage, "Suggest a message");
+    bind(continueBtn, "click", continueConversation, "Continue");
     inputEl.addEventListener("keydown", (e) => {
         // Enter sends; Shift+Enter for newline
         if (e.key === "Enter" && !e.shiftKey) {
@@ -128,12 +168,10 @@ function setupEventListeners() {
         inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + "px";
     });
 
-    newChatBtn.addEventListener("click", newChat);
-    ttsToggleBtn.addEventListener("click", toggleTTS);
-    micBtn.addEventListener("click", toggleMicrophone);
-    themeSelectEl.addEventListener("change", () => {
-        applyTheme(themeSelectEl.value, true);
-    });
+    bind(newChatBtn, "click", newChat, "New Chat");
+    bind(ttsToggleBtn, "click", toggleTTS, "the speech toggle");
+    bind(micBtn, "click", toggleMicrophone, "the microphone");
+    bind(themeSelectEl, "change", () => applyTheme(themeSelectEl.value, true), "the theme picker");
 
     document.addEventListener("keydown", (e) => {
         if (e.ctrlKey && e.code === "Space" && !micBtn.disabled) {

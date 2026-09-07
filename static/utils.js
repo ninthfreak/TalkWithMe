@@ -62,3 +62,33 @@ function escapeHtml(str) {
         }[match];
     });
 }
+
+
+/**
+ * Bind a listener, tolerating an element that is not there.
+ *
+ * The reason this exists: startup is a chain. init() runs the setup
+ * functions one after another, and a single `null.addEventListener`
+ * aborts the rest of it — so one missing element takes out every
+ * binding after it AND the history load at the end. That failure is
+ * silent and does not look like a JavaScript error to anyone using the
+ * app; it looks like "picking a room does nothing" and "the character
+ * picker won't open", which is exactly how it was reported.
+ *
+ * A missing element is still a bug, so it is logged loudly by name.
+ * What it is not any more is fatal to everything downstream of it.
+ *
+ * Returns true when the listener was attached.
+ */
+function bind(el, event, handler, label) {
+    if (!el) {
+        console.error(
+            `UI element missing: cannot bind "${event}" for ${label || "an unnamed control"}. ` +
+            `If the app was just updated, reload with Ctrl+Shift+R — a cached page ` +
+            `with newer scripts is the usual cause.`
+        );
+        return false;
+    }
+    el.addEventListener(event, handler);
+    return true;
+}
