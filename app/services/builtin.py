@@ -18,7 +18,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-from app.config import AppSettings, Persona
+from app.config import DEFAULT_USER_LABEL, AppSettings, Persona, user_label
 from app.services import persona_store
 
 logger = logging.getLogger(__name__)
@@ -174,6 +174,41 @@ ADD_MEMORY_SPEC = {
 }
 
 
+# What a model calls the human when it ignores the transcript tag. Only
+# these two: "you" is ambiguous (it is also how a persona addresses
+# whoever it is replying to), and guessing wider would silently refile
+# memories about somebody else.
+_MEANT_THE_USER = {
+    DEFAULT_USER_LABEL.casefold(),
+    f"the {DEFAULT_USER_LABEL.casefold()}",
+}
+
+
+def _resolve_subject(about: Optional[str]) -> Optional[str]:
+    """The name a memory is filed under, once the player is accounted for.
+
+    A memory is filed under the transcript tag, and the human's tag is
+    whichever persona they have adopted. The tool description says so, but
+    models name the human their own way often enough that it needs a
+    backstop, and getting it wrong is not a cosmetic mistake in either
+    direction:
+
+      * playing Kira, "the user" left alone would land in the "User"
+        bucket — invisible for the rest of that session, then surfacing
+        attached to the wrong person the moment they put Kira down;
+      * playing as themselves, "the user" left alone would land in a
+        bucket of its own that never matches the "User" the transcript
+        actually uses, so the memory would be written and never read.
+
+    So whichever way the model names the human, the memory is filed under
+    the name this room knows them by. Everything else is somebody else and
+    is left exactly as written.
+    """
+    if about is None or about.strip().casefold() not in _MEANT_THE_USER:
+        return about
+    return user_label()
+
+
 def _add_memory(persona: Persona, arguments: dict) -> str:
     """add_memory handler: delegate to the persona store's append logic.
 
@@ -186,7 +221,7 @@ def _add_memory(persona: Persona, arguments: dict) -> str:
         return "Error: The memory could not be saved."
     return persona_store.append_memory(
         persona.persona_dir,
-        arguments.get("about"),
+        _resolve_subject(arguments.get("about")),
         arguments.get("memory"),
         persona.memory_size,
     )

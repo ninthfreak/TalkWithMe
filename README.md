@@ -819,6 +819,14 @@ transcript tags them with, which means the human is filed under **whoever they a
 playing** — play Kira today and Tony tomorrow and you are two different people to the
 room, which is the point of playing someone.
 
+That separation is enforced in both directions, and it is the whole reason the human is
+filed by name at all. `User` is a person like any other: it is who you are when you have
+adopted nobody, and it is not consulted while you are playing somebody. Pick up Kira and
+you meet the room as a stranger, however well it knows you; put her down and what it
+learned about Kira stays with Kira. Memories written before this feature existed carry no
+subject, and since they were all about you playing as yourself, they are shown only when
+you are playing as yourself.
+
 Only the people actually present are mentioned in a persona's prompt, and each of them
 lands in one of three states:
 

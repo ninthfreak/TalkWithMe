@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, Response
 from app.config import (
     LengthBias,
     DEFAULT_MEMORY_SIZE,
+    DEFAULT_USER_LABEL,
     MAX_MEMORY_SIZE,
     ChatRoom,
     ChatRoomsConfig,
@@ -588,8 +589,9 @@ _PREVIEW_MAX_TOKENS = 400
 # What the human is called in a preview. One constant, because the same
 # name has to reach the transcript tag, the stop strings and the guard —
 # a persona told not to speak as "User" while the tag says something else
-# is the bug this names away.
-_PREVIEW_USER = "User"
+# is the bug this names away. A preview is not a room, so it is always the
+# neutral label: whoever the player has adopted is not in this scene.
+_PREVIEW_USER = DEFAULT_USER_LABEL
 
 
 @router.post("/draft", response_model=PersonaDraftResponse)

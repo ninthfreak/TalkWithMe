@@ -19,12 +19,14 @@ from app.config import (
     ChatRoom,
     Persona,
     TypicalLength,
+    adopted_persona,
     derive_max_tokens,
     get_chatrooms,
     get_personas,
     get_player,
     get_settings,
     resolve_typical_length,
+    user_label as _canonical_user_label,
 )
 from app.models import (
     ChatRequest,
@@ -118,13 +120,11 @@ def _find_room(chat_room: str) -> Optional[ChatRoom]:
 def _adopted_persona() -> Optional[Persona]:
     """The persona the player is currently playing, or None.
 
-    Resolved against the live persona list every time: the adopted persona
-    can be deleted or renamed after the fact, and a dangling reference must
-    degrade to "playing as themselves" rather than half-applying.
+    Thin alias for config.adopted_persona(), which the built-in tools also
+    consult: whether a persona is adopted decides how a memory is filed,
+    so the router and the add_memory handler have to agree on the answer.
     """
-    personas = {p.name: p for p in get_personas().personas}
-    name = get_player().adopted(personas.keys())
-    return personas.get(name) if name else None
+    return adopted_persona()
 
 
 def _user_label() -> str:
@@ -132,12 +132,11 @@ def _user_label() -> str:
 
     The adopted persona's name when there is one, else a neutral "User".
     Every consumer takes it from here: the preamble, the "[Name]: " tags in
-    history, the stop strings, and the reply guard. If they disagreed, a
-    persona could be told not to speak as "Kira" while the transcript
-    tagged them "User".
+    history, the stop strings, the reply guard, and the subject a memory
+    about them is filed under. If they disagreed, a persona could be told
+    not to speak as "Kira" while the transcript tagged them "User".
     """
-    adopted = _adopted_persona()
-    return adopted.name if adopted else "User"
+    return _canonical_user_label()
 
 
 def _player_lines(player: Optional[Persona], speaker: str) -> list[str]:
@@ -433,9 +432,25 @@ def _who_is_here_block(persona, present: list[str], settings) -> str:
 
     The met-list is written by the app, so this works whether or not the
     persona may call tools. Only the memory lines need the feature on.
+
+    Everything here is keyed on the name the transcript uses, which for the
+    human is whoever they have adopted. That is what keeps the two people
+    they can be apart: what a persona knows about the human playing as
+    themselves is filed under "User" and is not consulted while they are
+    playing Kira, and what it knows about Kira is not consulted when they
+    put Kira down. A first meeting with the character you just picked up
+    reads as a first meeting.
     """
     if persona.persona_dir is None or not present:
         return ""
+
+    # Who the human is playing decides which of their memories apply, and
+    # "User" is a person like any other: a memory filed under it belongs
+    # to the human playing as themselves and to nobody else. Playing Kira,
+    # only Kira's row is looked up — and since "User" is never in
+    # *present* while somebody is adopted, nothing filed under it can
+    # reach this room.
+    playing = _adopted_persona()
 
     known = persona_store.read_acquaintances(persona.persona_dir)
     known_fold = {n.casefold() for n in known}
@@ -464,11 +479,15 @@ def _who_is_here_block(persona, present: list[str], settings) -> str:
         else:
             lines.append(f"{name}: you have never met.")
 
-    # Untagged legacy lines predate memories being about anybody. They
-    # were all about the human, so they still go in, unattached.
-    loose = grouped.get("", [])
-    if loose:
-        lines.append(" ".join(loose))
+    # Untagged legacy lines predate memories being about anybody, and they
+    # were all about the human playing as themselves. So they go in only
+    # when the human is playing as themselves now: shown to a persona who
+    # is talking to Kira, they would be read as things known about Kira,
+    # which is exactly the leak that filing memories by subject closed.
+    if playing is None:
+        loose = grouped.get("", [])
+        if loose:
+            lines.append(" ".join(loose))
 
     return "\n".join(lines)
 

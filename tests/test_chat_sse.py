@@ -630,6 +630,49 @@ class TestPersonaMemory:
         persona = self._persona(tmp_path, memories="The user told me they sail.\n")
         assert "The user told me they sail." in self._block(persona)
 
+    # -- the human is two people, and the two are kept apart -----------------
+
+    def test_legacy_untagged_memories_are_withheld_while_playing_someone(
+        self, tmp_path, monkeypatch,
+    ):
+        # Untagged lines were all about the human playing as themselves.
+        # Shown to a persona talking to Kira they read as things known
+        # about Kira, which is the leak filing memories by subject closed.
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name="Luna"))
+        persona = self._persona(tmp_path, memories="The user told me they sail.\n")
+
+        assert "they sail" not in self._block(persona, present=["Luna"])
+
+    def test_what_the_human_left_as_themselves_does_not_follow_them_into_a_persona(
+        self, tmp_path, monkeypatch,
+    ):
+        # Play Luna and you are Luna: a stranger, however well this
+        # persona knows the human behind her.
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name="Luna"))
+        persona = self._persona(
+            tmp_path, memories="[User] They have never been on a boat.\n", met=["User"],
+        )
+
+        result = self._block(persona, present=["Luna"])
+
+        assert "never been on a boat" not in result
+        assert "Luna: you have never met." in result
+
+    def test_putting_the_persona_down_gives_the_human_their_own_back(
+        self, tmp_path,
+    ):
+        # And the reverse: what was learned about Luna stays with Luna.
+        persona = self._persona(
+            tmp_path,
+            memories="[User] They have never been on a boat.\n[Luna] Luna owes money.\n",
+            met=["User", "Luna"],
+        )
+
+        result = self._block(persona, present=["User"])
+
+        assert "They have never been on a boat." in result
+        assert "owes money" not in result
+
     # -- budget enforcement on the read path ----------------------------------
 
     def test_over_limit_memories_purged_oldest_first_on_read(self, tmp_path):

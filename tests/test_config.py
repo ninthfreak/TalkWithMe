@@ -609,6 +609,32 @@ class TestPlayingAsAPersona:
         # them is worse than none.
         assert PlayerConfig(persona_name=stored).adopted(known) == expected
 
+    def test_user_label_is_the_neutral_one_when_playing_as_yourself(self, monkeypatch):
+        import app.config as app_config
+        from app.config import DEFAULT_USER_LABEL, adopted_persona, user_label
+
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig())
+        assert adopted_persona() is None
+        assert user_label() == DEFAULT_USER_LABEL
+
+    def test_user_label_is_the_adopted_persona_when_there_is_one(self, monkeypatch):
+        # One definition, because the transcript tag, the stop strings, the
+        # reply guard and the subject a memory is filed under all read it.
+        import app.config as app_config
+        from app.config import adopted_persona, user_label
+
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name="Luna"))
+        assert adopted_persona().name == "Luna"
+        assert user_label() == "Luna"
+
+    def test_a_deleted_persona_hands_the_human_back_to_themselves(self, monkeypatch):
+        import app.config as app_config
+        from app.config import DEFAULT_USER_LABEL, adopted_persona, user_label
+
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name="Gone"))
+        assert adopted_persona() is None
+        assert user_label() == DEFAULT_USER_LABEL
+
 
 class TestConfigWritesAreAtomic:
     """A half-written YAML file is worse than no file.

@@ -795,3 +795,37 @@ def reload_all():
     load_personas()
     load_chatrooms()
     load_player()
+
+
+# ---------------------------------------------------------------------------
+# Who the human is
+# ---------------------------------------------------------------------------
+
+# What the human is tagged as in the transcript when they have not adopted
+# anybody. It is also the name their memories are filed under, and that is
+# why it is a constant rather than a literal in three files: the tag, the
+# memory subject and the stop strings have to be the same string or a
+# persona gets told not to speak as "Kira" while the transcript says "User".
+DEFAULT_USER_LABEL = "User"
+
+
+def adopted_persona() -> Optional[Persona]:
+    """The persona the human is currently playing, or None.
+
+    Resolved against the live persona list on every call: the adopted
+    persona can be deleted or renamed after the fact, and a dangling
+    reference must degrade to "playing as themselves" rather than
+    half-applying.
+    """
+    personas = {p.name: p for p in get_personas().personas}
+    name = get_player().adopted(personas.keys())
+    return personas.get(name) if name else None
+
+
+def user_label() -> str:
+    """What the human is called in the transcript, and in memories.
+
+    The adopted persona's name when there is one, else DEFAULT_USER_LABEL.
+    """
+    playing = adopted_persona()
+    return playing.name if playing else DEFAULT_USER_LABEL

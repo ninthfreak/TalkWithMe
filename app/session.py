@@ -292,6 +292,8 @@ class SessionManager:
         responding_persona: str,
         max_turns_for_context: Optional[int] = None,
         room_preamble: Optional[str] = None,
+        # Literal, not config.DEFAULT_USER_LABEL: this module imports no
+        # config by design, and every real caller passes the label anyway.
         user_label: str = "User",
     ) -> List[Dict[str, str]]:
         """Build the messages list for an LLM call.

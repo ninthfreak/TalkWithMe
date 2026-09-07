@@ -11,7 +11,13 @@ the throwaway never leaks into the other tests.
 
 import pytest
 
-from app.config import AppSettings, GeneralConfig, Persona
+import app.config as app_config
+from app.config import (
+    AppSettings,
+    GeneralConfig,
+    Persona,
+    PlayerConfig,
+)
 from app.services import builtin
 from app.services.builtin import (
     ADD_MEMORY_NAME,
@@ -188,3 +194,96 @@ class TestAddMemoryTool:
         persona = _persona(tmp_path)
         result = call_builtin_tool(persona, ADD_MEMORY_NAME, {"memory": "   "})
         assert result == "Error: The memory was not saved because it had no content."
+
+
+# ---------------------------------------------------------------------------
+# add_memory: who a memory ends up filed under
+# ---------------------------------------------------------------------------
+
+class TestMemorySubjectAndThePlayer:
+    """The human is two different people depending on who they are playing,
+    and a memory has to land under the right one.
+
+    The transcript tags them with whichever persona they have adopted, and
+    the tool description tells the model to use that tag. This is the
+    backstop for when it does not: however the model names the human, the
+    memory is filed under the name this room knows them by. While somebody
+    is adopted that is the adopted persona, so the "User" bucket — which
+    belongs to the human playing as themselves — is not written to at all.
+    """
+
+    @staticmethod
+    def _play(monkeypatch, name: str) -> None:
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name=name))
+
+    @pytest.mark.parametrize("about", ["User", "the user"])
+    def test_playing_as_themselves_the_user_bucket_is_used(self, tmp_path, about):
+        # Including the model's own phrasing: "the user" filed verbatim
+        # would make a bucket nothing ever looks in, since the transcript
+        # tags them "User".
+        persona = _persona(tmp_path)
+
+        call_builtin_tool(
+            persona, ADD_MEMORY_NAME,
+            {"about": about, "memory": "They have never been on a boat."},
+        )
+
+        assert (persona.persona_dir / "memories.txt").read_text() == (
+            "[User] They have never been on a boat.\n"
+        )
+
+    @pytest.mark.parametrize("about", ["User", "user", "the user", " The User "])
+    def test_while_playing_a_persona_the_user_means_that_persona(
+        self, tmp_path, monkeypatch, about,
+    ):
+        # Left alone this would land in "User": invisible for the rest of
+        # the session, then surfacing attached to the wrong person the
+        # moment they stop playing Kira.
+        self._play(monkeypatch, "Alex")
+        persona = _persona(tmp_path)
+
+        call_builtin_tool(
+            persona, ADD_MEMORY_NAME, {"about": about, "memory": "They sail."},
+        )
+
+        assert (persona.persona_dir / "memories.txt").read_text() == "[Alex] They sail.\n"
+
+    def test_somebody_else_is_never_refiled(self, tmp_path, monkeypatch):
+        # Only the two ways a model names the human are remapped. "Luna"
+        # is a third party and stays a third party.
+        self._play(monkeypatch, "Alex")
+        persona = _persona(tmp_path)
+
+        call_builtin_tool(
+            persona, ADD_MEMORY_NAME, {"about": "Luna", "memory": "Luna writes poems."},
+        )
+
+        assert (persona.persona_dir / "memories.txt").read_text() == (
+            "[Luna] Luna writes poems.\n"
+        )
+
+    def test_an_adopted_name_that_no_longer_exists_falls_back(self, tmp_path, monkeypatch):
+        # A persona can be deleted after being adopted. adopted() resolves
+        # against the live list, so the human is themselves again and
+        # "User" is right again.
+        self._play(monkeypatch, "Deleted")
+        persona = _persona(tmp_path)
+
+        call_builtin_tool(
+            persona, ADD_MEMORY_NAME, {"about": "the user", "memory": "They sail."},
+        )
+
+        assert (persona.persona_dir / "memories.txt").read_text() == "[User] They sail.\n"
+
+    def test_a_memory_about_nobody_is_still_refused_while_playing(
+        self, tmp_path, monkeypatch,
+    ):
+        # The subject remap must not invent one where there was none.
+        self._play(monkeypatch, "Alex")
+        persona = _persona(tmp_path)
+
+        result = call_builtin_tool(persona, ADD_MEMORY_NAME, {"memory": "They sail."})
+
+        assert result.startswith("Error:") and "who it is about" in result
+        assert not (persona.persona_dir / "memories.txt").exists()
+
