@@ -869,11 +869,45 @@ default and its own label says it is about MCP servers. There is also a manual
 Look back at a finished conversation** if you would rather not spend the
 generation.
 
+**The persona is shown what it already knows before it is asked.** This is the
+whole reason a memories file stops filling up with the same fact in slightly
+different words. The question used to be asked in ignorance every time: a persona
+that had recorded somebody's age in three previous conversations was told nothing
+about that, re-derived it from the transcript, and filed it again — which
+exact-match deduplication cannot catch and no amount of "don't repeat yourself" in
+the prompt could fix, because the model had nothing to compare against. Showing it
+its own memories and asking only for what is new costs nothing extra: the
+completion was happening anyway.
+
+Deliberately *not* done: fuzzy matching on the way in. "Tony likes tea" and "Tony
+likes coffee" overlap heavily and are different facts, so a similarity threshold
+loose enough to catch a restatement is loose enough to eat one of those.
+
 It used to be that a persona could only save a memory by invoking the `add_memory`
 tool mid-reply. That still works, and is still there for tool-capable personas —
 but as the only route it meant memory was off for everybody by default, and
 turning it on moved that persona from the transcript prompt format to the instruct
 one, trading conversation quality for it. Asking after the fact costs neither.
+
+**What a persona guessed is kept apart from what it was told.** Personas make
+assumptions — it is one of the more convincing things they do — but an inference
+and a fact are indistinguishable once both are prose in the same file, and the
+persona holding one has no way to find out which it was. So a line can carry a
+marker, and the prompt says it back:
+
+```
+[Tony] Tony has never been on a boat.
+[Tony] (assumed) Tony is about forty.
+```
+
+> Tony: Tony has never been on a boat. You have also assumed, though nobody said
+> so: Tony is about forty.
+
+Which means the persona can be wrong out loud — ask, be corrected, or drop it —
+instead of treating a guess as something it was told. Assumptions are also the
+first thing shed when a persona's byte budget fills: what you worked out fades
+before what you witnessed. You can add or remove the `(assumed)` marker by hand,
+which is the point of it being a word rather than a symbol.
 
 **The first row is the one that needed building.** Every model's default is warm
 familiarity — "good to see you again", "how have you been?" — and nothing used to

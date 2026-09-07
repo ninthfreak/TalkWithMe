@@ -696,6 +696,111 @@ class TestAppendMemory:
         assert "could not delete memories.txt" in caplog.text
 
 
+class TestAssumedMemories:
+    """A memory records whether it was witnessed or worked out.
+
+    Without it an inference is indistinguishable from a fact once both are
+    prose in the same file, and the persona holding it has no way to find
+    out which it was.
+    """
+
+    def test_the_marker_round_trips(self):
+        line = "[Tony] (assumed) Tony is about forty."
+        memory = persona_store.parse_memory_line(line)
+
+        assert memory == persona_store.Memory("Tony", "Tony is about forty.", True)
+        assert memory.stored() == line
+
+    @pytest.mark.parametrize("written", [
+        "[Tony] (assumed) He sails.",
+        "[Tony] (Assumed) He sails.",
+        "[Tony] (guess) He sails.",
+        "[Tony] ( guessed ) He sails.",
+    ])
+    def test_the_ways_a_model_writes_it(self, written):
+        # A small closed set: every extra spelling accepted is a phrase
+        # that stops being part of the memory's text, and quietly losing
+        # words out of a memory is worse than an unmarked one.
+        memory = persona_store.parse_memory_line(written)
+        assert memory.assumed is True
+        assert memory.text == "He sails."
+
+    def test_a_plain_bracket_is_left_in_the_text(self):
+        memory = persona_store.parse_memory_line("[Tony] (probably) he sails.")
+        assert memory.assumed is False
+        assert memory.text == "(probably) he sails."
+
+    def test_an_unmarked_memory_is_known(self):
+        assert persona_store.parse_memory_line("[Tony] Tony is 43.").assumed is False
+
+    def test_append_writes_the_marker(self, tmp_path):
+        persona_store.append_memory(tmp_path, "Tony", "Tony is about forty.",
+                                    1024, assumed=True)
+        assert (tmp_path / "memories.txt").read_text() == (
+            "[Tony] (assumed) Tony is about forty.\n"
+        )
+
+    def test_the_same_thing_assumed_and_known_are_two_memories(self, tmp_path):
+        # Deduplication compares the stored line, and these are not the
+        # same claim: one is what they said, the other what you decided.
+        persona_store.append_memory(tmp_path, "Tony", "Tony sails.", 1024)
+        persona_store.append_memory(tmp_path, "Tony", "Tony sails.", 1024, assumed=True)
+
+        assert (tmp_path / "memories.txt").read_text() == (
+            "[Tony] Tony sails.\n[Tony] (assumed) Tony sails.\n"
+        )
+
+    def test_grouping_keeps_the_marker(self, tmp_path):
+        (tmp_path / "memories.txt").write_text(
+            "[Tony] Tony is 43.\n[Tony] (assumed) Tony is unhappy.\n"
+        )
+        grouped = persona_store.memories_by_subject(tmp_path)
+
+        assert [m.assumed for m in grouped["tony"]] == [False, True]
+
+
+class TestAssumptionsFadeFirst:
+    """Under pressure, what you guessed goes before what you were told.
+
+    A guess that never got confirmed is the cheapest thing in the file to
+    be wrong about, and giving assumptions a shorter half-life is the
+    closest this gets to a memory that settles.
+    """
+
+    @staticmethod
+    def _lines(tmp_path):
+        return (tmp_path / "memories.txt").read_text().splitlines()
+
+    def test_the_oldest_assumption_goes_before_any_fact(self, tmp_path):
+        # Budget fits three of these lines, not four.
+        (tmp_path / "memories.txt").write_text(
+            "[T] (assumed) aaaa\n[T] bbbb\n[T] (assumed) cccc\n"
+        )
+        budget = len("[T] (assumed) aaaa\n[T] bbbb\n[T] (assumed) cccc\n[T] dddd\n")
+
+        persona_store.append_memory(tmp_path, "T", "dddd", budget - 1)
+
+        assert self._lines(tmp_path) == [
+            "[T] bbbb", "[T] (assumed) cccc", "[T] dddd",
+        ]
+
+    def test_facts_go_only_once_the_guesses_are_gone(self, tmp_path):
+        (tmp_path / "memories.txt").write_text("[T] aaaa\n[T] bbbb\n")
+
+        persona_store.append_memory(tmp_path, "T", "cccc", 22)
+
+        assert self._lines(tmp_path) == ["[T] bbbb", "[T] cccc"]
+
+    def test_the_memory_just_added_is_never_the_one_dropped(self, tmp_path):
+        # Even when it is itself an assumption and the only other line is
+        # a fact: the newest line always survives, and the budget fits one.
+        (tmp_path / "memories.txt").write_text("[T] aaaa\n")
+
+        persona_store.append_memory(tmp_path, "T", "zzzz", 25, assumed=True)
+
+        assert self._lines(tmp_path) == ["[T] (assumed) zzzz"]
+
+
 class TestPurgeMemoriesToLimit:
     """purge_memories_to_limit(): the editor-side cleanup run when a
     persona's memory_size drops on save. Never raises."""

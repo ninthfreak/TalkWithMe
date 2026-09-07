@@ -28,7 +28,7 @@ import re
 import shutil
 import uuid
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import NamedTuple, Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
 from pydantic import ValidationError
@@ -612,21 +612,72 @@ MAX_SUBJECT_CHARS = MAX_PERSONA_NAME
 _SUBJECT_RE = re.compile(r"^\[([^\]\n]{1,%d})\]\s*(.+)$" % MAX_SUBJECT_CHARS)
 
 
-def split_memory_line(line: str) -> Tuple[str, str]:
-    """A stored line as (subject, text). Subject is "" when untagged."""
+# How a memory records that it was worked out rather than witnessed.
+#
+# A persona that decides somebody is about forty, and files "Tony is
+# forty", meets them next week believing it the way it believes anything
+# else it was told. That is not what happened, and the persona has no way
+# to find out — an inference is indistinguishable from a fact once both
+# are prose in the same file.
+#
+# So the line carries which it is, and the prompt says it back (see
+# _who_is_here_block). It is a word rather than a symbol because
+# memories.txt is meant to be opened and edited by hand, and "(assumed)"
+# explains itself where "~" would need a legend.
+ASSUMED_PREFIX = "(assumed)"
+
+# What a model writes when asked to mark an assumption. Only these: every
+# extra spelling is a phrase that stops being part of the memory's text,
+# and quietly losing words out of a memory is worse than an unmarked one.
+_ASSUMED_RE = re.compile(r"^\(\s*(?:assumed|assumption|guess|guessed)\s*\)\s*", re.I)
+
+
+class Memory(NamedTuple):
+    """One stored line, pulled apart.
+
+    *subject* is "" for the untagged legacy lines that predate memories
+    being about anybody. *assumed* is True when the persona worked this
+    out rather than being told it.
+    """
+
+    subject: str
+    text: str
+    assumed: bool = False
+
+    def stored(self) -> str:
+        """The line as it is written to disk."""
+        body = f"{ASSUMED_PREFIX} {self.text}" if self.assumed else self.text
+        return f"[{self.subject}] {body}" if self.subject else body
+
+
+def parse_memory_line(line: str) -> Memory:
+    """A stored line as a Memory. Never raises; anything unparseable is
+    treated as an untagged memory, which is what it looks like."""
     match = _SUBJECT_RE.match(line.strip())
-    return (match.group(1).strip(), match.group(2).strip()) if match else ("", line.strip())
+    subject, body = (
+        (match.group(1).strip(), match.group(2).strip()) if match else ("", line.strip())
+    )
+    stripped = _ASSUMED_RE.sub("", body, count=1)
+    return Memory(subject=subject, text=stripped.strip(), assumed=stripped != body)
 
 
-def memories_by_subject(persona_dir: Path) -> Dict[str, List[str]]:
+def split_memory_line(line: str) -> Tuple[str, str]:
+    """A stored line as (subject, text), dropping any assumed marker."""
+    memory = parse_memory_line(line)
+    return memory.subject, memory.text
+
+
+def memories_by_subject(persona_dir: Path) -> Dict[str, List[Memory]]:
     """Stored memories grouped by who they are about, casefolded keys.
 
-    Untagged legacy lines land under "".
+    Untagged legacy lines land under "". Callers get whole Memory rows
+    rather than bare text because what a persona *assumed* has to be
+    presented differently from what it knows.
     """
-    grouped: Dict[str, List[str]] = {}
+    grouped: Dict[str, List[Memory]] = {}
     for line in _memory_lines(read_memories(persona_dir)):
-        subject, text = split_memory_line(line)
-        grouped.setdefault(subject.casefold(), []).append(text)
+        memory = parse_memory_line(line)
+        grouped.setdefault(memory.subject.casefold(), []).append(memory)
     return grouped
 
 
@@ -773,8 +824,43 @@ def rename_persona_directory(persona_dir: Path, new_name: str) -> Path:
     return target
 
 
+def _shed_to_fit(lines: List[str], memory_size: int) -> None:
+    """Drop memories in place until *lines* fits the budget.
+
+    Assumptions go first, oldest among them first, and only then the
+    things the persona was actually told. A guess that never got confirmed
+    is the cheapest thing in the file to be wrong about, and giving them a
+    shorter half-life than facts is the closest this gets to a memory that
+    settles: what you worked out fades, what you witnessed stays.
+
+    Never drops the last line — the caller has just added it, and a memory
+    that alone exceeds the budget was refused before reaching here.
+    """
+    def over() -> bool:
+        return len(lines) > 1 and _memories_bytes(lines) >= memory_size
+
+    if not over():
+        return
+
+    # Oldest assumption first each time round, keeping the newest line
+    # whatever it is. Recomputed rather than iterated, because deleting
+    # shifts every index after it.
+    while over():
+        stale = next(
+            (i for i, line in enumerate(lines[:-1]) if parse_memory_line(line).assumed),
+            None,
+        )
+        if stale is None:
+            break
+        del lines[stale]
+
+    while over():
+        lines.pop(0)
+
+
 def append_memory(
-    persona_dir: Path, about: object, memory: object, memory_size: int
+    persona_dir: Path, about: object, memory: object, memory_size: int,
+    assumed: bool = False,
 ) -> str:
     """Append one memory to the persona's memories.txt, enforcing all limits.
 
@@ -819,7 +905,7 @@ def append_memory(
             "Error: The memory was not saved because it did not say who it is "
             "about. Use the name the transcript tags them with."
         )
-    cleaned = f"[{subject}] {cleaned}"
+    cleaned = Memory(subject=subject, text=cleaned, assumed=bool(assumed)).stored()
 
     if len(cleaned.encode("utf-8")) > memory_size:
         return (
@@ -841,12 +927,11 @@ def append_memory(
         return "The memory was already saved."
 
     lines.append(cleaned)
-    # Purge oldest-first until the file is under the limit, but never drop
-    # the memory just added (the newest line). A memory that alone exceeds
-    # the limit was rejected above, so this always terminates with the new
-    # memory surviving.
-    while len(lines) > 1 and _memories_bytes(lines) >= memory_size:
-        lines.pop(0)
+    # Purge until the file is under the limit, but never drop the memory
+    # just added (the newest line). A memory that alone exceeds the limit
+    # was rejected above, so this always terminates with the new memory
+    # surviving.
+    _shed_to_fit(lines, memory_size)
     try:
         _write_memories_file(persona_dir, lines)
     except OSError as exc:
@@ -881,8 +966,8 @@ def purge_memories_to_limit(persona_dir: Path, memory_size: int) -> None:
         return  # no file, or blank file: nothing to purge
     if _memories_bytes(lines) <= memory_size:
         return  # already within the new limit
-    while len(lines) > 1 and _memories_bytes(lines) >= memory_size:
-        lines.pop(0)
+    # Same rule as the write path: assumptions before facts.
+    _shed_to_fit(lines, memory_size)
     if len(lines) == 1 and _memories_bytes(lines) > memory_size:
         # Best-effort: the file simply survives until the next attempt when
         # the delete fails (logged inside the helper), matching the

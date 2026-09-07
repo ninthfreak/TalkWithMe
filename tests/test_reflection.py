@@ -15,6 +15,7 @@ import pytest
 from app.config import GeneralConfig, Persona
 from app.models import ChatMessage
 from app.services import persona_store, reflection
+from app.services.persona_store import Memory
 from tests.factories import make_settings
 
 
@@ -127,8 +128,8 @@ class TestParseReflection:
             "Alex", ["Tony", "Marv"],
         )
         assert saved == [
-            ("Tony", "Tony has never been on a boat."),
-            ("Marv", "Marv sighs at everything."),
+            Memory("Tony", "Tony has never been on a boat."),
+            Memory("Marv", "Marv sighs at everything."),
         ]
         assert skipped == []
 
@@ -159,7 +160,7 @@ class TestParseReflection:
         saved, _ = reflection.parse_reflection(
             "[tony] tony sails.", "Alex", ["Tony"],
         )
-        assert saved == [("Tony", "tony sails.")]
+        assert saved == [Memory("Tony", "tony sails.")]
 
     @pytest.mark.parametrize("answer", [
         "nothing", "Nothing.", "none", "N/A", "  nothing at all", "no memories",
@@ -170,6 +171,22 @@ class TestParseReflection:
         saved, skipped = reflection.parse_reflection(answer, "Alex", ["Tony"])
         assert saved == []
         assert skipped == []
+
+    def test_an_assumption_is_kept_as_one(self):
+        # The marker is understood in the answer exactly as it is on disk,
+        # so a persona that worked something out can be told later that it
+        # worked it out.
+        saved, skipped = reflection.parse_reflection(
+            "[Tony] (assumed) Tony is about forty.", "Alex", ["Tony"],
+        )
+        assert saved == [Memory("Tony", "Tony is about forty.", assumed=True)]
+        assert skipped == []
+
+    def test_an_unmarked_line_is_taken_as_known(self):
+        saved, _ = reflection.parse_reflection(
+            "[Tony] Tony is 43.", "Alex", ["Tony"],
+        )
+        assert saved[0].assumed is False
 
     def test_an_untagged_line_is_skipped_not_guessed_at(self):
         saved, skipped = reflection.parse_reflection(
@@ -220,6 +237,75 @@ class TestReflect:
         )
 
         assert "Write only about these people: Tony" in captured[0][0][-1]["content"]
+
+    # -- knowing what it already knows ---------------------------------------
+
+    def test_it_is_shown_what_it_already_knows(self, tmp_path, monkeypatch):
+        # The cause of a memories file filling with the same fact: the
+        # question used to be asked in ignorance every single time, so the
+        # persona re-derived what it had already recorded and filed it
+        # again in slightly different words — which exact-match dedup
+        # cannot catch.
+        persona = _persona(tmp_path)
+        (persona.persona_dir / "memories.txt").write_text(
+            "[Tony] Tony is 43.\n[Tony] (assumed) Tony dislikes his job.\n"
+        )
+        captured = []
+        _stub_llm(monkeypatch, "nothing", capture=captured)
+
+        _reflect(persona, ["Tony"], _history(), make_settings(), "Tony")
+
+        prompt = captured[0][0][-1]["content"]
+        assert "[Tony] Tony is 43." in prompt
+        assert "[Tony] (assumed) Tony dislikes his job." in prompt
+        assert "only what is NEW" in prompt
+
+    def test_memories_about_people_who_are_not_here_are_not_listed(
+        self, tmp_path, monkeypatch,
+    ):
+        # Every line spent listing somebody absent is prompt paid for
+        # nothing: this conversation cannot restate it.
+        persona = _persona(tmp_path)
+        (persona.persona_dir / "memories.txt").write_text(
+            "[Tony] Tony is 43.\n[Ghost] Ghost is elsewhere.\n"
+        )
+        captured = []
+        _stub_llm(monkeypatch, "nothing", capture=captured)
+
+        _reflect(persona, ["Tony"], _history(), make_settings(), "Tony")
+
+        prompt = captured[0][0][-1]["content"]
+        assert "Tony is 43." in prompt
+        assert "Ghost" not in prompt
+
+    def test_with_nothing_saved_it_is_told_so(self, tmp_path, monkeypatch):
+        captured = []
+        _stub_llm(monkeypatch, "nothing", capture=captured)
+
+        _reflect(_persona(tmp_path), ["Tony"], _history(), make_settings(), "Tony")
+
+        assert "nothing saved about them yet" in captured[0][0][-1]["content"]
+
+    # -- assumptions ----------------------------------------------------------
+
+    def test_an_assumption_is_stored_marked(self, tmp_path, monkeypatch):
+        persona = _persona(tmp_path)
+        _stub_llm(monkeypatch, "[Tony] (assumed) Tony is about forty.")
+
+        result = _reflect(persona, ["Tony"], _history(), make_settings(), "Tony")
+
+        assert _memories(persona) == "[Tony] (assumed) Tony is about forty.\n"
+        assert result.saved == ["[Tony] (assumed) Tony is about forty."]
+
+    def test_the_prompt_shows_how_to_mark_one(self, tmp_path, monkeypatch):
+        captured = []
+        _stub_llm(monkeypatch, "nothing", capture=captured)
+
+        _reflect(_persona(tmp_path), ["Tony"], _history(), make_settings(), "Tony")
+
+        prompt = captured[0][0][-1]["content"]
+        assert "worked something out rather than being told" in prompt
+        assert "[Tony] (assumed) Tony is about forty." in prompt
 
     def test_no_more_than_the_cap_is_filed(self, tmp_path, monkeypatch):
         # A model answering a "what did you learn" question with a dozen

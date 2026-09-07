@@ -513,8 +513,24 @@ def _who_is_here_block(persona, present: list[str], settings) -> str:
     lines = []
     for name in present:
         recalled = grouped.get(name.casefold(), [])
-        if recalled:
-            lines.append(f"{name}: " + " ".join(recalled))
+        # Split by how it was come by, because the two are not the same
+        # kind of thing to know. A persona that decided somebody was about
+        # forty and filed "Tony is forty" believes it next week exactly as
+        # firmly as anything it was told, and has no way to find out
+        # otherwise — an inference and a fact are indistinguishable once
+        # both are prose in the same file.
+        known = [m.text for m in recalled if not m.assumed]
+        assumed = [m.text for m in recalled if m.assumed]
+        if known or assumed:
+            said = f"{name}: "
+            if known:
+                said += " ".join(known)
+            if assumed:
+                # Said as something they worked out, so it can be wrong
+                # out loud: asked about, corrected, or quietly dropped.
+                lead = " You have also assumed" if known else "You have assumed"
+                said += f"{lead}, though nobody said so: " + " ".join(assumed)
+            lines.append(said)
         elif name.casefold() in known_fold:
             lines.append(f"{name}: you have met before, but nothing in particular comes to mind.")
         else:
@@ -528,7 +544,7 @@ def _who_is_here_block(persona, present: list[str], settings) -> str:
     if playing is None:
         loose = grouped.get("", [])
         if loose:
-            lines.append(" ".join(loose))
+            lines.append(" ".join(m.text for m in loose))
 
     return "\n".join(lines)
 

@@ -100,7 +100,10 @@ def render_conversation(history: Sequence[ChatMessage], user_label: str) -> str:
 
 
 def build_reflection_prompt(
-    persona: Persona, present: Sequence[str], conversation: str,
+    persona: Persona,
+    present: Sequence[str],
+    conversation: str,
+    already_known: str = "",
 ) -> List[Dict[str, str]]:
     """The one question this whole module asks.
 
@@ -113,11 +116,35 @@ def build_reflection_prompt(
     anything, and a model that believes it must produce a line will
     invent one.
 
+    **The persona is shown what it already knows**, and that is the whole
+    fix for a memories file filling up with the same fact. Without it the
+    question was being asked in ignorance every single time: a persona
+    that had recorded somebody's age in three previous conversations was
+    told nothing about that, re-derived it from the transcript, and filed
+    it again in slightly different words each time — which exact-match
+    deduplication cannot catch and no amount of "do not repeat yourself"
+    in the prompt could fix, because the model had nothing to compare
+    against. It also lets a persona revise: seeing what it once assumed
+    is what makes confirming or correcting it possible.
+
     The stored format is asked for directly ("[Name] text") because it is
     also the format the memory file uses, so there is no second
-    representation to keep in sync.
+    representation to keep in sync — including the "(assumed)" marker,
+    which is how a persona later tells what it worked out from what it
+    was told.
     """
     others = ", ".join(present)
+
+    if already_known:
+        knowledge = (
+            f"You already know this about them, and it is saved — there is "
+            f"no need to write any of it down again:\n\n{already_known}\n\n"
+            f"Write down only what is NEW: something this conversation "
+            f"taught you, or something that changes what you had. "
+        )
+    else:
+        knowledge = "You have nothing saved about them yet. "
+
     return [
         {
             "role": "system",
@@ -129,14 +156,17 @@ def build_reflection_prompt(
             "role": "user",
             "content": (
                 f"This conversation has finished:\n\n{conversation}\n\n"
-                f"You are {persona.name}. Write down anything you learned "
-                f"about the other people in it that you would still want to "
-                f"know the next time you meet them — what they want, what "
-                f"they fear, something that happened to them, a strong "
-                f"opinion, something they asked you to remember.\n\n"
-                f"One line each, starting with whose it is in brackets:\n"
+                f"You are {persona.name}. {knowledge}"
+                f"Anything worth keeping about the other people in it — "
+                f"what they want, what they fear, something that happened "
+                f"to them, a strong opinion, something they asked you to "
+                f"remember.\n\n"
+                f"One line each, starting with whose it is in brackets. "
+                f"If you worked something out rather than being told it, "
+                f"begin that line with (assumed):\n"
                 f"[Tony] Tony has never been on a boat and does not intend "
-                f"to start.\n\n"
+                f"to start.\n"
+                f"[Tony] (assumed) Tony is about forty.\n\n"
                 f"Write only about these people: {others}. Most "
                 f"conversations leave you with one or two lines, and plenty "
                 f"leave you with none — if nothing came up that you would "
@@ -146,9 +176,27 @@ def build_reflection_prompt(
     ]
 
 
+def known_about(persona: Persona, present: Sequence[str]) -> str:
+    """What this persona has already saved about the people in the room.
+
+    Only the people present, for the same reason injection shows only
+    them: a memory about somebody absent is not going to be restated by
+    this conversation, and every line spent listing it is a line of prompt
+    paid for nothing.
+    """
+    if persona.persona_dir is None:
+        return ""
+    grouped = persona_store.memories_by_subject(persona.persona_dir)
+    lines = []
+    for name in present:
+        for memory in grouped.get(name.casefold(), []):
+            lines.append(memory.stored())
+    return "\n".join(lines)
+
+
 def parse_reflection(
     text: str, persona_name: str, present: Sequence[str],
-) -> Tuple[List[Tuple[str, str]], List[str]]:
+) -> Tuple[List[persona_store.Memory], List[str]]:
     """The model's answer as (subject, memory) pairs, plus what was dropped.
 
     Filtering is the point, not tidiness. A memory filed about somebody
@@ -161,22 +209,24 @@ def parse_reflection(
     allowed = {n.casefold(): n for n in present if n and n.strip()}
     allowed.pop(persona_name.casefold(), None)
 
-    saved: List[Tuple[str, str]] = []
+    saved: List[persona_store.Memory] = []
     skipped: List[str] = []
     for raw in (text or "").splitlines():
         line = raw.strip()
         if not line or _NOTHING.match(line):
             continue
-        subject, memory = persona_store.split_memory_line(line)
-        if not subject or not memory:
+        # The same parser the file uses, so "(assumed)" is understood in
+        # the answer exactly as it is on disk — one format, not two.
+        memory = persona_store.parse_memory_line(line)
+        if not memory.subject or not memory.text:
             skipped.append(line)
             continue
-        canonical = allowed.get(subject.casefold())
+        canonical = allowed.get(memory.subject.casefold())
         if canonical is None:
             # Either somebody who was not here, or the persona itself.
             skipped.append(line)
             continue
-        saved.append((canonical, memory))
+        saved.append(memory._replace(subject=canonical))
     return saved, skipped
 
 
@@ -210,7 +260,9 @@ async def reflect(
 
     try:
         answer = await chat_completion(
-            build_reflection_prompt(persona, others, conversation),
+            build_reflection_prompt(
+                persona, others, conversation, known_about(persona, others),
+            ),
             max_tokens=_REFLECTION_MAX_TOKENS,
             temperature=_REFLECTION_TEMPERATURE,
             timeout=PROSE_TIMEOUT,
@@ -226,25 +278,27 @@ async def reflect(
     memories, skipped = parse_reflection(answer, persona.name, others)
     result.skipped = skipped
 
-    for subject, memory in memories[:MAX_MEMORIES_PER_REFLECTION]:
+    for memory in memories[:MAX_MEMORIES_PER_REFLECTION]:
         outcome = persona_store.append_memory(
-            persona.persona_dir, subject, memory, persona.memory_size,
+            persona.persona_dir, memory.subject, memory.text,
+            persona.memory_size, assumed=memory.assumed,
         )
         if outcome.startswith("Error:"):
             logger.debug(
                 "Reflection: persona '%s' could not save a memory about %s: %s",
-                persona.name, subject, outcome,
+                persona.name, memory.subject, outcome,
             )
-            result.skipped.append(f"[{subject}] {memory}")
+            result.skipped.append(memory.stored())
         elif outcome == "The memory was already saved.":
-            # Expected and uninteresting: a reflection re-reads the same
-            # conversation, so it re-derives what it derived last time.
+            # The backstop, not the mechanism: the prompt now shows the
+            # persona what it already knows, so a restatement should be
+            # rare rather than the norm it used to be.
             logger.debug(
                 "Reflection: persona '%s' already knew '%s' about %s",
-                persona.name, memory, subject,
+                persona.name, memory.text, memory.subject,
             )
         else:
-            result.saved.append(f"[{subject}] {memory}")
+            result.saved.append(memory.stored())
 
     if result.saved:
         logger.info(

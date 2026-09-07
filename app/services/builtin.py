@@ -143,6 +143,8 @@ ADD_MEMORY_SPEC = {
             "'memory' is a SINGLE LINE of at most 1024 characters, written in your "
             "own voice about them by name — 'Tony has never been on a boat', not "
             "'The user told me...'. "
+            "Set 'assumed' to true when you worked it out rather than being told "
+            "it, so you know later which it was. "
             "Do not save anything you were told in confidence by somebody else about "
             "a third person unless it is yours to know. "
             "Do not add a memory that repeats one you have already saved. Do not "
@@ -165,6 +167,14 @@ ADD_MEMORY_SPEC = {
                         "A single line of at most 1024 characters, about them by "
                         "name. Example: 'Tony has never been on a boat and does "
                         "not intend to start.'"
+                    ),
+                },
+                "assumed": {
+                    "type": "boolean",
+                    "description": (
+                        "True if you inferred this rather than being told it — "
+                        "'Tony is about forty' from how he talks, rather than "
+                        "because he said so. Defaults to false."
                     ),
                 },
             },
@@ -224,6 +234,7 @@ def _add_memory(persona: Persona, arguments: dict) -> str:
         _resolve_subject(arguments.get("about")),
         arguments.get("memory"),
         persona.memory_size,
+        assumed=bool(arguments.get("assumed")),
     )
 
 

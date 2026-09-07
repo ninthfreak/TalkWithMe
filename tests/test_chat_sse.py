@@ -597,6 +597,48 @@ class TestPersonaMemory:
         assert "Kira owes everyone money." in self._block(persona, present=["Kira"])
         assert "owes everyone money" not in self._block(persona, present=["Tony"])
 
+    # -- what was worked out, versus what was witnessed -----------------------
+
+    def test_an_assumption_is_presented_as_one(self, tmp_path):
+        # A persona that decided somebody was about forty and filed "Tony
+        # is forty" believes it next week exactly as firmly as anything it
+        # was told, with no way to find out otherwise. Saying which is
+        # which is what lets it be wrong out loud.
+        persona = self._persona(
+            tmp_path, memories="[Tony] (assumed) Tony is about forty.\n", met=["Tony"],
+        )
+
+        result = self._block(persona)
+
+        assert "Tony: You have assumed, though nobody said so: Tony is about forty." in result
+
+    def test_what_was_told_comes_first_and_the_guess_after(self, tmp_path):
+        persona = self._persona(
+            tmp_path,
+            memories=("[Tony] Tony has never been on a boat.\n"
+                      "[Tony] (assumed) Tony is about forty.\n"),
+            met=["Tony"],
+        )
+
+        result = self._block(persona)
+
+        assert (
+            "Tony: Tony has never been on a boat. You have also assumed, though "
+            "nobody said so: Tony is about forty."
+        ) in result
+
+    def test_an_unmarked_memory_is_still_simply_known(self, tmp_path):
+        # The format is additive: every memory written before this existed
+        # reads as something the persona was told, which is what it was.
+        persona = self._persona(
+            tmp_path, memories="[Tony] Tony is 43.\n", met=["Tony"],
+        )
+
+        result = self._block(persona)
+
+        assert "Tony: Tony is 43." in result
+        assert "assumed" not in result
+
     def test_it_works_with_the_memory_feature_switched_off(self, tmp_path):
         # The met-list is written by the app, not the model, so knowing
         # whether you have met somebody does not depend on the feature —
