@@ -29,6 +29,19 @@ from app.config_migrations import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Persona identity
+# ---------------------------------------------------------------------------
+
+MAX_PERSONA_NAME = 25
+"""Longest permitted persona name, in characters.
+
+Load-bearing beyond the form field: a memory is stored as ``[Subject] text``
+and the subject is a persona's name, so a name longer than this could not
+be parsed back out of the file it was written to. persona_store's
+MAX_SUBJECT_CHARS reads this constant for exactly that reason."""
+
+
+# ---------------------------------------------------------------------------
 # Persona memory limits (docs/feature_persona_memory.md)
 # ---------------------------------------------------------------------------
 

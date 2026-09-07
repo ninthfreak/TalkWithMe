@@ -37,6 +37,7 @@ from app.config import (
     DEFAULT_MEMORY_SIZE,
     MAX_MEMORY_LINE_CHARS,
     MAX_MEMORY_SIZE,
+    MAX_PERSONA_NAME,
     LengthBias,
     Persona,
 )
@@ -605,8 +606,9 @@ def _write_memories_file(persona_dir: Path, lines: List[str]) -> None:
 # Untagged lines are legacy, from when every memory was about the human by
 # definition. They are read as belonging to no one in particular and shown
 # whoever is present, which is what they used to do.
-# Mirrors the persona-name cap enforced by the create/update form.
-MAX_SUBJECT_CHARS = 25
+# The subject of a memory is somebody's name, so the cap IS the name cap:
+# a longer subject could not be written and read back.
+MAX_SUBJECT_CHARS = MAX_PERSONA_NAME
 _SUBJECT_RE = re.compile(r"^\[([^\]\n]{1,%d})\]\s*(.+)$" % MAX_SUBJECT_CHARS)
 
 
@@ -626,6 +628,149 @@ def memories_by_subject(persona_dir: Path) -> Dict[str, List[str]]:
         subject, text = split_memory_line(line)
         grouped.setdefault(subject.casefold(), []).append(text)
     return grouped
+
+
+# ---------------------------------------------------------------------------
+# Renaming a persona
+# ---------------------------------------------------------------------------
+#
+# Names are the identifiers here, and deliberately so: the name is not
+# just a key, it is what the model reads and writes. A memory's subject
+# tag, a met-list entry and a transcript tag are all the same string, and
+# they have to be, or the mechanical containment layers (stop sequences,
+# ReplyGuard) would be guarding a different name from the one in the
+# prompt.
+#
+# The price of that choice is that a rename has to be a real operation
+# rather than an edit to one field, which is what these helpers are for.
+
+
+def replace_name_in_text(text: str, old_name: str, new_name: str) -> str:
+    """Swap *old_name* for *new_name* where it stands as a whole word.
+
+    Whole-word and case-sensitive: a name is a proper noun, so matching
+    loosely would rewrite "alex" inside "alexandrite". It still cannot be
+    made safe in general — a character called Will, May or Mark shares a
+    spelling with an ordinary word — which is why every caller of this
+    puts it behind a choice rather than doing it silently.
+    """
+    old, new = old_name.strip(), new_name.strip()
+    if not old or not new or old == new or not text:
+        return text
+    return re.sub(r"\b%s\b" % re.escape(old), new, text)
+
+
+def rename_memory_subjects(
+    persona_dir: Path, old_name: str, new_name: str, sweep_text: bool = True,
+) -> int:
+    """Repoint one persona's memories from *old_name* to *new_name*.
+
+    Two different jobs, and only the first is unambiguous:
+
+      * the ``[Subject]`` tag is structural, matched whole and
+        case-insensitively — this is the one that decides whose memory it
+        is, and getting it wrong orphans the line;
+      * the name *inside* the memory is prose the model wrote ("Alex has
+        never been on a boat"). Left alone it turns a renamed character
+        into a memory about somebody who no longer exists, which reads
+        worse than no memory at all — so it is swept too, whole-word and
+        case-sensitively.
+
+    That second sweep is optional because it cannot be made safe in
+    general: a persona called Will, May or Mark shares a spelling with an
+    ordinary word, and no amount of care distinguishes "Will you pass the
+    salt" from the character. The caller decides; the count comes back so
+    the decision is visible rather than silent.
+
+    Returns the number of lines changed. Raises OSError on a failed write.
+    """
+    old, new = old_name.strip(), new_name.strip()
+    if not old or not new or old == new:
+        return 0
+
+    lines = _memory_lines(read_memories(persona_dir))
+    if not lines:
+        return 0
+
+    changed, rewritten = 0, []
+    for line in lines:
+        subject, text = split_memory_line(line)
+        was = (subject, text)
+        if subject.casefold() == old.casefold():
+            subject = new
+        if sweep_text:
+            text = replace_name_in_text(text, old, new)
+        if (subject, text) != was:
+            changed += 1
+        rewritten.append(f"[{subject}] {text}" if subject else text)
+
+    if changed:
+        _write_memories_file(persona_dir, rewritten)
+    return changed
+
+
+def rename_acquaintance(persona_dir: Path, old_name: str, new_name: str) -> bool:
+    """Repoint one persona's met-list entry. True if it knew *old_name*.
+
+    Losing this would be quieter than losing a memory and worse: the
+    persona would meet a character it has known for weeks and be told
+    they have never met.
+
+    Raises OSError on a failed write.
+    """
+    old, new = old_name.strip(), new_name.strip()
+    if not old or not new or old == new:
+        return False
+
+    known = read_acquaintances(persona_dir)
+    matches = {n for n in known if n.casefold() == old.casefold()}
+    if not matches:
+        return False
+
+    known = (known - matches) | {new}
+    (persona_dir / ACQUAINTANCES_FILENAME).write_text(
+        "\n".join(sorted(known)) + "\n", encoding="utf-8"
+    )
+    return True
+
+
+def rename_persona_directory(persona_dir: Path, new_name: str) -> Path:
+    """Move a persona's directory to match its new name.
+
+    Cosmetic, and done last for that reason: the directory name is not the
+    persona's identity (the name in prompt.md frontmatter is), so a
+    failure here leaves a correctly renamed character in a stale folder
+    rather than anything broken. But the folder is meant to be opened and
+    hand-edited, and Alexander living in ``Personas/Alex/`` is a trap laid
+    for the person who does.
+
+    Returns the directory the persona now lives in — the new path, or the
+    original one when the move was impossible.
+    """
+    root = persona_dir.parent
+    base = sanitize_persona_dirname(new_name).strip()
+    if not base:
+        # Nothing usable as a directory name (a name of pure punctuation).
+        # The frontmatter still carries the real name, so leave the folder.
+        return persona_dir
+    # Only bump for a collision with somebody ELSE. Renaming "Alex" to
+    # "alex" collides with itself on a case-insensitive filesystem, and
+    # "alex_2" would be a strange answer to a change of capitalisation.
+    if base.casefold() == persona_dir.name.casefold():
+        target = root / base
+    else:
+        target = root / unique_persona_dirname(root, base)
+    if target == persona_dir:
+        return persona_dir
+    try:
+        os.replace(persona_dir, target)
+    except OSError as exc:
+        logger.warning(
+            "Renamed persona to '%s' but could not move %s to %s: %s",
+            new_name, persona_dir, target, exc,
+        )
+        return persona_dir
+    return target
 
 
 def append_memory(

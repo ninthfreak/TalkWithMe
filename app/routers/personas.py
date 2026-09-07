@@ -23,6 +23,7 @@ from app.config import (
     DEFAULT_MEMORY_SIZE,
     DEFAULT_USER_LABEL,
     MAX_MEMORY_SIZE,
+    MAX_PERSONA_NAME,
     ChatRoom,
     ChatRoomsConfig,
     Persona,
@@ -31,9 +32,12 @@ from app.config import (
     get_chatrooms,
     get_personas,
     get_personas_directory,
+    PlayerConfig,
+    get_player,
     get_settings,
     resolve_typical_length,
     save_chatrooms,
+    save_player,
     set_personas_cache,
 )
 from app.models import (
@@ -45,8 +49,11 @@ from app.models import (
     PersonaPreviewResponse,
     PersonaRefineRequest,
     PersonaRefineResponse,
+    PersonaRenameRequest,
+    PersonaRenameResponse,
     PersonaResponse,
 )
+from app import persistence
 from app.services import persona_draft, persona_store
 from app.services.llm import PROSE_TIMEOUT, chat_completion
 from app.services.reply_guard import ReplyGuard, stop_sequences
@@ -206,8 +213,9 @@ def _read_uploads(
 
 _SAFE_PERSONA_NAME = re.compile(r"^[^/\\\n\r\t]+$")
 
-# Matches the Form(max_length=...) on create and update.
-MAX_PERSONA_NAME = 25
+# Matches the Form(max_length=...) on create and update. Defined in
+# app/config.py because it is also the cap on a memory's [Subject] tag —
+# a persona is filed in other personas' memories under this name.
 
 
 def _validate_name(name: str, reserved_check: bool = True) -> str:
@@ -379,10 +387,13 @@ def update_persona(
 ):
     """Update an existing persona in its directory (multipart/form-data).
 
-    Renaming rewrites the prompt.md frontmatter and cascades to chat
-    rooms; the persona DIRECTORY is never renamed — the directory name
-    is only a filesystem concern and renaming it would break any external
-    reference to the old path.
+    Every field except the name. A changed name is refused with a 409 and
+    sent to POST /api/personas/{name}/rename, which cascades it to the
+    places a save cannot reach — other personas' memories and met-lists,
+    room membership, the adopted player, stored transcripts and the
+    folder itself. This endpoint used to accept a rename and cascade it
+    to chat rooms only, which left everything else pointing at somebody
+    who no longer existed.
 
     Memory handling: clear_memories=True deletes memories.txt outright
     (an explicit user action — a failure here DOES fail the save, so the
@@ -401,10 +412,22 @@ def update_persona(
         )
 
     new_name = _validate_name(new_name)
-    if new_name.lower() != name.lower() and any(
-        p.name.lower() == new_name.lower() for p in config.personas if p.name != name
-    ):
-        raise HTTPException(status_code=409, detail=f"A persona named '{new_name}' already exists")
+    # A name change is not an edit, and this refusal is what makes that
+    # true. Names are identifiers here: the same string is a memory's
+    # subject tag, a met-list entry, a room member, the adopted player and
+    # the tag on every line this persona has ever spoken. Changing it here
+    # would rewrite prompt.md and orphan all of it — which is exactly what
+    # this endpoint used to do. The rename endpoint cascades; a read-only
+    # field in the browser only reminds.
+    if new_name != name:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Use Rename to change a persona's name. Saving cannot rename "
+                f"'{name}' to '{new_name}', because the old name is also how "
+                f"other personas remember them."
+            ),
+        )
 
     image, audio = _read_uploads(avatar_image, reference_audio)
     persona_dir = existing.persona_dir
@@ -443,11 +466,175 @@ def update_persona(
     new_list = [updated if p.name == name else p for p in config.personas]
     set_personas_cache(PersonasConfig(personas=new_list))
 
-    # If the persona was renamed, update all chat rooms referencing it
-    if new_name != name:
-        _cascade_persona_rename(name, new_name)
-
     return _to_detail(updated)
+
+
+@router.post("/{name}/rename", response_model=PersonaRenameResponse)
+def rename_persona(name: str, req: PersonaRenameRequest):
+    """Rename a persona everywhere it is referred to.
+
+    This exists because the app uses **names as identifiers**, and that is
+    a deliberate choice rather than an oversight: the name is not only a
+    key, it is the string the model reads and writes. A memory's subject
+    tag, a met-list entry, a chat-room member, the adopted player and the
+    "[Name]: " tag on every stored line are all the same text — and they
+    have to be, or the mechanical containment layers (stop_sequences,
+    ReplyGuard) would be guarding a name the prompt never uses.
+
+    The price of that is that a rename cannot be an edit to one field, so
+    it is not offered as one: ``PUT /api/personas/{name}`` refuses a
+    changed name and sends the caller here. That refusal is the actual
+    guarantee — a read-only input in the browser is only a reminder.
+
+    Ordering is chosen for its failure modes. The persona's own
+    prompt.md goes first, because until it is written nothing has
+    happened and the error is clean. The references follow, each
+    best-effort and counted, so one unwritable file leaves a reported
+    warning rather than an abandoned half-rename. The directory moves
+    **last** and is the most expendable step: the name in frontmatter is
+    the identity, so a failure there leaves a correctly renamed character
+    in a stale folder.
+    """
+    config = get_personas()
+    existing = next((p for p in config.personas if p.name == name), None)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Persona '{name}' not found")
+    if existing.persona_dir is None or not existing.persona_dir.is_dir():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Persona '{name}' has no directory on disk; cannot rename it",
+        )
+
+    new_name = _validate_name(req.new_name)
+    if new_name == name:
+        raise HTTPException(
+            status_code=422, detail=f"'{name}' is already this persona's name.",
+        )
+    if any(p.name.lower() == new_name.lower() for p in config.personas if p.name != name):
+        raise HTTPException(
+            status_code=409, detail=f"A persona named '{new_name}' already exists",
+        )
+
+    persona_dir = existing.persona_dir
+    warnings: list[str] = []
+
+    # 1. The persona's own identity, including their own words about
+    #    themselves. A prompt reading "You are Alex, a friendly assistant"
+    #    on a persona called Alexander is not a cosmetic leftover: the
+    #    room preamble opens "You are Alexander" and the two are
+    #    concatenated into one system message, so the model is handed a
+    #    contradiction about who it is playing. That is worse than any
+    #    stale memory, which is why the sweep defaults to on.
+    #
+    #    Everything downstream is a reference to this, so a failure here
+    #    must change nothing else.
+    description = existing.description
+    system_prompt = existing.system_prompt
+    if req.sweep_old_name:
+        description = persona_store.replace_name_in_text(description, name, new_name)
+        system_prompt = persona_store.replace_name_in_text(system_prompt, name, new_name)
+    own_prose_updated = (description, system_prompt) != (
+        existing.description, existing.system_prompt
+    )
+
+    try:
+        persona_store.write_prompt_md(
+            persona_dir,
+            name=new_name,
+            description=description,
+            router_hints=existing.router_hints,
+            avatar_color=existing.avatar_color,
+            allow_tool_calls=existing.allow_tool_calls,
+            length_bias=existing.length_bias.value,
+            system_prompt=system_prompt,
+            memory_size=existing.memory_size,
+        )
+    except OSError as exc:
+        logger.error("Failed to rename persona '%s' in %s: %s", name, persona_dir, exc)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to rename persona: {exc}",
+        ) from exc
+
+    # 2. What everyone else knows about them. Counted per persona so the
+    #    response can say what it reached; a persona that has never met
+    #    the renamed one contributes nothing and is not reported.
+    memories_updated = personas_touched = acquaintances_updated = 0
+    for other in config.personas:
+        if other.persona_dir is None or not other.persona_dir.is_dir():
+            continue
+        try:
+            changed = persona_store.rename_memory_subjects(
+                other.persona_dir, name, new_name, sweep_text=req.sweep_old_name,
+            )
+        except OSError as exc:
+            warnings.append(f"Could not update {other.name}'s memories: {exc}")
+            changed = 0
+        try:
+            met = persona_store.rename_acquaintance(other.persona_dir, name, new_name)
+        except OSError as exc:
+            warnings.append(f"Could not update who {other.name} has met: {exc}")
+            met = False
+        memories_updated += changed
+        acquaintances_updated += int(met)
+        if changed or met:
+            personas_touched += 1
+
+    # 3. Room membership.
+    rooms_updated = sum(
+        1 for room in get_chatrooms().chat_rooms if name in room.persona_names
+    )
+    _cascade_persona_rename(name, new_name)
+
+    # 4. Who the human is playing. Skipping this would silently drop them
+    #    back to playing as themselves, since adopted() resolves against
+    #    the live persona list and the old name is no longer in it.
+    player_updated = False
+    if get_player().persona_name.strip() == name:
+        save_player(PlayerConfig(persona_name=new_name))
+        player_updated = True
+
+    # 5. Stored transcripts. Attribution only — see the note on
+    #    rename_persona_in_history for why the prose is left alone.
+    try:
+        messages_reattributed = persistence.rename_persona_in_history(name, new_name)
+    except OSError as exc:
+        warnings.append(f"Could not re-attribute stored messages: {exc}")
+        messages_reattributed = 0
+
+    # 6. The folder, last and least.
+    moved = persona_store.rename_persona_directory(persona_dir, new_name)
+    if moved == persona_dir and persona_dir.name != new_name:
+        warnings.append(
+            f"The persona was renamed, but its folder is still "
+            f"'{persona_dir.name}'."
+        )
+
+    # Rebuild from disk rather than patching the cached list: the
+    # directory may have moved, and every Persona carries its own path.
+    set_personas_cache(PersonasConfig(
+        personas=persona_store.scan_personas_directory(get_personas_directory())
+    ))
+
+    logger.info(
+        "Renamed persona '%s' -> '%s' (%d memory line(s) across %d persona(s), "
+        "%d met-list(s), %d room(s), %d message(s), player=%s)",
+        name, new_name, memories_updated, personas_touched,
+        acquaintances_updated, rooms_updated, messages_reattributed, player_updated,
+    )
+
+    return PersonaRenameResponse(
+        name=new_name,
+        previous_name=name,
+        memories_updated=memories_updated,
+        personas_touched=personas_touched,
+        acquaintances_updated=acquaintances_updated,
+        rooms_updated=rooms_updated,
+        messages_reattributed=messages_reattributed,
+        player_updated=player_updated,
+        own_prose_updated=own_prose_updated,
+        directory_renamed=moved != persona_dir,
+        warnings=warnings,
+    )
 
 
 @router.delete("/{name}", status_code=204)

@@ -120,8 +120,12 @@
                 <form id="pe-form" novalidate>
                     <div class="form-row">
                         <label for="pf-name">Name <span class="required">*</span></label>
-                        <input id="pf-name" type="text" maxlength="25" placeholder="Max 25 chars" required>
-                        <span class="field-hint">25 chars max, must be unique (not 'user')</span>
+                        <div class="pf-name-row">
+                            <input id="pf-name" type="text" maxlength="25" placeholder="Max 25 chars" required>
+                            <button type="button" id="pf-btn-rename" class="btn-secondary hidden">Rename&hellip;</button>
+                        </div>
+                        <span id="pf-name-hint" class="field-hint">25 chars max, must be unique (not 'user')</span>
+                        <span id="pf-name-locked-hint" class="field-hint hidden">The name is how other personas remember them, so changing it is its own step.</span>
                     </div>
                     <div class="form-row">
                         <label for="pf-description">Description</label>
@@ -759,6 +763,39 @@
                 <button id="gsf-wipe-cancel" class="btn-secondary">Cancel</button>
                 <button id="gsf-wipe-confirm" class="btn-danger">Delete it</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Rename a persona. After the persona editor in the document on
+         purpose: .modal-overlay shares one z-index, so stacking is DOM
+         order and this has to sit above the editor that opened it. -->
+    <div id="pf-rename-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pf-rename-title">
+        <div class="modal-box modal-box-sm">
+            <div class="modal-header">
+                <h2 id="pf-rename-title">Rename persona</h2>
+                <button id="pf-rename-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
+            </div>
+            <div class="modal-intro field-hint">A name is an identity here, not a label: it is how the other personas have you filed, who they remember meeting, and the tag on every line you have spoken. Renaming moves all of it.</div>
+            <div id="pf-rename-error" class="pe-form-error hidden"></div>
+            <form id="pf-rename-form" novalidate>
+                <div class="settings-body">
+                    <div class="form-row">
+                        <label for="pf-rename-new">New name</label>
+                        <input id="pf-rename-new" type="text" maxlength="25" placeholder="Max 25 chars" required>
+                    </div>
+                    <div class="form-row">
+                        <label class="settings-checkbox-label">
+                            <input type="checkbox" id="pf-rename-sweep" checked>
+                            <span>Also update the old name inside their own prompt and other personas' memories</span>
+                        </label>
+                        <span class="field-hint">Leave this on: a persona whose prompt still says &ldquo;You are Alex&rdquo; is told two different names in one breath. Turn it off only when the name is also an ordinary word &mdash; Will, May, Mark &mdash; where it would rewrite sentences that were never about them.</span>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="pf-rename-cancel" class="btn-secondary">Cancel</button>
+                    <button type="submit" id="pf-rename-confirm" class="btn-accent">Rename</button>
+                </div>
+            </form>
         </div>
     </div>
 

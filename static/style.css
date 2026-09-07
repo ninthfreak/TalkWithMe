@@ -31,6 +31,10 @@
     --text-muted: #606070;
     --accent: #e94560;
     --accent-hover: #ff6b81;
+    /* Distinct from --accent on purpose: the dark theme's accent is
+       a red, and a success message in it reads as the error it
+       replaces. */
+    --success: #2ecc71;
     --bubble-user: #0f3460;
     --bubble-ai: #16213e;
     --border-color: #2a2a4e;
@@ -49,6 +53,7 @@ body[data-theme="light"] {
     --text-muted: #6f7d97;
     --accent: #2f6fed;
     --accent-hover: #4d85f2;
+    --success: #1e8e4a;
     --bubble-user: #d9e6ff;
     --bubble-ai: #ffffff;
     --border-color: #ccd6e6;
@@ -64,6 +69,7 @@ body[data-theme="matrix"] {
     --text-muted: #4b9b4b;
     --accent: #35ff6c;
     --accent-hover: #6eff95;
+    --success: #9dff9d;
     --bubble-user: #0a2a10;
     --bubble-ai: #08220d;
     --border-color: #1f5f2f;
@@ -79,6 +85,7 @@ body[data-theme="blues"] {
     --text-muted: #8eb0db;
     --accent: #66b3ff;
     --accent-hover: #8cc8ff;
+    --success: #5fe0a0;
     --bubble-user: #174073;
     --bubble-ai: #12335e;
     --border-color: #2a4f82;
@@ -1090,6 +1097,17 @@ html, body {
     display: none;
 }
 
+/* The same banner, saying something went right. A rename reports what it
+   moved, and reporting a success in the red error box reads as a failure
+   for the half-second before you get to the words. Themed rather than a
+   fixed green: the four themes disagree about what reads as "went well",
+   and the default theme's accent is itself a red. */
+.pe-form-error.pe-form-notice {
+    background: color-mix(in srgb, var(--success) 14%, transparent);
+    color: var(--success);
+    border-color: var(--success);
+}
+
 .pe-confirm-msg {
     padding: 16px 20px;
     font-size: 0.9rem;
@@ -1592,6 +1610,27 @@ html, body {
 /* --------------------------------------------------------------------------
    Persona drafting dialog
    -------------------------------------------------------------------------- */
+
+/* Name field plus its Rename button. The input keeps the row's width so
+   the field does not visibly shrink when the button appears on edit. */
+.pf-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pf-name-row input {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Read-only rather than disabled: a disabled input is greyed to the point
+   of being hard to read, and the name is the one field you most need to
+   see while editing. */
+.pf-name-row input[readonly] {
+    opacity: 0.75;
+    cursor: default;
+}
 
 /* The draft entry point, above the persona form. */
 .pf-draft-bar {

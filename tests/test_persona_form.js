@@ -152,12 +152,16 @@ function createFormHarness() {
         if (method === "GET" && u === "/api/personas") {
             return jsonResponse(fetchStub.state.personas);
         }
+        if (method === "POST" && u.endsWith("/rename")) {
+            return jsonResponse(fetchStub.state.rename || {});
+        }
         return jsonResponse({});
     };
     fetchStub.calls = [];
     fetchStub.state = {
         detail: {},   // persona detail fixture for GET /api/personas/<name>/detail
         personas: [], // fixture for GET /api/personas (post-submit refresh)
+        rename: {},   // fixture for POST /api/personas/<name>/rename
     };
 
     const sandbox = {
@@ -173,6 +177,10 @@ function createFormHarness() {
         requestAnimationFrame: () => 0,
         // Defined in app.js (not loaded here); submitPersonaForm awaits it.
         loadPersonas: async () => {},
+        // Defined in chatrooms.js (not loaded here); submitRename refreshes
+        // both when the rename moved the player or a room's membership.
+        loadPlayer: async () => {},
+        loadChatRooms: async () => {},
         // Defined by the browser; playPersonaReferenceAudio would use it.
         Audio: class {
             constructor() {
@@ -594,3 +602,120 @@ test("submitPersonaForm_invalidMemorySize_showsErrorAndSendsNoRequest", async ()
         assert.equal(mutationCall(h), undefined, `request sent for invalid budget ${JSON.stringify(bad)}`);
     }
 });
+
+/* ==========================================================================
+    Renaming — the name is an identifier, so it is not an editable field
+    ========================================================================== */
+
+test("openPersonaForm_editingExisting_locksTheNameAndOffersRename", async () => {
+    const h = createFormHarness();
+
+    await openEditForm(h);
+
+    // The server refuses a changed name on save; this is the reminder.
+    assert.equal(h.elementById("pf-name").readOnly, true);
+    assert.ok(!h.elementById("pf-btn-rename").classList.contains("hidden"));
+});
+
+test("openPersonaForm_newPersona_leavesTheNameEditableAndHidesRename", async () => {
+    const h = createFormHarness();
+
+    await h.sandbox.openPersonaForm(null);
+
+    // Nothing refers to a persona that does not exist yet, so the name is
+    // an ordinary field until the first save.
+    assert.equal(h.elementById("pf-name").readOnly, false);
+    assert.ok(h.elementById("pf-btn-rename").classList.contains("hidden"));
+});
+
+test("submitRename_sendsTheNewNameAndTheSweepChoice", async () => {
+    const h = createFormHarness();
+    await openEditForm(h);
+    h.fetchStub.state.rename = { name: "Alexander", previous_name: "Al" };
+
+    h.elementById("pf-rename-new").value = "Alexander";
+    h.elementById("pf-rename-sweep").checked = false;
+    await h.sandbox.submitRename({ preventDefault() {} });
+
+    const call = h.fetchStub.calls.find((c) => c.url.endsWith("/rename"));
+    assert.equal(call.url, "/api/personas/Al/rename");
+    assert.deepEqual(JSON.parse(call.body), {
+        new_name: "Alexander", sweep_old_name: false,
+    });
+});
+
+test("submitRename_adoptsTheNewNameSoTheNextSaveGoesToIt", async () => {
+    // peEditingName addresses every later save, avatar fetch and audio
+    // fetch. Left stale, the next save would 404 against the old name.
+    const h = createFormHarness();
+    await openEditForm(h);
+    h.fetchStub.state.rename = { name: "Alexander", previous_name: "Al" };
+
+    h.elementById("pf-rename-new").value = "Alexander";
+    await h.sandbox.submitRename({ preventDefault() {} });
+
+    assert.equal(h.get("peEditingName"), "Alexander");
+    assert.equal(h.elementById("pf-name").value, "Alexander");
+    assert.ok(h.elementById("pf-rename-overlay").classList.contains("hidden"));
+});
+
+test("submitRename_sweptProse_updatesTheOpenFormWithoutLosingUnsavedEdits", async () => {
+    // The server rewrote the prompt; the form is still showing what was
+    // loaded before it, and saving from here would put the old name back.
+    // The same whole-word swap is applied in place rather than re-reading
+    // from the server, which would silently discard an edit in progress.
+    const h = createFormHarness();
+    await openEditForm(h);
+    h.elementById("pf-system-prompt").value = "You are Al, and Al is calm.";
+    h.elementById("pf-description").value = "Half-typed edit";
+    h.fetchStub.state.rename = {
+        name: "Alexander", previous_name: "Al", own_prose_updated: true,
+    };
+
+    h.elementById("pf-rename-new").value = "Alexander";
+    await h.sandbox.submitRename({ preventDefault() {} });
+
+    assert.equal(
+        h.elementById("pf-system-prompt").value,
+        "You are Alexander, and Alexander is calm.",
+    );
+    assert.equal(h.elementById("pf-description").value, "Half-typed edit");
+});
+
+test("submitRename_refusedByTheServer_keepsTheDialogOpenAndTheOldName", async () => {
+    const h = createFormHarness();
+    await openEditForm(h);
+    h.fetchStub.state.rename = null;
+    // A 409 from the collision check.
+    const original = h.sandbox.fetch;
+    h.sandbox.fetch = async (url, options) => {
+        if (String(url).endsWith("/rename")) {
+            return {
+                ok: false, status: 409,
+                json: async () => ({ detail: "A persona named 'Luna' already exists" }),
+            };
+        }
+        return original(url, options);
+    };
+
+    h.elementById("pf-rename-new").value = "Luna";
+    await h.sandbox.submitRename({ preventDefault() {} });
+
+    assert.ok(!h.elementById("pf-rename-error").classList.contains("hidden"));
+    assert.ok(h.elementById("pf-rename-error").textContent.includes("Luna"));
+    assert.ok(!h.elementById("pf-rename-overlay").classList.contains("hidden"));
+    assert.equal(h.get("peEditingName"), "Al");
+});
+
+test("replaceNameInText_matchesWholeWordsOnly", () => {
+    const h = createFormHarness();
+    const swap = h.sandbox.replaceNameInText;
+
+    assert.equal(swap("You are Al.", "Al", "Alexander"), "You are Alexander.");
+    // Mirrors persona_store.replace_name_in_text: a name is a proper noun.
+    assert.equal(swap("Alba and Al and Als", "Al", "Alexander"),
+                 "Alba and Alexander and Als");
+    assert.equal(swap("nothing here", "Al", "Alexander"), "nothing here");
+    assert.equal(swap("Al", "Al", "Al"), "Al");
+});
+

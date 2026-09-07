@@ -208,6 +208,13 @@ pfAudioPlayBtn.addEventListener("click", playPersonaReferenceAudio);
 pfMemoriesClearBtn.addEventListener("click", () => {
     peMemoriesClearRequested = true;
 });
+pfRenameBtn.addEventListener("click", openRenameDialog);
+pfRenameForm.addEventListener("submit", submitRename);
+pfRenameClose.addEventListener("click", closeRenameDialog);
+pfRenameCancel.addEventListener("click", closeRenameDialog);
+pfRenameOverlay.addEventListener("click", (e) => {
+    if (e.target === pfRenameOverlay) closeRenameDialog();
+});
 document.getElementById("pe-confirm-cancel").addEventListener("click", () => {
     peConfirmOverlay.classList.add("hidden");
 });
@@ -221,6 +228,162 @@ peConfirmOverlay.addEventListener("click", (e) => {
 });
 
 /* ==========================================================================
+   Persona Editor — renaming
+   ========================================================================== */
+
+/**
+ * Swap a name for another where it stands as a whole word.
+ *
+ * Mirrors persona_store.replace_name_in_text() so the text left in the
+ * open form matches what the server just wrote to disk. Whole-word and
+ * case-sensitive for the same reason: a name is a proper noun, and
+ * matching loosely would rewrite "alex" inside "alexandrite".
+ */
+function replaceNameInText(text, oldName, newName) {
+    const from = (oldName || "").trim();
+    const to = (newName || "").trim();
+    if (!text || !from || !to || from === to) return text;
+    const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.replace(new RegExp(`\\b${escaped}\\b`, "g"), to);
+}
+
+/**
+ * Open the rename dialog for the persona currently being edited.
+ *
+ * Renaming is a separate step rather than an edit to a field because the
+ * name is an identifier: the same string is a memory's subject tag, an
+ * entry in another persona's met-list, a chat room member, the adopted
+ * player, and the "[Name]: " tag on every line the persona has spoken.
+ * Changing it in one place orphans the rest.
+ */
+function openRenameDialog() {
+    if (!peEditingName) return;
+    pfRenameError.classList.add("hidden");
+    pfRenameNew.value = peEditingName;
+    // On by default, and stated in the dialog: a renamed character
+    // remembered under their old name reads worse than no memory at all.
+    pfRenameSweep.checked = true;
+    pfRenameOverlay.classList.remove("hidden");
+    pfRenameNew.focus();
+    pfRenameNew.select();
+}
+
+function closeRenameDialog() {
+    pfRenameOverlay.classList.add("hidden");
+}
+
+function showRenameError(message) {
+    pfRenameError.textContent = message;
+    pfRenameError.classList.remove("hidden");
+}
+
+/**
+ * One sentence saying what the rename actually moved.
+ *
+ * Reported rather than assumed, for the same reason the context wipe
+ * reads its inventory back: most of what a rename touches is in files the
+ * user cannot see from here, and "it probably worked" is what this exists
+ * to replace.
+ */
+function describeRename(body) {
+    const parts = [];
+    if (body.memories_updated) {
+        parts.push(`${body.memories_updated} memory line${body.memories_updated === 1 ? "" : "s"}`
+            + ` held by ${body.personas_touched} persona${body.personas_touched === 1 ? "" : "s"}`);
+    }
+    if (body.acquaintances_updated) {
+        parts.push(`${body.acquaintances_updated} met-list${body.acquaintances_updated === 1 ? "" : "s"}`);
+    }
+    if (body.rooms_updated) {
+        parts.push(`${body.rooms_updated} chat room${body.rooms_updated === 1 ? "" : "s"}`);
+    }
+    if (body.messages_reattributed) {
+        parts.push(`${body.messages_reattributed} stored message${body.messages_reattributed === 1 ? "" : "s"}`);
+    }
+    if (body.own_prose_updated) parts.push("their own prompt");
+    if (body.player_updated) parts.push("the character you are playing");
+    if (!parts.length) return `Renamed to ${body.name}. Nothing else referred to them.`;
+    return `Renamed to ${body.name}, and updated ${parts.join(", ")}.`;
+}
+
+async function submitRename(e) {
+    e.preventDefault();
+    pfRenameError.classList.add("hidden");
+
+    const newName = pfRenameNew.value.trim();
+    if (!newName) return showRenameError("A new name is required.");
+    if (newName === peEditingName) return showRenameError(`They are already called ${newName}.`);
+    if (newName.toLowerCase() === "user") {
+        return showRenameError("'user' is a reserved name and cannot be used.");
+    }
+
+    pfRenameConfirm.disabled = true;
+    try {
+        const resp = await fetch(
+            `/api/personas/${encodeURIComponent(peEditingName)}/rename`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    new_name: newName,
+                    sweep_old_name: pfRenameSweep.checked,
+                }),
+            },
+        );
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showRenameError(extractApiErrorMessage(err, resp.status));
+            return;
+        }
+
+        const body = await resp.json();
+        closeRenameDialog();
+
+        // The editor is still open on this persona, so it has to follow
+        // the rename: peEditingName is what every later save, avatar
+        // fetch and audio fetch is addressed to.
+        peEditingName = body.name;
+        pfName.value = body.name;
+        peFormTitle.textContent = `Edit Persona: ${body.name}`;
+        // The sweep rewrote the description and prompt on the server, and
+        // the form is still showing what was loaded before it — save from
+        // here and the old name goes straight back in.
+        //
+        // The same swap is applied to what is in the fields rather than
+        // re-reading them from the server, because the user may have been
+        // part-way through editing when they renamed, and re-reading
+        // would throw that away without saying so.
+        if (body.own_prose_updated) {
+            pfDescription.value = replaceNameInText(
+                pfDescription.value, body.previous_name, body.name);
+            pfSystemPrompt.value = replaceNameInText(
+                pfSystemPrompt.value, body.previous_name, body.name);
+        }
+
+        // A partial rename is the one outcome that has to stand out, so
+        // it keeps the red banner; a clean one gets the accent.
+        if (body.warnings && body.warnings.length) {
+            showPersonaFormError(`${describeRename(body)} ${body.warnings.join(" ")}`);
+        } else {
+            showPersonaFormNotice(describeRename(body));
+        }
+
+        // Everything the rename moved is cached client-side too, and a
+        // stale cache shows the failure rather than the fix: the persona
+        // list still lists the old name, and "Playing as: Alex" resolves
+        // against it and goes blank when it no longer matches.
+        await loadPersonas();
+        if (body.player_updated) await loadPlayer();
+        if (body.rooms_updated) await loadChatRooms();
+        renderPersonaAvatarPreview();
+    } catch (err) {
+        showRenameError("Request failed. Is the server running?");
+    } finally {
+        pfRenameConfirm.disabled = false;
+    }
+}
+
+/* ==========================================================================
    Persona Editor — modal lifecycle
    ========================================================================== */
 
@@ -232,12 +395,16 @@ function openPersonaEditor() {
 function closePersonaEditor() {
     stopPersonaPreviewAudio();
     stopPersonaAvatarPreview();
+    // The rename dialog stacks on top of the editor, so closing the
+    // editor from under it would strand it over the chat.
+    closeRenameDialog();
     personaEditorOverlay.classList.add("hidden");
 }
 
 function showPersonaList() {
     stopPersonaPreviewAudio();
     stopPersonaAvatarPreview();
+    closeRenameDialog();
     peListView.classList.remove("hidden");
     peFormView.classList.add("hidden");
     renderPersonaEditorList();
@@ -372,6 +539,19 @@ async function openPersonaForm(name) {
     // persona — a new one has nothing to clear.
     pfMemoriesClearBtn.classList.toggle("hidden", !name);
 
+    // The name is an identifier, not a label: it is a memory's subject
+    // tag, an entry in other personas' met-lists, a room member, the
+    // adopted player and the tag on every line this persona has spoken.
+    // So editing it in place is not offered — Rename does the whole
+    // cascade. The field is read-only rather than disabled because it is
+    // the field you most need to be able to read while editing, and the
+    // server refuses a changed name anyway: this is the reminder, the 409
+    // is the guarantee.
+    pfName.readOnly = !!name;
+    pfRenameBtn.classList.toggle("hidden", !name);
+    pfNameHint.classList.toggle("hidden", !!name);
+    pfNameLockedHint.classList.toggle("hidden", !name);
+
     // Drafting and refining are the same tool at two moments, and only
     // one of them applies at a time: drafting writes a character from
     // nothing, so it belongs to New Persona and would overwrite an
@@ -387,7 +567,9 @@ async function openPersonaForm(name) {
 
     peListView.classList.add("hidden");
     peFormView.classList.remove("hidden");
-    pfName.focus();
+    // On a new persona the name is the first thing to write; on an
+    // existing one it cannot be typed into, so the description is.
+    (name ? pfDescription : pfName).focus();
 }
 
 /* ==========================================================================
@@ -687,6 +869,20 @@ async function deletePersona(name) {
 }
 
 function showPersonaFormError(msg) {
+    peFormError.classList.remove("pe-form-notice");
+    peFormError.textContent = msg;
+    peFormError.classList.remove("hidden");
+}
+
+/**
+ * The same banner in the accent colour instead of red.
+ *
+ * A rename reports what it moved, and most of that is in files the user
+ * cannot see from the editor — so it has to be said. Saying it in the
+ * error box reads as a failure until you have read the words.
+ */
+function showPersonaFormNotice(msg) {
+    peFormError.classList.add("pe-form-notice");
     peFormError.textContent = msg;
     peFormError.classList.remove("hidden");
 }

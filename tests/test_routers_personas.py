@@ -306,23 +306,28 @@ class TestUpdatePersona:
         assert "You are Alex, but updated." in prompt
         assert "Updated description" in prompt
 
-    def test_rename_updates_frontmatter_cascades_and_keeps_directory(self, client, personas_root):
+    def test_a_save_may_not_rename(self, client, personas_root):
+        # The read-only field in the browser is a reminder; this is the
+        # guarantee. A save that renamed would rewrite prompt.md and
+        # orphan every memory, met-list and transcript naming the old one.
         resp = client.put("/api/personas/Alex", data=self._data(name="Alexander"))
-        assert resp.status_code == 200
-        assert resp.json()["name"] == "Alexander"
 
-        # The directory keeps its original name; the frontmatter carries
-        # the new one (renaming directories would break external paths).
-        assert (personas_root / "Alex").is_dir()
-        prompt = (personas_root / "Alex" / "prompt.md").read_text()
-        assert "name: Alexander" in prompt
+        assert resp.status_code == 409
+        assert "Rename" in resp.json()["detail"]
+        # Nothing on disk moved: the frontmatter omits a name that
+        # matches the directory, so the tell is that the new one is absent.
+        assert "Alexander" not in (personas_root / "Alex" / "prompt.md").read_text()
+        assert client.get("/api/personas/Alex/detail").status_code == 200
 
-        rooms = client.get("/api/chatrooms").json()
-        tng = next(r for r in rooms if r["name"] == "TNG")
-        assert tng["persona_names"] == ["Alexander", "Luna"]
+    def test_a_save_that_keeps_the_name_is_not_a_rename(self, client, personas_root):
+        # The refusal keys on the name changing, not on it being sent:
+        # the form posts every field on every save.
+        assert client.put("/api/personas/Alex", data=self._data(name="Alex")).status_code == 200
 
-    def test_rename_to_existing_name_rejected(self, client, personas_root):
-        resp = client.put("/api/personas/Alex", data=self._data(name="luna"))
+    def test_a_save_may_not_rename_by_capitalisation_either(self, client, personas_root):
+        # "alex" is a different string in a [Subject] tag and in a
+        # transcript tag, so it is a rename like any other.
+        resp = client.put("/api/personas/Alex", data=self._data(name="alex"))
         assert resp.status_code == 409
 
     def test_rename_to_reserved_user_rejected(self, client, personas_root):
@@ -668,7 +673,7 @@ class TestCascadePreservesRoomSettings:
 
     def test_rename_preserves_room_settings(self, client, personas_root):
         self._configure_room(client)
-        resp = client.put("/api/personas/Alex", data=_persona_form(name="Alexander"))
+        resp = client.post("/api/personas/Alex/rename", json={"new_name": "Alexander"})
         assert resp.status_code == 200
 
         body = client.get("/api/chatrooms/TNG").json()
@@ -1318,3 +1323,225 @@ class TestRefinePersona:
         assert client.post(
             "/api/personas/refine", json=self._req()
         ).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /api/personas/{name}/rename
+# ---------------------------------------------------------------------------
+
+class TestRenamePersona:
+    """A rename is its own operation because names are the identifiers.
+
+    The same string is a memory's [Subject] tag, an entry in another
+    persona's met-list, a chat room member, the adopted player and the
+    "[Name]: " tag on every stored line. Each of these is a place a save
+    could not reach, and each one left stale is a character somebody
+    remembers who no longer exists.
+    """
+
+    def _rename(self, client, old="Alex", new="Alexander", **body):
+        return client.post(
+            f"/api/personas/{old}/rename", json={"new_name": new, **body},
+        )
+
+    # -- the persona itself --------------------------------------------------
+
+    def test_the_persona_answers_to_the_new_name(self, client, personas_root):
+        resp = self._rename(client)
+
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Alexander"
+        assert resp.json()["previous_name"] == "Alex"
+        assert client.get("/api/personas/Alexander/detail").status_code == 200
+        assert client.get("/api/personas/Alex/detail").status_code == 404
+
+    def test_the_rest_of_the_persona_survives(self, client, personas_root):
+        # write_prompt_md rewrites the whole file, so every field the
+        # rename does not name has to be carried across it. Only the name
+        # and the prose the sweep is allowed to touch may differ.
+        before = client.get("/api/personas/Alex/detail").json()
+        self._rename(client, sweep_old_name=False)
+        after = client.get("/api/personas/Alexander/detail").json()
+
+        assert {k: v for k, v in after.items() if k != "name"} == {
+            k: v for k, v in before.items() if k != "name"
+        }
+
+    def test_the_directory_follows(self, client, personas_root):
+        # Cosmetic, but the folder is meant to be opened and hand-edited,
+        # and Alexander living in Personas/Alex is a trap for whoever does.
+        assert self._rename(client).json()["directory_renamed"] is True
+        assert (personas_root / "Alexander").is_dir()
+        assert not (personas_root / "Alex").exists()
+
+    # -- what everyone else knows --------------------------------------------
+
+    def test_other_personas_memories_follow(self, client, personas_root):
+        (personas_root / "Luna" / "memories.txt").write_text(
+            "[Alex] Alex has never been on a boat.\n[Marv] Marv sighs.\n"
+        )
+
+        body = self._rename(client).json()
+
+        assert (personas_root / "Luna" / "memories.txt").read_text() == (
+            "[Alexander] Alexander has never been on a boat.\n[Marv] Marv sighs.\n"
+        )
+        assert body["memories_updated"] == 1
+        assert body["personas_touched"] == 1
+
+    def test_the_old_name_can_be_left_in_the_memory_text(self, client, personas_root):
+        # A persona called Will or May shares a spelling with an ordinary
+        # word, and no rule tells them apart — so the sweep is the
+        # caller's call. The subject tag is repointed either way, because
+        # that one is structural and getting it wrong orphans the line.
+        (personas_root / "Luna" / "memories.txt").write_text(
+            "[Alex] Alex has never been on a boat.\n"
+        )
+
+        self._rename(client, sweep_old_name=False)
+
+        assert (personas_root / "Luna" / "memories.txt").read_text() == (
+            "[Alexander] Alex has never been on a boat.\n"
+        )
+
+    def test_their_own_prompt_follows(self, client, personas_root):
+        # The sharpest case, and why the sweep defaults to on: the room
+        # preamble opens "You are Alexander" and is concatenated with this
+        # prompt, so a stale one tells the model two names in one breath.
+        assert self._rename(client).json()["own_prose_updated"] is True
+
+        detail = client.get("/api/personas/Alexander/detail").json()
+        assert detail["system_prompt"] == "You are Alexander, a friendly assistant."
+
+    def test_their_own_prompt_can_be_left_alone(self, client, personas_root):
+        body = self._rename(client, sweep_old_name=False).json()
+
+        assert body["own_prose_updated"] is False
+        assert client.get("/api/personas/Alexander/detail").json()["system_prompt"] == (
+            "You are Alex, a friendly assistant."
+        )
+
+    def test_a_name_inside_a_longer_word_is_left_alone(self, client, personas_root):
+        # Whole-word: "alexandrite" is not a mention of Alex.
+        (personas_root / "Luna" / "memories.txt").write_text(
+            "[Alex] Alex bought alexandrite from Alexa.\n"
+        )
+
+        self._rename(client)
+
+        assert (personas_root / "Luna" / "memories.txt").read_text() == (
+            "[Alexander] Alexander bought alexandrite from Alexa.\n"
+        )
+
+    def test_a_met_list_follows(self, client, personas_root):
+        # Quieter than a lost memory and worse: without this, Luna meets a
+        # character she has known for weeks and is told they have never met.
+        (personas_root / "Luna" / "met.txt").write_text("Alex\nUser\n")
+
+        body = self._rename(client).json()
+
+        assert persona_store.read_acquaintances(personas_root / "Luna") == {
+            "Alexander", "User",
+        }
+        assert body["acquaintances_updated"] == 1
+
+    def test_a_persona_who_never_met_them_is_not_reported(self, client, personas_root):
+        body = self._rename(client).json()
+        assert body["personas_touched"] == 0
+        assert body["memories_updated"] == 0
+
+    # -- room membership, the player, and the transcript ----------------------
+
+    def test_room_membership_follows(self, client, personas_root):
+        body = self._rename(client).json()
+
+        assert client.get("/api/chatrooms/TNG").json()["persona_names"] == [
+            "Alexander", "Luna",
+        ]
+        assert body["rooms_updated"] == 1
+
+    def test_the_adopted_player_follows(self, client, personas_root):
+        # adopted() resolves against the live persona list, so leaving
+        # this stale would quietly drop the human back to playing as
+        # themselves — and make them a stranger to the whole cast.
+        client.put("/api/player", json={"persona_name": "Alex"})
+
+        assert self._rename(client).json()["player_updated"] is True
+        assert client.get("/api/player").json()["persona_name"] == "Alexander"
+
+    def test_somebody_elses_adopted_persona_is_left_alone(self, client, personas_root):
+        client.put("/api/player", json={"persona_name": "Luna"})
+
+        assert self._rename(client).json()["player_updated"] is False
+        assert client.get("/api/player").json()["persona_name"] == "Luna"
+
+    def test_stored_messages_are_re_attributed(self, client, personas_root, tmp_project_root):
+        # Not cosmetic: build_llm_messages turns the stored persona name
+        # into the "[Name]: " tag other personas read, so a stale one
+        # hands the model a speaker who is not on the roster and not in
+        # the stop sequences.
+        from app import persistence
+        from app.models import ChatMessage
+
+        persistence.persist_message(
+            "TNG", ChatMessage(role="assistant", content="Hello.", persona="Alex"), "m1",
+        )
+        persistence.persist_message(
+            "TNG", ChatMessage(role="assistant", content="Hi.", persona="Luna"), "m2",
+        )
+
+        body = self._rename(client).json()
+
+        # "sender" is the on-disk field for ChatMessage.persona.
+        senders = [m["sender"] for m in persistence.load_history("TNG")]
+        assert senders == ["Alexander", "Luna"]
+        assert body["messages_reattributed"] == 1
+
+    def test_what_was_said_is_left_as_it_was_said(self, client, personas_root):
+        # A transcript is a record. The attribution is fixed because it is
+        # structural; the prose is not, because rewriting every room a
+        # persona ever spoke in is a far larger and less reversible thing.
+        from app import persistence
+        from app.models import ChatMessage
+
+        persistence.persist_message(
+            "TNG", ChatMessage(role="user", content="Nice one, Alex."), "m1",
+        )
+        self._rename(client)
+
+        stored = persistence.load_history("TNG")[0]
+        assert stored["text"] == "Nice one, Alex."
+        # And the human's own rows are the sentinel, never a persona name.
+        assert stored["sender"] == "USER"
+
+    # -- refusals ------------------------------------------------------------
+
+    def test_renaming_onto_an_existing_name_is_refused(self, client, personas_root):
+        assert self._rename(client, new="luna").status_code == 409
+
+    def test_renaming_to_the_reserved_user_is_refused(self, client, personas_root):
+        assert self._rename(client, new="User").status_code == 422
+
+    def test_renaming_to_the_same_name_is_refused(self, client, personas_root):
+        assert self._rename(client, new="Alex").status_code == 422
+
+    def test_renaming_a_persona_that_does_not_exist_is_a_404(self, client, personas_root):
+        assert self._rename(client, old="Nobody").status_code == 404
+
+    def test_a_name_too_long_to_be_a_memory_subject_is_refused(self, client, personas_root):
+        # The cap is not cosmetic: a memory is stored as "[Subject] text"
+        # and a longer subject could not be parsed back out of the file.
+        assert self._rename(client, new="A" * 26).status_code == 422
+
+    def test_a_name_with_a_slash_is_refused(self, client, personas_root):
+        # The name is a path segment on /api/personas/{name}/...
+        assert self._rename(client, new="Alex/2").status_code == 422
+
+    # -- capitalisation ------------------------------------------------------
+
+    def test_changing_only_the_capitalisation_is_a_real_rename(self, client, personas_root):
+        (personas_root / "Luna" / "memories.txt").write_text("[Alex] Alex sails.\n")
+
+        assert self._rename(client, new="alex").status_code == 200
+        assert (personas_root / "Luna" / "memories.txt").read_text() == "[alex] alex sails.\n"
+        assert client.get("/api/personas/alex/detail").json()["name"] == "alex"

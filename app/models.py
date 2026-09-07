@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import LengthBias, PromptFormat, TypicalLength
 
-from app.config import DEFAULT_MEMORY_SIZE, MAX_MEMORY_SIZE
+from app.config import DEFAULT_MEMORY_SIZE, MAX_MEMORY_SIZE, MAX_PERSONA_NAME
 
 from app.services.persona_draft import MAX_REFINE_INSTRUCTION
 
@@ -254,6 +254,54 @@ class PersonaResponse(BaseModel):
     # GET /api/personas/{name}/avatar).
     avatar_image: bool = False
     tts_capable: bool = False
+
+
+class PersonaRenameRequest(BaseModel):
+    """Rename a saved persona, everywhere it is referred to.
+
+    A rename is its own operation rather than an edit to the name field,
+    because names are the identifiers: the same string is a memory's
+    subject tag, an entry in another persona's met-list, a member of a
+    chat room, the adopted player, and the "[Name]: " tag on every line
+    that persona has ever spoken. Changing it in one place and not the
+    others does not rename anybody — it orphans them.
+    """
+
+    new_name: str = Field(..., min_length=1, max_length=MAX_PERSONA_NAME)
+    # Whether to also rewrite the old name where it appears inside prose:
+    # this persona's own description and system prompt ("You are Alex, a
+    # friendly assistant"), and the text of other personas' memories
+    # ("Alex has never been on a boat").
+    #
+    # On by default, and the persona's own prompt is why. The room
+    # preamble opens "You are Alexander" and is concatenated with a prompt
+    # that says "You are Alex" — a contradiction inside a single system
+    # message, which is worse than any stale memory. But a character
+    # called Will, May or Mark shares a spelling with an ordinary word and
+    # no rule tells them apart, so it stays the caller's decision.
+    sweep_old_name: bool = True
+
+
+class PersonaRenameResponse(BaseModel):
+    """What the rename actually touched.
+
+    Reported rather than assumed: the counts are how a user checks that a
+    rename reached the places they cannot see from the persona editor.
+    """
+
+    name: str
+    previous_name: str
+    memories_updated: int = 0
+    personas_touched: int = 0
+    acquaintances_updated: int = 0
+    rooms_updated: int = 0
+    messages_reattributed: int = 0
+    player_updated: bool = False
+    # True when the old name was swept out of this persona's own
+    # description or system prompt.
+    own_prose_updated: bool = False
+    directory_renamed: bool = False
+    warnings: List[str] = Field(default_factory=list)
 
 
 class PersonaDetailResponse(BaseModel):

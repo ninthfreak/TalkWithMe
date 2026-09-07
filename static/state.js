@@ -86,6 +86,17 @@ const peConfirmMsg = document.getElementById("pe-confirm-msg");
 
 // Persona Editor form fields
 const pfName = document.getElementById("pf-name");
+const pfNameHint = document.getElementById("pf-name-hint");
+const pfNameLockedHint = document.getElementById("pf-name-locked-hint");
+const pfRenameBtn = document.getElementById("pf-btn-rename");
+const pfRenameOverlay = document.getElementById("pf-rename-overlay");
+const pfRenameForm = document.getElementById("pf-rename-form");
+const pfRenameNew = document.getElementById("pf-rename-new");
+const pfRenameSweep = document.getElementById("pf-rename-sweep");
+const pfRenameError = document.getElementById("pf-rename-error");
+const pfRenameClose = document.getElementById("pf-rename-close");
+const pfRenameCancel = document.getElementById("pf-rename-cancel");
+const pfRenameConfirm = document.getElementById("pf-rename-confirm");
 const pfDescription = document.getElementById("pf-description");
 const pfSystemPrompt = document.getElementById("pf-system-prompt");
 const pfRouterHints = document.getElementById("pf-router-hints");

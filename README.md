@@ -848,6 +848,33 @@ it, and needs *Allow tool calls* on the persona.
 Both go together when you wipe: a persona whose memories you clear also forgets who it
 has met, or it would still greet everyone as an old friend.
 
+### Renaming somebody
+
+Because names are identifiers here, the Name field is **read-only while you are
+editing** and there is a **Rename** button beside it. That is not tidiness: the same
+string is a memory's subject tag, an entry in another persona's met-list, a chat-room
+member, the character you are playing, and the tag on every line that persona has ever
+spoken. Changing it in one place would not rename them, it would orphan them — so
+saving with a different name is refused by the server, not only discouraged by the
+form.
+
+Rename moves all of it in one go, and tells you what it moved:
+
+> Renamed to Alexander, and updated 2 memory lines held by 2 personas, 2 met-lists,
+> 1 chat room, 2 stored messages, their own prompt, the character you are playing.
+
+Most of that is in files you cannot see from the editor, which is why it is reported
+rather than assumed — the same reason the context wipe reads its inventory back.
+
+Two things it does **not** do. It leaves what was *said* alone: a transcript is a
+record, and the old name in the middle of a sentence is what somebody actually typed.
+And the checkbox — on by default — controls whether the old name is swept out of
+*prose*: their own prompt, and the text inside other personas' memories. Leave it on.
+A persona whose prompt still says "You are Alex" is handed two different names in one
+system message, which is worse than any stale memory. Turn it off only when the name is
+also an ordinary word — Will, May, Mark — where a whole-word swap would rewrite
+sentences that were never about them.
+
 ### Starting from a known-clean slate
 
 **Settings → Start fresh** deletes stored conversation. It exists because "New Chat"

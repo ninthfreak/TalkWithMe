@@ -335,6 +335,63 @@ def message_count(room_name: str) -> int:
         return 0
 
 
+def rename_persona_in_history(old_name: str, new_name: str) -> int:
+    """Re-attribute every persisted message from *old_name* to *new_name*.
+
+    Not cosmetic, and not optional. A stored message carries the name of
+    the persona who said it, and `build_llm_messages` turns that into the
+    "[Name]: " tag other personas read. Leave it stale and the last few
+    exchanges hand the model a speaker who is not on the roster and not in
+    the stop sequences — which is precisely the invented-character failure
+    the whole containment layer exists to prevent.
+
+    Only the attribution is rewritten. What was *said* is left exactly as
+    it was said: a transcript is a record, the old name in the middle of a
+    sentence is what somebody actually typed, and rewriting prose across
+    every room a persona has ever spoken in is a far larger and less
+    reversible thing than fixing who a line belongs to.
+
+    The human's rows are stored under the sentinel "USER" rather than
+    under whoever they are playing, so they cannot be caught by this even
+    when the renamed persona is the adopted one — the transcript tag for
+    the human is resolved at prompt-build time, not stored.
+
+    Returns the number of messages re-attributed.
+    """
+    old, new = old_name.strip(), new_name.strip()
+    if not old or not new or old == new:
+        return 0
+
+    changed = 0
+    with _HISTORY_LOCK:
+        for room_name in persisted_rooms():
+            data = _read_history_file(room_name)
+            messages = data.get("messages") or []
+            # "sender" is the on-disk field (persist_message writes it);
+            # ChatMessage.persona is the in-memory name for the same thing.
+            hits = [m for m in messages
+                    if isinstance(m, dict) and (m.get("sender") or "").strip() == old]
+            if not hits:
+                continue
+            for message in hits:
+                message["sender"] = new
+            try:
+                _write_history_file(room_name, data)
+            except OSError as exc:
+                # Best-effort per room: one unwritable transcript must not
+                # abandon the rest of the sweep half-done.
+                logger.warning(
+                    "Could not re-attribute %d message(s) in room '%s' from "
+                    "'%s' to '%s': %s", len(hits), room_name, old, new, exc,
+                )
+                continue
+            changed += len(hits)
+
+    if changed:
+        logger.info("Re-attributed %d message(s) from '%s' to '%s'", changed, old, new)
+    return changed
+
+
 def clear_room(room_name: str) -> None:
     """Delete all persisted files for a room.
 
