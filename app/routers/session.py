@@ -77,9 +77,12 @@ def _inventory() -> ContextInventory:
             persona_store.read_memories(persona.persona_dir).splitlines()
             if line.strip()
         ]
-        if lines:
+        met = persona_store.read_acquaintances(persona.persona_dir)
+        if lines or met:
             personas.append(
-                PersonaMemoryContext(persona=persona.name, memories=len(lines))
+                PersonaMemoryContext(
+                    persona=persona.name, memories=len(lines), met=len(met),
+                )
             )
     return ContextInventory(
         rooms=rooms,
@@ -125,7 +128,11 @@ def wipe_context(req: WipeRequest):
             if persona.persona_dir is None:
                 continue
             try:
-                if persona_store.remove_memories_file(persona.persona_dir):
+                # The met-list goes with the memories: leaving it behind
+                # would mean a wiped persona still greets everyone as an
+                # old acquaintance, which is the one thing this is for.
+                forgot = persona_store.forget_acquaintances(persona.persona_dir)
+                if persona_store.remove_memories_file(persona.persona_dir) or forgot:
                     result.memories_cleared.append(persona.name)
             except OSError as exc:
                 # Surfaced rather than swallowed: a wipe that quietly

@@ -28,7 +28,7 @@ import re
 import shutil
 import uuid
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
 from pydantic import ValidationError
@@ -53,6 +53,7 @@ LANGUAGE_FILENAME = "language.txt"
 REFERENCE_AUDIO_FILENAME = "ref.wav"
 TRANSCRIPT_FILENAME = "ref.txt"
 MEMORIES_FILENAME = "memories.txt"
+ACQUAINTANCES_FILENAME = "met.txt"
 IMAGE_BASENAME = "image"
 DEFAULT_LANGUAGE = "en"
 
@@ -454,6 +455,63 @@ def parse_memory_size(raw: object, persona_name: str) -> int:
     return raw
 
 
+# ---------------------------------------------------------------------------
+# Who a persona has met
+# ---------------------------------------------------------------------------
+#
+# Written by the app, not by the model, and that is the whole point. An
+# empty memories file cannot tell you whether two characters have never
+# met or simply had nothing worth writing down, so "you have not met them
+# before" was not a claim the app could honestly make. A turn taken in a
+# room is an encounter whether or not anything memorable came of it, so
+# the app records it directly — which also means a first meeting reads as
+# a first meeting without the memory feature being switched on at all.
+
+def read_acquaintances(persona_dir: Path) -> Set[str]:
+    """Everyone this persona has shared a room with. Empty when unknown."""
+    path = persona_dir / ACQUAINTANCES_FILENAME
+    if not path.is_file():
+        return set()
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logger.warning("Persona %s: unreadable %s (%s)",
+                       persona_dir.name, ACQUAINTANCES_FILENAME, exc)
+        return set()
+    return {line.strip() for line in text.splitlines() if line.strip()}
+
+
+def record_acquaintances(persona_dir: Path, names: Iterable[str]) -> Set[str]:
+    """Note that this persona has now met *names*. Returns the full set.
+
+    Best-effort: failing to record an encounter must never break a reply,
+    it only means the next conversation starts as another first meeting.
+    """
+    known = read_acquaintances(persona_dir)
+    fresh = {n.strip() for n in names if n and n.strip()} - known
+    if not fresh:
+        return known
+    known |= fresh
+    try:
+        (persona_dir / ACQUAINTANCES_FILENAME).write_text(
+            "\n".join(sorted(known)) + "\n", encoding="utf-8"
+        )
+    except OSError as exc:
+        logger.warning("Persona %s: could not record %s: %s",
+                       persona_dir.name, ACQUAINTANCES_FILENAME, exc)
+        return known - fresh
+    return known
+
+
+def forget_acquaintances(persona_dir: Path) -> bool:
+    """Delete the met-list. True if there was one."""
+    path = persona_dir / ACQUAINTANCES_FILENAME
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
 def read_memories(persona_dir: Path) -> str:
     """Read the persona's memories file, or "" when absent/unreadable.
 
@@ -539,7 +597,40 @@ def _write_memories_file(persona_dir: Path, lines: List[str]) -> None:
         raise
 
 
-def append_memory(persona_dir: Path, memory: object, memory_size: int) -> str:
+# A memory is about somebody, and the line says who: "[Tony] ...". The
+# subject is whatever the transcript calls them, so the human is filed
+# under the persona they are playing rather than under "the user" — play
+# somebody else tomorrow and you are somebody else to the room.
+#
+# Untagged lines are legacy, from when every memory was about the human by
+# definition. They are read as belonging to no one in particular and shown
+# whoever is present, which is what they used to do.
+# Mirrors the persona-name cap enforced by the create/update form.
+MAX_SUBJECT_CHARS = 25
+_SUBJECT_RE = re.compile(r"^\[([^\]\n]{1,%d})\]\s*(.+)$" % MAX_SUBJECT_CHARS)
+
+
+def split_memory_line(line: str) -> Tuple[str, str]:
+    """A stored line as (subject, text). Subject is "" when untagged."""
+    match = _SUBJECT_RE.match(line.strip())
+    return (match.group(1).strip(), match.group(2).strip()) if match else ("", line.strip())
+
+
+def memories_by_subject(persona_dir: Path) -> Dict[str, List[str]]:
+    """Stored memories grouped by who they are about, casefolded keys.
+
+    Untagged legacy lines land under "".
+    """
+    grouped: Dict[str, List[str]] = {}
+    for line in _memory_lines(read_memories(persona_dir)):
+        subject, text = split_memory_line(line)
+        grouped.setdefault(subject.casefold(), []).append(text)
+    return grouped
+
+
+def append_memory(
+    persona_dir: Path, about: object, memory: object, memory_size: int
+) -> str:
     """Append one memory to the persona's memories.txt, enforcing all limits.
 
     Returns the LLM-facing result string (see docs/feature_persona_memory.md
@@ -577,6 +668,14 @@ def append_memory(persona_dir: Path, memory: object, memory_size: int) -> str:
             f"Error: The memory was too large to save. "
             f"Max per-memory length is {MAX_MEMORY_LINE_CHARS} characters."
         )
+    subject = " ".join(str(about or "").split())[:MAX_SUBJECT_CHARS].strip("[]").strip()
+    if not subject:
+        return (
+            "Error: The memory was not saved because it did not say who it is "
+            "about. Use the name the transcript tags them with."
+        )
+    cleaned = f"[{subject}] {cleaned}"
+
     if len(cleaned.encode("utf-8")) > memory_size:
         return (
             "Error: The memory was too large to save. "

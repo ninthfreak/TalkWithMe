@@ -542,113 +542,127 @@ class TestPersonaMemory:
     injected into the system prompt, and tool-capable personas get the
     built-in add_memory tool offered."""
 
-    # -- _system_prompt_with_memories (unit) ---------------------------------
+    # -- who is here, and what this persona knows of them (unit) -------------
 
     @staticmethod
-    def _persona_with_memories(tmp_path, **persona_kwargs) -> Persona:
+    def _persona(tmp_path, memories="", met=(), **kwargs) -> Persona:
         persona_dir = tmp_path / "Alex"
-        persona_dir.mkdir(parents=True)
-        (persona_dir / "memories.txt").write_text("The user likes tea.\n")
+        persona_dir.mkdir(parents=True, exist_ok=True)
+        if memories:
+            (persona_dir / "memories.txt").write_text(memories)
+        if met:
+            (persona_dir / "met.txt").write_text("\n".join(met) + "\n")
         return Persona(name="Alex", system_prompt="You are Alex.",
-                       persona_dir=persona_dir, **persona_kwargs)
+                       persona_dir=persona_dir, **kwargs)
 
-    def test_memories_appended_to_system_prompt(self, tmp_path):
-        result = chat_router._system_prompt_with_memories(
-            self._persona_with_memories(tmp_path), make_settings(),
+    def _block(self, persona, present=("Tony",), settings=None):
+        return chat_router._system_prompt_with_memories(
+            persona, settings or make_settings(), list(present),
         )
+
+    def test_a_stranger_is_named_as_one(self, tmp_path):
+        # The complaint this answers: personas opening with "good to see
+        # you again" the first time they ever meet somebody. Every model's
+        # default is warm familiarity, and nothing used to contradict it.
+        result = self._block(self._persona(tmp_path))
         assert result == (
-            "You are Alex.\n\nYou have the following memories related to the user:\n"
-            "The user likes tea.\n"
+            "You are Alex.\n\nThe people here, and what you know of them:\n"
+            "Tony: you have never met."
         )
 
-    def test_no_injection_when_global_flag_off(self, tmp_path):
+    def test_met_before_with_nothing_saved_says_so(self, tmp_path):
+        # Distinct from never having met, and the distinction is why the
+        # met-list exists: an empty memories file cannot tell them apart.
+        result = self._block(self._persona(tmp_path, met=["Tony"]))
+        assert "Tony: you have met before, but nothing in particular comes to mind." in result
+
+    def test_memories_are_shown_under_the_person_they_are_about(self, tmp_path):
+        persona = self._persona(
+            tmp_path,
+            memories="[Tony] Tony has never been on a boat.\n[Marv] Marv sighs at everything.\n",
+            met=["Tony", "Marv"],
+        )
+        result = self._block(persona, present=["Tony"])
+
+        assert "Tony: Tony has never been on a boat." in result
+        # Marv is not in the room, so Marv is not in the prompt.
+        assert "Marv" not in result
+
+    def test_the_human_is_whoever_they_are_playing(self, tmp_path):
+        # The caller passes the user label, so a memory saved about "Kira"
+        # comes back when the player is Kira and not when they are not.
+        persona = self._persona(tmp_path, memories="[Kira] Kira owes everyone money.\n",
+                                met=["Kira"])
+        assert "Kira owes everyone money." in self._block(persona, present=["Kira"])
+        assert "owes everyone money" not in self._block(persona, present=["Tony"])
+
+    def test_it_works_with_the_memory_feature_switched_off(self, tmp_path):
+        # The met-list is written by the app, not the model, so knowing
+        # whether you have met somebody does not depend on the feature —
+        # only the remembered detail does.
         settings = make_settings(general=GeneralConfig(enable_persona_memories=False))
+        persona = self._persona(tmp_path, memories="[Tony] Tony likes tea.\n", met=["Tony"])
+
+        result = self._block(persona, settings=settings)
+
+        assert "Tony: you have met before, but nothing in particular comes to mind." in result
+        assert "likes tea" not in result
+
+    def test_a_zero_budget_persona_still_knows_who_it_has_met(self, tmp_path):
+        persona = self._persona(tmp_path, memories="[Tony] Tony likes tea.\n",
+                                met=["Tony"], memory_size=0)
+        result = self._block(persona)
+        assert "you have met before" in result
+        assert "likes tea" not in result
+
+    def test_nobody_present_means_nothing_appended(self, tmp_path):
+        assert self._block(self._persona(tmp_path), present=[]) == "You are Alex."
+
+    def test_a_persona_with_no_directory_is_left_alone(self, tmp_path):
         result = chat_router._system_prompt_with_memories(
-            self._persona_with_memories(tmp_path), settings,
+            Persona(name="Alex", system_prompt="You are Alex."), make_settings(), ["Tony"],
         )
         assert result == "You are Alex."
 
-    def test_no_injection_when_memory_size_zero(self, tmp_path):
-        result = chat_router._system_prompt_with_memories(
-            self._persona_with_memories(tmp_path, memory_size=0), make_settings(),
-        )
-        assert result == "You are Alex."
-
-    def test_no_injection_when_persona_has_no_directory(self, tmp_path):
-        result = chat_router._system_prompt_with_memories(
-            Persona(name="Alex", system_prompt="You are Alex."), make_settings(),
-        )
-        assert result == "You are Alex."
-
-    def test_no_injection_when_memories_file_absent(self, tmp_path):
-        persona_dir = tmp_path / "Alex"
-        persona_dir.mkdir(parents=True)
-        result = chat_router._system_prompt_with_memories(
-            Persona(name="Alex", system_prompt="You are Alex.",
-                    persona_dir=persona_dir), make_settings(),
-        )
-        assert result == "You are Alex."
-
-    def test_no_injection_when_memories_file_blank(self, tmp_path):
-        persona_dir = tmp_path / "Alex"
-        persona_dir.mkdir(parents=True)
-        (persona_dir / "memories.txt").write_text("  \n")
-        result = chat_router._system_prompt_with_memories(
-            Persona(name="Alex", system_prompt="You are Alex.",
-                    persona_dir=persona_dir), make_settings(),
-        )
-        assert result == "You are Alex."
+    def test_legacy_untagged_memories_are_still_shown(self, tmp_path):
+        # They predate memories being about anybody, and were all about
+        # the human. They still go in, unattached to a name.
+        persona = self._persona(tmp_path, memories="The user told me they sail.\n")
+        assert "The user told me they sail." in self._block(persona)
 
     # -- budget enforcement on the read path ----------------------------------
 
-    @staticmethod
-    def _persona_with_budget(tmp_path, memory_size: int) -> Persona:
-        """A persona with a real directory and a (small) memory budget,
-        no memories file yet — the tests write that themselves."""
-        persona_dir = tmp_path / "Alex"
-        persona_dir.mkdir(parents=True)
-        return Persona(name="Alex", system_prompt="You are Alex.",
-                       persona_dir=persona_dir, memory_size=memory_size)
-
     def test_over_limit_memories_purged_oldest_first_on_read(self, tmp_path):
-        persona = self._persona_with_budget(tmp_path, memory_size=10)
-        memories_file = persona.persona_dir / "memories.txt"
-        # 15 bytes against a 10-byte budget: the oldest-first purge leaves
-        # only the newest memory — both in the injected prompt and on disk.
-        memories_file.write_text("aaaa\nbbbb\ncccc\n")
-
-        result = chat_router._system_prompt_with_memories(persona, make_settings())
-
-        assert result == (
-            "You are Alex.\n\nYou have the following memories related to the user:\n"
-            "cccc\n"
+        persona = self._persona(
+            tmp_path, memories="[Tony] aaaa\n[Tony] bbbb\n[Tony] cccc\n",
+            met=["Tony"], memory_size=15,
         )
-        assert memories_file.read_text() == "cccc\n"
+        memories_file = persona.persona_dir / "memories.txt"
+
+        result = self._block(persona)
+
+        assert "Tony: cccc" in result
+        assert "aaaa" not in result
+        assert memories_file.read_text() == "[Tony] cccc\n"
 
     def test_within_budget_memories_left_untouched_on_read(self, tmp_path):
-        persona = self._persona_with_budget(tmp_path, memory_size=10)
+        persona = self._persona(tmp_path, memories="[Tony] aaaa\n[Tony] bbbb\n",
+                                met=["Tony"], memory_size=8192)
         memories_file = persona.persona_dir / "memories.txt"
-        # Exactly at the limit: the read path must not rewrite the file.
-        memories_file.write_text("aaaa\nbbbb\n")
 
-        result = chat_router._system_prompt_with_memories(persona, make_settings())
+        result = self._block(persona)
 
-        assert result == (
-            "You are Alex.\n\nYou have the following memories related to the user:\n"
-            "aaaa\nbbbb\n"
-        )
-        assert memories_file.read_text() == "aaaa\nbbbb\n"
+        assert "Tony: aaaa bbbb" in result
+        assert memories_file.read_text() == "[Tony] aaaa\n[Tony] bbbb\n"
 
     def test_single_memory_exceeding_budget_deletes_file_on_read(self, tmp_path):
-        persona = self._persona_with_budget(tmp_path, memory_size=10)
+        persona = self._persona(tmp_path, memories="[Tony] aaaaaaaaaa\n",
+                                met=["Tony"], memory_size=10)
         memories_file = persona.persona_dir / "memories.txt"
-        # One 11-byte memory against a 10-byte budget: nothing can survive,
-        # so the file is deleted — same semantics as the write path.
-        memories_file.write_text("aaaaaaaaaa\n")
 
-        result = chat_router._system_prompt_with_memories(persona, make_settings())
+        result = self._block(persona)
 
-        assert result == "You are Alex."
+        assert "Tony: you have met before" in result
         assert not memories_file.exists()
 
     # -- integration: injection reaches the LLM -------------------------------
@@ -656,7 +670,7 @@ class TestPersonaMemory:
     def test_injected_memories_reach_the_llm_payload(self, client, monkeypatch, tmp_path):
         alex_dir = tmp_path / "Alex"
         alex_dir.mkdir(parents=True)
-        (alex_dir / "memories.txt").write_text("The user likes tea.\n")
+        (alex_dir / "memories.txt").write_text("[User] Tony likes tea.\n")
         config = make_personas()
         config.personas[0] = Persona(
             name="Alex",
@@ -681,11 +695,8 @@ class TestPersonaMemory:
         assert len(seen) == 1
         system_message = seen[0][0]
         assert system_message["role"] == "system"
-        assert (
-            "You have the following memories related to the user:\n"
-            "The user likes tea.\n"
-            in system_message["content"]
-        )
+        assert "The people here, and what you know of them:" in system_message["content"]
+        assert "User: Tony likes tea." in system_message["content"]
 
     def test_external_over_limit_memories_purged_before_llm_payload(self, client, monkeypatch, tmp_path):
         # The scenario the read-path enforcement exists for: an external
@@ -694,7 +705,8 @@ class TestPersonaMemory:
         alex_dir = tmp_path / "Alex"
         alex_dir.mkdir(parents=True)
         memories_file = alex_dir / "memories.txt"
-        memories_file.write_text("aaaa\nbbbb\ncccc\n")  # 15 bytes, budget is 10
+        # 36 bytes against a 15-byte budget: only the newest line survives.
+        memories_file.write_text("[User] aaaa\n[User] bbbb\n[User] cccc\n")
         config = make_personas()
         config.personas[0] = Persona(
             name="Alex",
@@ -702,7 +714,7 @@ class TestPersonaMemory:
             system_prompt="You are Alex, a friendly assistant.",
             router_hints="general questions",
             persona_dir=alex_dir,
-            memory_size=10,
+            memory_size=15,
         )
         _patch_personas(monkeypatch, config)
 
@@ -720,12 +732,10 @@ class TestPersonaMemory:
         assert len(seen) == 1
         system_message = seen[0][0]
         assert system_message["role"] == "system"
-        assert (
-            "You have the following memories related to the user:\ncccc\n"
-            in system_message["content"]
-        )
+        assert "User: cccc" in system_message["content"]
+        assert "aaaa" not in system_message["content"]
         # The on-disk file is repaired too, so subsequent reads stay clean.
-        assert memories_file.read_text() == "cccc\n"
+        assert memories_file.read_text() == "[User] cccc\n"
 
     # -- integration: add_memory is offered to the LLM ------------------------
 

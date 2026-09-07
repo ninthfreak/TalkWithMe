@@ -63,8 +63,10 @@ class TestRegistry:
         function = ADD_MEMORY_SPEC["function"]
         assert function["name"] == ADD_MEMORY_NAME
         assert function["parameters"]["type"] == "object"
-        assert function["parameters"]["required"] == ["memory"]
+        assert function["parameters"]["required"] == ["about", "memory"]
         assert function["parameters"]["properties"]["memory"]["type"] == "string"
+        # A memory is about somebody, and the line says who.
+        assert function["parameters"]["properties"]["about"]["type"] == "string"
 
     def test_registering_a_duplicate_name_raises(self, monkeypatch):
         # Patch the dict first so the attempt below can't poison the real
@@ -138,13 +140,23 @@ class TestAddMemoryTool:
         persona = _persona(tmp_path)
 
         result = call_builtin_tool(
-            persona, ADD_MEMORY_NAME, {"memory": "The user told me they like tea."},
+            persona, ADD_MEMORY_NAME,
+            {"about": "Tony", "memory": "Tony likes tea."},
         )
 
         assert result == "The memory was saved successfully."
-        assert (persona.persona_dir / "memories.txt").read_text() == (
-            "The user told me they like tea.\n"
+        assert (persona.persona_dir / "memories.txt").read_text() == "[Tony] Tony likes tea.\n"
+
+    def test_a_memory_about_nobody_is_refused(self, tmp_path):
+        # Without a subject there is no way to know who to tell it to.
+        persona = _persona(tmp_path)
+
+        result = call_builtin_tool(
+            persona, ADD_MEMORY_NAME, {"memory": "Somebody likes tea."},
         )
+
+        assert result.startswith("Error:") and "who it is about" in result
+        assert not (persona.persona_dir / "memories.txt").exists()
 
     def test_persona_without_directory_reports_generic_io_error(self, tmp_path):
         # No persona_dir -> no file to write; the honest answer is the

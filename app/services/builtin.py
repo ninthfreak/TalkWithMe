@@ -130,38 +130,45 @@ ADD_MEMORY_SPEC = {
     "function": {
         "name": ADD_MEMORY_NAME,
         "description": (
-            "Save a memory about the user to your persistent memory. "
-            "Submit a maximum of ONE memory per conversation turn, and only when the "
-            "user has revealed something interesting about themselves (ambitions, "
-            "hopes, dreams, fears, strong emotions, personal anecdotes) or has "
-            "explicitly asked you to remember something. It is NOT a requirement to "
-            "submit a memory on every turn - ignore the tool if nothing noteworthy was said. Each memory must be a "
-            "SINGLE LINE of text of at most 1024 characters, and must begin with "
-            "'The user told me' (always refer to the user as 'the user' when saving memories). "
-            "Save only what the USER said about themselves. Never save anything about the "
-            "other characters in the room, and never save anything about yourself — a "
-            "memory of what somebody else is like comes back to you in every later "
-            "conversation as though it were true of you. "
-            "Do not add a memory that is redundant with or very similar to one you have already "
-            "saved. Do not mention to the user that you are using this tool. Do NOT output text when invoking this "
-            "tool. Only output text when the tool returns. Ignore errors from this tool. "
-            "Example memory: 'The user told me they prefer cats over "
-            "dogs.' Example memory: 'The user told me they'd like to take singing "
-            "lessons one day.'"
+            "Save something you have learned about one of the people in this room, "
+            "so you still know it next time you meet them. "
+            "Submit at most ONE memory per turn, and only when somebody has revealed "
+            "something worth remembering about themselves — what they want, what they "
+            "fear, something that happened to them, a strong opinion, or something "
+            "they asked you to remember. It is NOT a requirement to save one every "
+            "turn; ignore the tool when nothing notable was said. "
+            "'about' is WHO the memory concerns: the name the transcript tags them "
+            "with, exactly as it is spelled there. Save it about the person it "
+            "concerns, never about yourself. "
+            "'memory' is a SINGLE LINE of at most 1024 characters, written in your "
+            "own voice about them by name — 'Tony has never been on a boat', not "
+            "'The user told me...'. "
+            "Do not save anything you were told in confidence by somebody else about "
+            "a third person unless it is yours to know. "
+            "Do not add a memory that repeats one you have already saved. Do not "
+            "mention to anyone that you are using this tool. Do NOT output text when "
+            "invoking it; only speak when it returns. Ignore errors from it."
         ),
         "parameters": {
             "type": "object",
             "properties": {
+                "about": {
+                    "type": "string",
+                    "description": (
+                        "Who the memory is about — the name the transcript tags "
+                        "them with, e.g. 'Tony'."
+                    ),
+                },
                 "memory": {
                     "type": "string",
                     "description": (
-                        "A single line of at most 1024 characters, beginning with "
-                        "'The user told me'. Example: 'The user told me they'd like "
-                        "to take singing lessons one day.'"
+                        "A single line of at most 1024 characters, about them by "
+                        "name. Example: 'Tony has never been on a boat and does "
+                        "not intend to start.'"
                     ),
                 },
             },
-            "required": ["memory"],
+            "required": ["about", "memory"],
         },
     },
 }
@@ -178,7 +185,10 @@ def _add_memory(persona: Persona, arguments: dict) -> str:
         # file to write, and the generic I/O error is the honest answer.
         return "Error: The memory could not be saved."
     return persona_store.append_memory(
-        persona.persona_dir, arguments.get("memory"), persona.memory_size
+        persona.persona_dir,
+        arguments.get("about"),
+        arguments.get("memory"),
+        persona.memory_size,
     )
 
 

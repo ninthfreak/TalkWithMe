@@ -578,20 +578,20 @@ class TestAppendMemory:
     def test_disabled_budget_deletes_stale_file(self, tmp_path):
         d = _dir(tmp_path)
         (d / "memories.txt").write_text("stale\n")
-        result = append_memory(d, "The user likes tea.", 0)
+        result = append_memory(d, "Tony", "The user likes tea.", 0)
         assert result == "Error: Memory is not enabled for this persona."
         assert not (d / "memories.txt").exists()
 
     @pytest.mark.parametrize("memory", [None, 42, [], "   ", "\n\t\n", ""])
     def test_no_content_is_reported(self, tmp_path, memory):
         d = _dir(tmp_path)
-        result = append_memory(d, memory, DEFAULT_MEMORY_SIZE)
+        result = append_memory(d, "Tony", memory, DEFAULT_MEMORY_SIZE)
         assert result == "Error: The memory was not saved because it had no content."
         assert not (d / "memories.txt").exists()
 
     def test_too_long_memory_is_rejected_not_truncated(self, tmp_path):
         d = _dir(tmp_path)
-        result = append_memory(d, "x" * (MAX_MEMORY_LINE_CHARS + 1), DEFAULT_MEMORY_SIZE)
+        result = append_memory(d, "Tony", "x" * (MAX_MEMORY_LINE_CHARS + 1), DEFAULT_MEMORY_SIZE)
         assert result == (
             "Error: The memory was too large to save. "
             f"Max per-memory length is {MAX_MEMORY_LINE_CHARS} characters."
@@ -600,68 +600,70 @@ class TestAppendMemory:
 
     def test_memory_exactly_at_char_limit_is_accepted(self, tmp_path):
         d = _dir(tmp_path)
-        result = append_memory(d, "x" * MAX_MEMORY_LINE_CHARS, DEFAULT_MEMORY_SIZE)
+        result = append_memory(d, "Tony", "x" * MAX_MEMORY_LINE_CHARS, DEFAULT_MEMORY_SIZE)
         assert result == "The memory was saved successfully."
 
     def test_too_large_memory_reported_with_configured_limit(self, tmp_path):
         d = _dir(tmp_path)
-        result = append_memory(d, "ab" * 4, memory_size=7)  # 8 bytes > 7
+        result = append_memory(d, "Tony", "ab" * 4, memory_size=7)  # 8 bytes > 7
         assert result == "Error: The memory was too large to save. Configured memory limit: 7 bytes"
 
     def test_memory_exactly_at_byte_limit_is_accepted(self, tmp_path):
         d = _dir(tmp_path)
-        result = append_memory(d, "abc", memory_size=4)  # 3 bytes + 1 newline = 4
+        # "[Tony] abc" plus a newline. The tag counts against the budget.
+        result = append_memory(d, "Tony", "abc", memory_size=11)
         assert result == "The memory was saved successfully."
-        assert read_memories(d) == "abc\n"
+        assert read_memories(d) == "[Tony] abc\n"
 
     def test_success_appends_one_line(self, tmp_path):
         d = _dir(tmp_path)
         (d / "memories.txt").write_text("old\n")
-        assert append_memory(d, "The user likes tea.", DEFAULT_MEMORY_SIZE) == (
+        assert append_memory(d, "Tony", "The user likes tea.", DEFAULT_MEMORY_SIZE) == (
             "The memory was saved successfully."
         )
-        assert read_memories(d) == "old\nThe user likes tea.\n"
+        assert read_memories(d) == "old\n[Tony] The user likes tea.\n"
 
     def test_newlines_are_deleted_not_replaced(self, tmp_path):
         # The spec deletes newline characters ("a\nb" -> "ab"): a memory
         # must be a single line, and replacement would silently change
         # the memory's content.
         d = _dir(tmp_path)
-        assert append_memory(d, "a\nb\rc\rd", DEFAULT_MEMORY_SIZE) == (
+        assert append_memory(d, "Tony", "a\nb\rc\rd", DEFAULT_MEMORY_SIZE) == (
             "The memory was saved successfully."
         )
-        assert read_memories(d) == "abcd\n"
+        assert read_memories(d) == "[Tony] abcd\n"
 
     def test_edges_are_stripped(self, tmp_path):
         d = _dir(tmp_path)
-        assert append_memory(d, "  padded  ", DEFAULT_MEMORY_SIZE) == (
+        assert append_memory(d, "Tony", "  padded  ", DEFAULT_MEMORY_SIZE) == (
             "The memory was saved successfully."
         )
-        assert read_memories(d) == "padded\n"
+        assert read_memories(d) == "[Tony] padded\n"
 
     def test_new_blank_lines_are_dropped_from_existing_file(self, tmp_path):
         # The file is rewritten from non-blank lines, so hand-edited
         # blank lines do not survive an append.
         d = _dir(tmp_path)
         (d / "memories.txt").write_text("first\n\n  \nsecond\n")
-        append_memory(d, "third", DEFAULT_MEMORY_SIZE)
-        assert read_memories(d) == "first\nsecond\nthird\n"
+        append_memory(d, "Tony", "third", DEFAULT_MEMORY_SIZE)
+        assert read_memories(d) == "first\nsecond\n[Tony] third\n"
 
     def test_oldest_memories_purged_when_over_limit(self, tmp_path):
         d = _dir(tmp_path)
-        # 5 lines x 4 bytes ("aaaa\n") = 20 bytes; budget 12 keeps the
-        # newest 3.
+        # The new line is "[Tony] a5", 10 bytes with its newline. A
+        # budget of 19 leaves room for it plus the three newest old lines.
         (d / "memories.txt").write_text("a1\na2\na3\na4\n")
-        assert append_memory(d, "a5", memory_size=12) == "The memory was saved successfully."
-        assert read_memories(d) == "a3\na4\na5\n"
+        assert append_memory(d, "Tony", "a5", memory_size=19) == "The memory was saved successfully."
+        assert read_memories(d) == "a3\na4\n[Tony] a5\n"
 
     def test_purge_never_drops_the_new_memory(self, tmp_path):
         d = _dir(tmp_path)
         # The new memory fits the limit by itself, but combined with the
         # old line it does not: the OLD line must go, never the new one.
         (d / "memories.txt").write_text("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n")  # 41 bytes
-        assert append_memory(d, "new", memory_size=4) == "The memory was saved successfully."
-        assert read_memories(d) == "new\n"
+        # "[Tony] new" is 10 bytes; a budget of 11 fits it and nothing else.
+        assert append_memory(d, "Tony", "new", memory_size=11) == "The memory was saved successfully."
+        assert read_memories(d) == "[Tony] new\n"
 
     def test_write_failure_is_reported_and_leaves_no_temp_file(self, tmp_path, monkeypatch, caplog):
         d = _dir(tmp_path)
@@ -671,7 +673,7 @@ class TestAppendMemory:
             raise OSError("disk full")
 
         monkeypatch.setattr(persona_store, "_write_memories_file", boom)
-        result = append_memory(d, "new", DEFAULT_MEMORY_SIZE)
+        result = append_memory(d, "Tony", "new", DEFAULT_MEMORY_SIZE)
         assert result == "Error: The memory could not be saved."
         assert read_memories(d) == "old\n"  # untouched
         assert not list(d.glob("memories.txt.tmp*"))
@@ -688,7 +690,7 @@ class TestAppendMemory:
             raise OSError("read-only directory")
 
         monkeypatch.setattr(persona_store, "remove_memories_file", boom)
-        result = append_memory(d, "The user likes tea.", 0)
+        result = append_memory(d, "Tony", "The user likes tea.", 0)
         assert result == "Error: Memory is not enabled for this persona."
         assert (d / "memories.txt").read_text() == "stale\n"  # survives
         assert "could not delete memories.txt" in caplog.text

@@ -748,7 +748,7 @@ class TestEarlyCloseReleasesTheConnection:
                         tool_call_delta_line(
                             0, id="c1", type="function",
                             function={"name": builtin.ADD_MEMORY_NAME,
-                                      "arguments": '{"memory": "The user likes tea."}'},
+                                      "arguments": '{"about": "Tony", "memory": "Tony likes tea."}'},
                         ),
                         finish_line("tool_calls"),
                     ]
@@ -770,12 +770,12 @@ class TestEarlyCloseReleasesTheConnection:
 
         tool_event = next(e for e in events if e["type"] == "tool_call")
         assert tool_event["tool_name"] == builtin.ADD_MEMORY_NAME
-        assert tool_event["arguments"] == {"memory": "The user likes tea."}
+        assert tool_event["arguments"] == {"about": "Tony", "memory": "Tony likes tea."}
         assert tool_event["failed"] is False
         assert tool_event["result"] == "The memory was saved successfully."
         assert mcp_calls == []  # no MCP server was ever contacted
         # The memory landed in the persona's own directory...
-        assert (persona.persona_dir / "memories.txt").read_text() == "The user likes tea.\n"
+        assert (persona.persona_dir / "memories.txt").read_text() == "[Tony] Tony likes tea.\n"
         # ...and the confirmation went back to the LLM as the tool result.
         tool_result_msg = next(
             m for m in client.payloads[1]["messages"] if m.get("role") == "tool"

@@ -168,9 +168,13 @@ class RoomContext(BaseModel):
 
 
 class PersonaMemoryContext(BaseModel):
-    """One persona's saved memories."""
+    """One persona's saved memories, and how many people it has met."""
     persona: str
     memories: int
+    # Written by the app, not the model: a turn taken in a room is an
+    # encounter. It is what makes "you have never met" a fact rather than
+    # a guess from an empty memories file.
+    met: int = 0
 
 
 class ContextInventory(BaseModel):

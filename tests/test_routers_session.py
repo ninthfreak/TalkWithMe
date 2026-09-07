@@ -138,7 +138,7 @@ class TestContextInventory:
     def test_memories_are_counted_per_persona(self, client, personas_root):
         _remember(personas_root, "Luna", "The user told me they sail.")
         body = client.get("/api/session/context").json()
-        assert body["personas"] == [{"persona": "Luna", "memories": 1}]
+        assert body["personas"] == [{"persona": "Luna", "memories": 1, "met": 0}]
 
     def test_who_the_player_is_playing_is_part_of_it(self, client, personas_root, monkeypatch):
         # Not accumulated state, but it reaches every persona in every
@@ -222,7 +222,32 @@ class TestWipeContext:
         # the context that outlives every other clearing action.
         _remember(personas_root, "Luna", "The user told me they sail.")
         body = client.post("/api/session/wipe", json={"rooms": "all"}).json()
-        assert body["remaining"]["personas"] == [{"persona": "Luna", "memories": 1}]
+        assert body["remaining"]["personas"] == [{"persona": "Luna", "memories": 1, "met": 0}]
+
+    def test_who_a_persona_has_met_is_wiped_with_their_memories(
+        self, client, personas_root
+    ):
+        # Leaving the met-list behind would mean a wiped persona still
+        # greets everyone as an old acquaintance, which is the one thing
+        # a fresh start is for.
+        (personas_root / "Luna" / "met.txt").write_text("Tony\nAlex\n")
+
+        body = client.post("/api/session/wipe", json={"memories": True}).json()
+
+        assert body["memories_cleared"] == ["Luna"]
+        assert not (personas_root / "Luna" / "met.txt").exists()
+        assert body["remaining"]["personas"] == []
+
+    def test_an_acquaintance_with_no_memories_still_counts_as_context(
+        self, client, personas_root
+    ):
+        # It is state that changes how they behave, so it has to be
+        # visible in the inventory or "nothing stored" would be a lie.
+        (personas_root / "Alex" / "met.txt").write_text("Tony\n")
+
+        body = client.get("/api/session/context").json()
+
+        assert body["personas"] == [{"persona": "Alex", "memories": 0, "met": 1}]
 
     def test_the_adopted_player_can_be_cleared(self, client, personas_root, monkeypatch):
         monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name="Luna"))

@@ -418,47 +418,72 @@ async def _pick_persona(who_answers: str, user_message: str, chat_room: str) -> 
 # Memory injection (docs/feature_persona_memory.md)
 # ---------------------------------------------------------------------------
 
-def _system_prompt_with_memories(persona, settings) -> str:
-    """The persona's system prompt, with saved memories appended if eligible.
+def _who_is_here_block(persona, present: list[str], settings) -> str:
+    """What this persona knows about the people actually in front of them.
 
-    Qualifying conditions: the global enable_persona_memories flag, a
-    non-zero memory_size, and a memories.txt that exists and is not
-    blank. Note that allow_tool_calls is deliberately NOT part of this
-    gate: a persona that may not call tools can still benefit from
-    memories it saved earlier (injection and adding are independent).
+    Three states per person, and the difference between the first two is
+    the point of the met-list:
 
-    The memory budget is enforced on the read path as well as the write
-    path: the file may have been edited by an external process (the
-    README explicitly encourages it), so an over-limit file is purged
-    oldest-first to the persona's memory_size before injection, rather
-    than being handed to the LLM verbatim.
+      * never met — said outright, so a first meeting reads as one. Every
+        model's default is warm familiarity ("good to see you again"),
+        and nothing here used to contradict it.
+      * met before, nothing saved — met without anything worth writing
+        down, which is most of the people most of us know.
+      * memories — shown under their name.
+
+    The met-list is written by the app, so this works whether or not the
+    persona may call tools. Only the memory lines need the feature on.
     """
-    if not (settings.general.enable_persona_memories and persona.memory_size > 0):
+    if persona.persona_dir is None or not present:
+        return ""
+
+    known = persona_store.read_acquaintances(persona.persona_dir)
+    known_fold = {n.casefold() for n in known}
+
+    grouped = {}
+    if settings.general.enable_persona_memories and persona.memory_size > 0:
+        # The budget is enforced on the read path too: the file may have
+        # been edited by hand (the README encourages it), so an over-limit
+        # file is purged oldest-first rather than handed over verbatim.
+        persona_store.purge_memories_to_limit(persona.persona_dir, persona.memory_size)
+        grouped = persona_store.memories_by_subject(persona.persona_dir)
+    else:
         logger.debug(
             "Persona memory: NOT injecting saved memories for '%s' "
             "(enable_persona_memories=%s, memory_size=%d)",
             persona.name, settings.general.enable_persona_memories, persona.memory_size,
         )
+
+    lines = []
+    for name in present:
+        recalled = grouped.get(name.casefold(), [])
+        if recalled:
+            lines.append(f"{name}: " + " ".join(recalled))
+        elif name.casefold() in known_fold:
+            lines.append(f"{name}: you have met before, but nothing in particular comes to mind.")
+        else:
+            lines.append(f"{name}: you have never met.")
+
+    # Untagged legacy lines predate memories being about anybody. They
+    # were all about the human, so they still go in, unattached.
+    loose = grouped.get("", [])
+    if loose:
+        lines.append(" ".join(loose))
+
+    return "\n".join(lines)
+
+
+def _system_prompt_with_memories(persona, settings, present: list[str]) -> str:
+    """The persona's system prompt, plus what they know about the room.
+
+    ``allow_tool_calls`` is deliberately not part of the gate: a persona
+    that may not call tools still benefits from memories saved earlier,
+    and still knows whether it has met somebody.
+    """
+    block = _who_is_here_block(persona, present, settings)
+    if not block:
         return persona.system_prompt
-    if persona.persona_dir is None:
-        return persona.system_prompt
-    # Cheap no-op when the file is already within budget; repairs the
-    # on-disk file as a side effect when it isn't (e.g. an external
-    # writer ignored the persona's budget).
-    persona_store.purge_memories_to_limit(persona.persona_dir, persona.memory_size)
-    memories = persona_store.read_memories(persona.persona_dir)
-    if not memories.strip():
-        return persona.system_prompt
-    memory_lines = [line for line in memories.splitlines() if line.strip()]
-    logger.debug(
-        "Persona memory: injecting %d saved memory line(s) into the system prompt of '%s'",
-        len(memory_lines), persona.name,
-    )
-    return (
-        persona.system_prompt
-        + "\n\nYou have the following memories related to the user:\n"
-        + memories
-    )
+    return f"{persona.system_prompt}\n\nThe people here, and what you know of them:\n{block}"
 
 
 # ---------------------------------------------------------------------------
@@ -587,10 +612,14 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
         length = resolve_typical_length(persona, room, settings.general.typical_length)
         max_tokens = derive_max_tokens(length, settings.llm.max_tokens)
 
+        # Everyone this persona can see, the human included under whatever
+        # name they are playing under.
+        present = [n for n in eligible if n != persona_name] + [user_label]
+
         messages = session.build_llm_messages(
-            # The persona's own prompt, with its saved memories appended
-            # when the feature is on for it (docs/feature_persona_memory.md).
-            system_prompt=_system_prompt_with_memories(persona, settings),
+            # The persona's own prompt, plus who is here and what they
+            # know of them (docs/feature_persona_memory.md).
+            system_prompt=_system_prompt_with_memories(persona, settings, present),
             responding_persona=persona_name,
             max_turns_for_context=settings.general.max_turns_for_context,
             room_preamble=_build_room_preamble(
@@ -697,6 +726,12 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
             full_text, persona_name, assistant_message_id,
             truncated=truncated, room=turn_room,
         )
+
+        # They have now met. Recorded after the reply, never before, or a
+        # persona would have "met" somebody in the very turn they are
+        # meeting them and the first meeting would never read as one.
+        if persona.persona_dir is not None:
+            persona_store.record_acquaintances(persona.persona_dir, present)
 
         replied_personas.append(persona_name)
 

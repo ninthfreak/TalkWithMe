@@ -812,6 +812,34 @@ That is the thing to look at whenever a persona behaves like a different one: ev
 which one character's text reaches another is visible in it, and none of them are guessable from
 the outside.
 
+### Remembering people
+
+A persona's memories are **about somebody**. Each one is filed under the name the
+transcript tags them with, which means the human is filed under **whoever they are
+playing** — play Kira today and Tony tomorrow and you are two different people to the
+room, which is the point of playing someone.
+
+Only the people actually present are mentioned in a persona's prompt, and each of them
+lands in one of three states:
+
+| | What the persona is told |
+|---|---|
+| Never met | *"Tony: you have never met."* |
+| Met, nothing saved | *"Tony: you have met before, but nothing in particular comes to mind."* |
+| Something saved | *"Tony: Tony has never been on a boat and does not intend to start."* |
+
+**The first row is the one that needed building.** Every model's default is warm
+familiarity — "good to see you again", "how have you been?" — and nothing used to
+contradict it, so first meetings read like reunions. An empty memory file could not fix
+that, because it cannot tell "we have never met" from "we have met and nothing came of
+it". So the app keeps its own record: taking a turn in a room is an encounter, written
+down by the app rather than decided by the model. That also means **first meetings read
+correctly whether or not the memory feature is switched on** — only the third row needs
+it, and needs *Allow tool calls* on the persona.
+
+Both go together when you wipe: a persona whose memories you clear also forgets who it
+has met, or it would still greet everyone as an old friend.
+
 ### Starting from a known-clean slate
 
 **Settings → Start fresh** deletes stored conversation. It exists because "New Chat"
