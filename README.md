@@ -879,6 +879,37 @@ the prompt could fix, because the model had nothing to compare against. Showing 
 its own memories and asking only for what is new costs nothing extra: the
 completion was happening anyway.
 
+**Tidying up what is already there.** Two separate things, and the split is the
+point:
+
+- **Exact duplicates go automatically.** A plain function, no model, that keeps
+  the first of any byte-identical lines. 100% identical only — `Brad is 43.` and
+  `brad is 43.` are left alone, and so is a `(assumed)` version of a line that
+  also exists as a fact. It can only ever remove a line the file already contains
+  character for character, so the worst it can do is nothing. It runs whenever
+  memories are read, because hand-edited files can contain duplicates the write
+  path would have refused.
+- **Condense memories…** in the persona editor is the hand-run one, and it needs
+  a model. It merges notes that are about the same thing:
+
+  ```
+  [Brad] Brad is 43 years old.              [Brad] Brad is a tall, handsome,
+  [Brad] Brad is a banker.            →     43 year old man. He is a banker.
+  [Brad] Brad is a tall, handsome man.
+  ```
+
+  It also **drops a guess that a later fact has settled** — if a persona once
+  supposed Brad was about fifty and has since learned he is 43, only the 43
+  survives. That cull can only happen here, because this is the only place that
+  sees somebody's guesses and facts side by side.
+
+  It shows you the result before writing anything, and saves exactly the lines it
+  showed. Everything else in the memory system only adds a note or removes an
+  exact copy; this rewrites sentences the persona will act on, and there is no
+  undo. If the rewrite mentions somebody who was not in the notes, loses a name,
+  or comes back longer than it started, it is discarded and the file is left
+  alone.
+
 Deliberately *not* done: fuzzy matching on the way in. "Tony likes tea" and "Tony
 likes coffee" overlap heavily and are different facts, so a similarity threshold
 loose enough to catch a restatement is loose enough to eat one of those.

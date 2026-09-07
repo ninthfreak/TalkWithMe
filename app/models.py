@@ -271,6 +271,32 @@ class PersonaResponse(BaseModel):
     tts_capable: bool = False
 
 
+class CondenseRequest(BaseModel):
+    """Preview a condense, or apply one that has been looked at.
+
+    Applying takes the lines back rather than regenerating them, so what
+    is written is exactly what was shown. The pass rewrites sentences the
+    persona will act on, which nothing else in the memory system does.
+    """
+
+    apply: bool = False
+    memories: List[str] = Field(default_factory=list)
+
+
+class CondenseResponse(BaseModel):
+    """What condensing would do, or did."""
+
+    persona: str
+    before: List[str] = Field(default_factory=list)
+    after: List[str] = Field(default_factory=list)
+    before_bytes: int = 0
+    after_bytes: int = 0
+    saved_bytes: int = 0
+    duplicates_removed: int = 0
+    applied: bool = False
+    note: str = ""
+
+
 class PersonaReflection(BaseModel):
     """What one persona took away from one conversation."""
 

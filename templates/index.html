@@ -169,6 +169,10 @@
                         <span class="field-hint">Deletes all saved memories for this persona on save (does not change the size limit)</span>
                     </div>
                     <div class="form-row">
+                        <button type="button" id="pf-memories-condense" class="btn-secondary hidden">Condense memories&hellip;</button>
+                        <span class="field-hint">Merges notes that say the same thing into fewer lines &mdash; three about Brad&rsquo;s age, job and build become one. Shows you the result before writing anything.</span>
+                    </div>
+                    <div class="form-row">
                         <label for="pf-avatar-color">Avatar Color</label>
                         <input id="pf-avatar-color" type="color" value="#FF0000">
                     </div>
@@ -770,6 +774,37 @@
             <div class="form-actions">
                 <button id="gsf-wipe-cancel" class="btn-secondary">Cancel</button>
                 <button id="gsf-wipe-confirm" class="btn-danger">Delete it</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Condense a persona's memories. After the persona editor in the
+         document for the same reason the rename dialog is: .modal-overlay
+         shares one z-index, so stacking is DOM order. -->
+    <div id="pf-condense-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pf-condense-title">
+        <div class="modal-box modal-box-wide">
+            <div class="modal-header">
+                <h2 id="pf-condense-title">Condense memories</h2>
+                <button id="pf-condense-close" type="button" class="btn-icon-close" title="Close" aria-label="Close">&#10005;</button>
+            </div>
+            <div class="modal-intro field-hint">Everything else in here only ever adds a note or drops an exact copy. This rewrites sentences the persona will act on, so nothing is saved until you have read it.</div>
+            <div id="pf-condense-error" class="pe-form-error hidden"></div>
+            <div id="pf-condense-body" class="settings-body">
+                <div id="pf-condense-status" class="field-hint">Reading the notes&hellip;</div>
+                <div id="pf-condense-diff" class="pf-condense-diff hidden">
+                    <div class="pf-condense-side">
+                        <h3>Now</h3>
+                        <pre id="pf-condense-before"></pre>
+                    </div>
+                    <div class="pf-condense-side">
+                        <h3>After</h3>
+                        <pre id="pf-condense-after"></pre>
+                    </div>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="button" id="pf-condense-cancel" class="btn-secondary">Cancel</button>
+                <button type="button" id="pf-condense-apply" class="btn-accent" disabled>Save these</button>
             </div>
         </div>
     </div>

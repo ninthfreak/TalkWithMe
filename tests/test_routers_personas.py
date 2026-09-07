@@ -10,7 +10,7 @@ import pytest
 
 import app.config as app_config
 from app.config import Persona, PersonasConfig
-from app.services import persona_store
+from app.services import condense, persona_store
 from tests.factories import make_personas_in_dir, rescan_personas
 
 
@@ -1545,3 +1545,79 @@ class TestRenamePersona:
         assert self._rename(client, new="alex").status_code == 200
         assert (personas_root / "Luna" / "memories.txt").read_text() == "[alex] alex sails.\n"
         assert client.get("/api/personas/alex/detail").json()["name"] == "alex"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/personas/{name}/condense
+# ---------------------------------------------------------------------------
+
+class TestCondenseMemories:
+    """Two steps: propose, then apply what was proposed.
+
+    Every other memory route only ever adds a line or drops an exact
+    duplicate. This one rewrites sentences the persona will act on, and
+    there is no undo — so a preview that writes nothing is half the
+    feature, not a nicety.
+    """
+
+    def _remember(self, personas_root, *lines):
+        (personas_root / "Alex" / "memories.txt").write_text("\n".join(lines) + "\n")
+
+    def _stub(self, monkeypatch, answer):
+        async def fake(messages, **kwargs):
+            return answer
+        monkeypatch.setattr(condense, "chat_completion", fake)
+
+    def test_a_preview_writes_nothing(self, client, personas_root, monkeypatch):
+        self._remember(personas_root, "[Brad] Brad is 43.", "[Brad] Brad is a banker.")
+        self._stub(monkeypatch, "[Brad] Brad is a 43 year old banker.")
+
+        body = client.post("/api/personas/Alex/condense", json={"apply": False}).json()
+
+        assert body["after"] == ["[Brad] Brad is a 43 year old banker."]
+        assert body["applied"] is False
+        assert body["saved_bytes"] > 0
+        assert (personas_root / "Alex" / "memories.txt").read_text() == (
+            "[Brad] Brad is 43.\n[Brad] Brad is a banker.\n"
+        )
+
+    def test_applying_writes_the_lines_it_was_given(
+        self, client, personas_root, monkeypatch,
+    ):
+        # Verbatim, not regenerated: what is saved is what was shown.
+        self._remember(personas_root, "[Brad] Brad is 43.", "[Brad] Brad is a banker.")
+
+        resp = client.post("/api/personas/Alex/condense", json={
+            "apply": True, "memories": ["[Brad] Brad is a 43 year old banker."],
+        })
+
+        assert resp.status_code == 200
+        assert resp.json()["applied"] is True
+        assert (personas_root / "Alex" / "memories.txt").read_text() == (
+            "[Brad] Brad is a 43 year old banker.\n"
+        )
+
+    def test_applying_nothing_is_refused(self, client, personas_root):
+        # Would otherwise empty the file, which is what "Clear saved
+        # memories" is for and not what this button says.
+        resp = client.post("/api/personas/Alex/condense", json={"apply": True})
+
+        assert resp.status_code == 422
+        assert "Preview" in resp.json()["detail"]
+
+    def test_exact_duplicates_are_reported_separately(
+        self, client, personas_root, monkeypatch,
+    ):
+        # That part needs no model and is never in doubt, so it is counted
+        # apart from whatever the rewrite claims.
+        self._remember(personas_root, "[Brad] Brad is 43.", "[Brad] Brad is 43.")
+        self._stub(monkeypatch, "[Brad] Brad is 43.")
+
+        body = client.post("/api/personas/Alex/condense", json={"apply": False}).json()
+
+        assert body["duplicates_removed"] == 1
+
+    def test_an_unknown_persona_is_a_404(self, client, personas_root):
+        assert client.post(
+            "/api/personas/Nobody/condense", json={"apply": False},
+        ).status_code == 404

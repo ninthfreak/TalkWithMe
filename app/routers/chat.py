@@ -501,6 +501,11 @@ def _who_is_here_block(persona, present: list[str], settings) -> str:
         # The budget is enforced on the read path too: the file may have
         # been edited by hand (the README encourages it), so an over-limit
         # file is purged oldest-first rather than handed over verbatim.
+        # Both cheap and both no-ops on a healthy file: they only write
+        # when there is something to fix. The file may have been edited by
+        # hand (the README encourages it) or predate the write-path
+        # checks, so neither can be assumed done.
+        persona_store.dedupe_memories(persona.persona_dir)
         persona_store.purge_memories_to_limit(persona.persona_dir, persona.memory_size)
         grouped = persona_store.memories_by_subject(persona.persona_dir)
     else:

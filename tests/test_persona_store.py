@@ -759,6 +759,76 @@ class TestAssumedMemories:
         assert [m.assumed for m in grouped["tony"]] == [False, True]
 
 
+class TestDedupeMemories:
+    """Byte-identical lines only, so it can never delete a real memory.
+
+    Anything cleverer starts judging whether two sentences mean the same
+    thing, and the failure mode there is losing something the persona
+    knew. This function can only remove a line the file already contains
+    character for character.
+    """
+
+    def _write(self, tmp_path, *lines):
+        (tmp_path / "memories.txt").write_text("\n".join(lines) + "\n")
+
+    def _read(self, tmp_path):
+        return (tmp_path / "memories.txt").read_text().splitlines()
+
+    def test_identical_lines_collapse_to_one(self, tmp_path):
+        self._write(tmp_path, "[Brad] Brad is 43.", "[Brad] Brad is a banker.",
+                    "[Brad] Brad is 43.")
+
+        assert persona_store.dedupe_memories(tmp_path) == 2 - 1
+        assert self._read(tmp_path) == ["[Brad] Brad is 43.", "[Brad] Brad is a banker."]
+
+    def test_the_first_copy_is_the_one_kept(self, tmp_path):
+        # Order is meaningful: the budget sheds from the oldest end, so a
+        # memory must not quietly become younger by being repeated.
+        self._write(tmp_path, "[Brad] aaa", "[Brad] bbb", "[Brad] aaa")
+
+        persona_store.dedupe_memories(tmp_path)
+
+        assert self._read(tmp_path) == ["[Brad] aaa", "[Brad] bbb"]
+
+    def test_different_case_is_not_a_duplicate(self, tmp_path):
+        # 100% identical, as asked. The write path's own dedup is
+        # case-insensitive; this one is stricter on purpose.
+        self._write(tmp_path, "[Brad] Brad is 43.", "[Brad] brad is 43.")
+
+        assert persona_store.dedupe_memories(tmp_path) == 0
+        assert len(self._read(tmp_path)) == 2
+
+    def test_a_guess_is_not_a_duplicate_of_the_fact(self, tmp_path):
+        # Same sentence, different claim: one is what they said, the other
+        # what the persona decided.
+        self._write(tmp_path, "[Brad] Brad is 43.", "[Brad] (assumed) Brad is 43.")
+
+        assert persona_store.dedupe_memories(tmp_path) == 0
+
+    def test_similar_lines_are_left_completely_alone(self, tmp_path):
+        # The whole reason this is exact-match: these two overlap heavily
+        # and are different facts.
+        self._write(tmp_path, "[Brad] Brad likes tea.", "[Brad] Brad likes coffee.")
+
+        assert persona_store.dedupe_memories(tmp_path) == 0
+        assert len(self._read(tmp_path)) == 2
+
+    def test_different_people_keep_their_own_copies(self, tmp_path):
+        self._write(tmp_path, "[Brad] They sail.", "[Cora] They sail.")
+
+        assert persona_store.dedupe_memories(tmp_path) == 0
+
+    def test_a_clean_file_is_not_rewritten(self, tmp_path):
+        self._write(tmp_path, "[Brad] Brad is 43.")
+        before = (tmp_path / "memories.txt").stat().st_mtime_ns
+
+        assert persona_store.dedupe_memories(tmp_path) == 0
+        assert (tmp_path / "memories.txt").stat().st_mtime_ns == before
+
+    def test_no_file_is_not_an_error(self, tmp_path):
+        assert persona_store.dedupe_memories(tmp_path) == 0
+
+
 class TestAssumptionsFadeFirst:
     """Under pressure, what you guessed goes before what you were told.
 

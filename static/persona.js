@@ -208,6 +208,13 @@ pfAudioPlayBtn.addEventListener("click", playPersonaReferenceAudio);
 pfMemoriesClearBtn.addEventListener("click", () => {
     peMemoriesClearRequested = true;
 });
+pfCondenseBtn.addEventListener("click", openCondenseDialog);
+pfCondenseClose.addEventListener("click", closeCondenseDialog);
+pfCondenseCancel.addEventListener("click", closeCondenseDialog);
+pfCondenseApply.addEventListener("click", applyCondense);
+pfCondenseOverlay.addEventListener("click", (e) => {
+    if (e.target === pfCondenseOverlay) closeCondenseDialog();
+});
 pfRenameBtn.addEventListener("click", openRenameDialog);
 pfRenameForm.addEventListener("submit", submitRename);
 pfRenameClose.addEventListener("click", closeRenameDialog);
@@ -226,6 +233,124 @@ personaEditorOverlay.addEventListener("click", (e) => {
 peConfirmOverlay.addEventListener("click", (e) => {
     if (e.target === peConfirmOverlay) peConfirmOverlay.classList.add("hidden");
 });
+
+/* ==========================================================================
+   Persona Editor — condensing memories
+
+   Two steps, and deliberately so. Everything else in the memory system
+   only adds a note or drops an exact copy; this rewrites sentences the
+   persona will act on, and there is no undo. So the proposal is shown
+   first, and what gets saved is exactly the lines that were displayed —
+   not a second generation that might have come out differently.
+   ========================================================================== */
+
+/** The proposal currently on screen, or null. Saved verbatim on confirm. */
+let peCondensePlan = null;
+
+async function openCondenseDialog() {
+    if (!peEditingName) return;
+    peCondensePlan = null;
+    pfCondenseError.classList.add("hidden");
+    pfCondenseDiff.classList.add("hidden");
+    pfCondenseApply.disabled = true;
+    pfCondenseStatus.classList.remove("hidden");
+    pfCondenseStatus.textContent = "Reading the notes\u2026";
+    pfCondenseOverlay.classList.remove("hidden");
+
+    try {
+        const resp = await fetch(
+            `/api/personas/${encodeURIComponent(peEditingName)}/condense`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ apply: false }),
+            },
+        );
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showCondenseError(extractApiErrorMessage(err, resp.status));
+            return;
+        }
+        renderCondensePlan(await resp.json());
+    } catch (err) {
+        console.error("Condense error:", err);
+        showCondenseError("Request failed. Is the server running?");
+    }
+}
+
+function closeCondenseDialog() {
+    pfCondenseOverlay.classList.add("hidden");
+    peCondensePlan = null;
+}
+
+function showCondenseError(message) {
+    pfCondenseStatus.classList.add("hidden");
+    pfCondenseError.textContent = message;
+    pfCondenseError.classList.remove("hidden");
+}
+
+function renderCondensePlan(plan) {
+    const dupes = plan.duplicates_removed
+        ? `Dropped ${plan.duplicates_removed} exact duplicate` +
+          `${plan.duplicates_removed === 1 ? "" : "s"}. `
+        : "";
+
+    // Nothing proposed: say why, and leave the button disabled rather
+    // than offering to save what is already there.
+    if (!plan.after.length || plan.after.join("\n") === plan.before.join("\n")) {
+        pfCondenseStatus.textContent =
+            dupes + (plan.note || "Nothing to merge.");
+        pfCondenseStatus.classList.remove("hidden");
+        pfCondenseDiff.classList.add("hidden");
+        return;
+    }
+
+    peCondensePlan = plan.after;
+    const saved = plan.saved_bytes;
+    const lines = plan.before.length - plan.after.length;
+    pfCondenseStatus.textContent =
+        dupes +
+        `${plan.before.length} notes become ${plan.after.length}` +
+        `${lines > 0 ? ` (${lines} fewer)` : ""}, saving ${saved} bytes.`;
+    pfCondenseStatus.classList.remove("hidden");
+    pfCondenseBefore.textContent = plan.before.join("\n");
+    pfCondenseAfter.textContent = plan.after.join("\n");
+    pfCondenseDiff.classList.remove("hidden");
+    pfCondenseApply.disabled = false;
+}
+
+async function applyCondense() {
+    if (!peEditingName || !peCondensePlan) return;
+    pfCondenseApply.disabled = true;
+    try {
+        const resp = await fetch(
+            `/api/personas/${encodeURIComponent(peEditingName)}/condense`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                // The lines that were displayed, sent back verbatim.
+                body: JSON.stringify({ apply: true, memories: peCondensePlan }),
+            },
+        );
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showCondenseError(extractApiErrorMessage(err, resp.status));
+            pfCondenseApply.disabled = false;
+            return;
+        }
+        const body = await resp.json();
+        closeCondenseDialog();
+        showPersonaFormNotice(
+            `Condensed ${body.before.length} notes into ${body.after.length}, ` +
+            `saving ${body.saved_bytes} bytes.`
+        );
+    } catch (err) {
+        console.error("Condense apply error:", err);
+        showCondenseError("Request failed. Is the server running?");
+        pfCondenseApply.disabled = false;
+    }
+}
+
 
 /* ==========================================================================
    Persona Editor — renaming
@@ -395,9 +520,10 @@ function openPersonaEditor() {
 function closePersonaEditor() {
     stopPersonaPreviewAudio();
     stopPersonaAvatarPreview();
-    // The rename dialog stacks on top of the editor, so closing the
-    // editor from under it would strand it over the chat.
+    // These stack on top of the editor, so closing the editor from
+    // under one would strand it over the chat.
     closeRenameDialog();
+    closeCondenseDialog();
     personaEditorOverlay.classList.add("hidden");
 }
 
@@ -405,6 +531,7 @@ function showPersonaList() {
     stopPersonaPreviewAudio();
     stopPersonaAvatarPreview();
     closeRenameDialog();
+    closeCondenseDialog();
     peListView.classList.remove("hidden");
     peFormView.classList.add("hidden");
     renderPersonaEditorList();
@@ -538,6 +665,7 @@ async function openPersonaForm(name) {
     // "Clear saved memories" only makes sense when editing an existing
     // persona — a new one has nothing to clear.
     pfMemoriesClearBtn.classList.toggle("hidden", !name);
+    pfCondenseBtn.classList.toggle("hidden", !name);
 
     // The name is an identifier, not a label: it is a memory's subject
     // tag, an entry in other personas' met-lists, a room member, the

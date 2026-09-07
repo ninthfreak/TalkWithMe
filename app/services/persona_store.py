@@ -940,6 +940,71 @@ def append_memory(
     return "The memory was saved successfully."
 
 
+def write_memories(persona_dir: Path, lines: Iterable[str]) -> None:
+    """Replace the persona's memories with *lines*, atomically.
+
+    The public way in for a caller that has produced a whole new set —
+    the condense pass. Everything else appends or removes, and should
+    keep doing so: this one overwrites, so it belongs to a deliberate,
+    reviewed action rather than anything on the reply path.
+
+    Raises OSError on failure, unlike the append path: this is somebody
+    pressing a button, and a silent no-op would leave them believing the
+    file had changed.
+    """
+    kept = [line.strip() for line in lines if line and line.strip()]
+    _write_memories_file(persona_dir, kept)
+
+
+def dedupe_memories(persona_dir: Path) -> int:
+    """Collapse byte-identical memory lines to one. Returns how many went.
+
+    **Exact matches only**, deliberately. Anything cleverer — casefolding,
+    similarity, ignoring punctuation — starts making judgements about
+    whether two sentences mean the same thing, and the failure mode there
+    is deleting something the persona actually knew. "Tony likes tea" and
+    "Tony likes coffee" are close enough to worry a fuzzy matcher and are
+    not the same fact. This function can only ever remove a line that is
+    already present, character for character, so the worst it can do is
+    nothing.
+
+    The first copy survives, keeping its position: order is meaningful
+    here, since the budget sheds from the oldest end.
+
+    ``append_memory`` already refuses a duplicate on the way in, so a file
+    written only by this app should have none. Files get hand-edited (the
+    README encourages it), predate that check, or are merged from
+    elsewhere — which is why this exists and why it runs on the read path.
+
+    Never raises: a failed write leaves the duplicates in place, which is
+    the state it was called to improve, not a reason to fail a reply.
+    """
+    lines = _memory_lines(read_memories(persona_dir))
+    if len(lines) < 2:
+        return 0
+
+    seen = set()
+    kept = []
+    for line in lines:
+        if line in seen:
+            continue
+        seen.add(line)
+        kept.append(line)
+
+    removed = len(lines) - len(kept)
+    if not removed:
+        return 0
+    try:
+        _write_memories_file(persona_dir, kept)
+    except OSError as exc:
+        logger.warning("Persona %s: could not dedupe %s: %s",
+                       persona_dir.name, MEMORIES_FILENAME, exc)
+        return 0
+    logger.info("Persona %s: dropped %d duplicate memory line(s)",
+                persona_dir.name, removed)
+    return removed
+
+
 def purge_memories_to_limit(persona_dir: Path, memory_size: int) -> None:
     """Shrink (or delete) memories.txt to the given limit.
 

@@ -41,6 +41,8 @@ from app.config import (
     set_personas_cache,
 )
 from app.models import (
+    CondenseRequest,
+    CondenseResponse,
     PersonaDetailResponse,
     PersonaDraftRequest,
     PersonaDraftResponse,
@@ -54,7 +56,7 @@ from app.models import (
     PersonaResponse,
 )
 from app import persistence
-from app.services import persona_draft, persona_store
+from app.services import condense, persona_draft, persona_store
 from app.services.llm import PROSE_TIMEOUT, chat_completion
 from app.services.reply_guard import ReplyGuard, stop_sequences
 
@@ -634,6 +636,67 @@ def rename_persona(name: str, req: PersonaRenameRequest):
         own_prose_updated=own_prose_updated,
         directory_renamed=moved != persona_dir,
         warnings=warnings,
+    )
+
+
+@router.post("/{name}/condense", response_model=CondenseResponse)
+async def condense_memories(name: str, req: CondenseRequest):
+    """Rewrite a persona's memories as fewer lines saying the same thing.
+
+    Two steps on purpose. Without *apply* it proposes and writes nothing;
+    with it, the lines in the request are written verbatim. Everything
+    else in the memory system only adds a line or drops an exact
+    duplicate — this rewrites sentences the persona will act on, so it
+    does not happen without somebody having read the result.
+    """
+    config = get_personas()
+    persona = next((p for p in config.personas if p.name == name), None)
+    if not persona:
+        raise HTTPException(status_code=404, detail=f"Persona '{name}' not found")
+    if persona.persona_dir is None or not persona.persona_dir.is_dir():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Persona '{name}' has no directory on disk",
+        )
+
+    if req.apply:
+        if not req.memories:
+            raise HTTPException(
+                status_code=422,
+                detail="Nothing to apply. Preview the condense first.",
+            )
+        before = [
+            line for line in
+            persona_store.read_memories(persona.persona_dir).splitlines()
+            if line.strip()
+        ]
+        try:
+            condense.apply(persona, req.memories)
+        except OSError as exc:
+            logger.error("Failed to condense persona '%s': %s", name, exc)
+            raise HTTPException(
+                status_code=500, detail=f"Could not write the memories: {exc}",
+            ) from exc
+        after = [line.strip() for line in req.memories if line.strip()]
+        return CondenseResponse(
+            persona=name, before=before, after=after,
+            before_bytes=condense._bytes(before),
+            after_bytes=condense._bytes(after),
+            saved_bytes=max(0, condense._bytes(before) - condense._bytes(after)),
+            applied=True,
+        )
+
+    plan = await condense.plan(persona)
+    return CondenseResponse(
+        persona=name,
+        before=plan.before,
+        after=plan.after,
+        before_bytes=plan.before_bytes,
+        after_bytes=plan.after_bytes,
+        saved_bytes=plan.saved_bytes,
+        duplicates_removed=plan.duplicates_removed,
+        applied=False,
+        note=plan.note,
     )
 
 

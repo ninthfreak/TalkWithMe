@@ -1819,3 +1819,46 @@ html, body {
     white-space: pre-wrap;
     color: var(--text-secondary);
 }
+
+
+/* Condense: the notes as they are, beside what they would become. Two
+   columns because the point is the comparison — a single "after" list
+   asks the reader to remember what it replaced. */
+.pf-condense-diff {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.pf-condense-diff.hidden {
+    display: none;
+}
+
+.pf-condense-side h3 {
+    margin: 0 0 6px;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+}
+
+.pf-condense-side pre {
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 46vh;
+    overflow-y: auto;
+}
+
+/* One column on a narrow window: two columns of wrapped sentences at
+   half width is harder to compare than one above the other. */
+@media (max-width: 720px) {
+    .pf-condense-diff { grid-template-columns: 1fr; }
+}
+
