@@ -145,7 +145,7 @@
                             <input id="pf-allow-tool-calls" type="checkbox">
                             <span>Allow tool calls</span>
                         </label>
-                        <span class="field-hint">This persona may invoke tools from MCP servers configured in settings.yaml</span>
+                        <span class="field-hint">This persona may invoke tools from MCP servers configured in settings.yaml. Not needed for memories &mdash; those are written by looking back at the conversation, whether or not this is ticked.</span>
                     </div>
                     <div class="form-row">
                         <label for="pf-length-bias">Reply Length vs. the Room</label>
@@ -161,7 +161,7 @@
                     <div class="form-row">
                         <label for="pf-memory-size">Memory Size (bytes)</label>
                         <input id="pf-memory-size" type="number" min="0" max="16384" step="1" value="8192">
-                        <span class="field-hint">Max size of this persona's saved memories, in bytes. 0 disables memory saving for this persona.</span>
+                        <span class="field-hint">Max size of this persona's saved memories, in bytes. 0 disables memory saving for this persona &mdash; this is the switch, not &ldquo;Allow tool calls&rdquo;.</span>
                     </div>
                     <div class="form-row">
                         <button type="button" id="pf-memories-clear" class="btn-secondary hidden">Clear saved memories</button>
@@ -693,6 +693,13 @@
                                 <span>Enable persona memories</span>
                             </label>
                             <span class="field-hint">Personas may save memories and see previously saved ones. Disabling pauses the feature globally without deleting any memories.</span>
+                        </div>
+                        <div class="form-row">
+                            <label class="settings-checkbox-label">
+                                <input id="gsf-reflect-after-conversation" type="checkbox">
+                                <span>Look back at a finished conversation</span>
+                            </label>
+                            <span class="field-hint">When you start a new chat or change rooms, each persona who spoke is asked once what it learned about the others, and files it. This is how memories get written &mdash; it costs one extra reply's worth of generation per speaker, at a moment you are not waiting on one.</span>
                         </div>
                         <div class="form-row">
                             <label for="gsf-max-turns-for-context">Exchanges of Context <span class="field-hint">(1–50)</span></label>

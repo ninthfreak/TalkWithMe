@@ -828,6 +828,18 @@ def append_memory(
         )
 
     lines = _memory_lines(read_memories(persona_dir))
+
+    # Enforced, not merely asked for. "Do not add a memory that repeats one
+    # you have already saved" was a sentence in the tool description, which
+    # is a request rather than a rule — and the reflection pass re-reads the
+    # same conversation, so it re-derives the same facts by design. Without
+    # this, a persona's whole budget fills with one thing it knows.
+    #
+    # Compared on the stored form, so the subject counts: the same sentence
+    # about two different people is two memories.
+    if any(line.casefold() == cleaned.casefold() for line in lines):
+        return "The memory was already saved."
+
     lines.append(cleaned)
     # Purge oldest-first until the file is under the limit, but never drop
     # the memory just added (the newest line). A memory that alone exceeds

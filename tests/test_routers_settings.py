@@ -46,6 +46,7 @@ class TestGetSettings:
             "show_tool_calls": True,
             "typical_length": "detailed",
             "enable_persona_memories": True,
+            "reflect_after_conversation": True,
         }
 
 
@@ -107,6 +108,7 @@ class TestUpdateSettings:
             "show_tool_calls": False,         # updated
             "typical_length": "detailed",     # preserved
             "enable_persona_memories": False, # preserved
+            "reflect_after_conversation": True,
         }
 
     def test_missing_general_section_preserves_everything(self, client, monkeypatch):
@@ -133,7 +135,20 @@ class TestUpdateSettings:
             "show_tool_calls": False,
             "typical_length": "detailed",
             "enable_persona_memories": False,
+            "reflect_after_conversation": True,
         }
+
+    def test_reflect_after_conversation_round_trips(self, client):
+        # The extra cost of memory — a completion per speaker when a
+        # conversation ends — is separable from the feature itself, which
+        # is free to leave on.
+        resp = client.put("/api/settings", json=base_update(
+            general={"reflect_after_conversation": False}))
+
+        assert resp.status_code == 200
+        assert resp.json()["general"]["reflect_after_conversation"] is False
+        assert client.get("/api/settings").json()["general"][
+            "reflect_after_conversation"] is False
 
     def test_enable_persona_memories_round_trip(self, client):
         """The General settings dialog sends the whole general section:

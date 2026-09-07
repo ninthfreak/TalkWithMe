@@ -267,6 +267,18 @@ class GeneralConfig(BaseModel):
     # stops injecting saved memories into system prompts — without touching
     # any persona's memory_size or deleting any memories.txt.
     enable_persona_memories: bool = True
+    # Whether a finished conversation is reflected on: one extra LLM call
+    # per persona who spoke, asking what they learned about the people in
+    # it (app/services/reflection.py). This is how memories are written
+    # for a persona that cannot call tools, which is every persona by
+    # default — add_memory needs allow_tool_calls, and turning that on
+    # moves the persona off the transcript prompt format.
+    #
+    # Gated by enable_persona_memories above: that stays the one switch
+    # that turns the whole feature off. Separate from it because the cost
+    # is different in kind — injecting saved memories is free, and looking
+    # back over a conversation is a completion per speaker.
+    reflect_after_conversation: bool = True
     # Where persona subdirectories live. Absolute, or relative to the
     # project root; None/empty falls back to <project root>/Personas.
     # yaml-only for now (no UI) — like the mcp: section, changes need a

@@ -3,23 +3,32 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app import persistence
-from app.config import PlayerConfig, get_personas, get_player, save_player
+from app.config import (
+    PlayerConfig,
+    get_personas,
+    get_player,
+    get_settings,
+    save_player,
+    user_label,
+)
 from app.models import (
     ContextInventory,
+    PersonaReflection,
     PersistedHistoryResponse,
     PersistedMessage,
     PersonaMemoryContext,
     RoomContext,
     SessionPersonasRequest,
+    ReflectionResult,
     SessionState,
     WipeRequest,
     WipeResult,
 )
 from app.persistence import load_history_with_metadata
-from app.services import persona_store
+from app.services import persona_store, reflection
 from app.session import session
 
 logger = logging.getLogger(__name__)
@@ -36,11 +45,92 @@ def get_session():
     )
 
 
+# ---------------------------------------------------------------------------
+# Looking back on a finished conversation (app/services/reflection.py)
+# ---------------------------------------------------------------------------
+#
+# A conversation has no "end" event — you stop typing — so the app takes
+# the two moments where you visibly leave one: starting a new chat, and
+# switching to another room. Both clear the history, so the snapshot has
+# to be taken BEFORE they do.
+#
+# It runs in the background because it is a completion per persona who
+# spoke, against a backend that serves one request at a time: awaited, a
+# room of four would make "New Chat" sit there. Backgrounded, it queues
+# behind nothing the user is waiting on — they have just started a fresh
+# conversation and are typing the first line of it.
+
+
+def _conversation_snapshot():
+    """The live conversation, detached from the session that holds it.
+
+    A copy, deliberately: the caller is about to clear the history, and a
+    background task reading the session's own list would find it empty by
+    the time it ran.
+    """
+    return list(session.history), session.current_room, user_label()
+
+
+async def _reflect(history, room: str, label: str) -> list:
+    """Run the pass, swallowing anything it throws.
+
+    This is triggered by starting a new chat and by changing rooms. Losing
+    the memories of one conversation is a disappointment; taking out the
+    action that triggered it is a bug.
+    """
+    try:
+        return await reflection.reflect_on_conversation(
+            history, get_personas().personas, get_settings(), label, room=room,
+        )
+    except Exception:  # noqa: BLE001 — see the docstring
+        logger.exception("Reflection on room '%s' failed", room)
+        return []
+
+
+def _schedule_reflection(background: BackgroundTasks) -> None:
+    """Queue a look back at the conversation that is about to be cleared."""
+    settings = get_settings()
+    if not (settings.general.enable_persona_memories
+            and settings.general.reflect_after_conversation):
+        return
+    history, room, label = _conversation_snapshot()
+    if not history:
+        return
+    background.add_task(_reflect, history, room, label)
+
+
 @router.post("/new")
-def new_session():
+def new_session(background: BackgroundTasks):
     """Clear history and reset the session. Returns the fresh state."""
+    _schedule_reflection(background)
     session.reset()
     return {"status": "cleared"}
+
+
+@router.post("/reflect", response_model=ReflectionResult)
+async def reflect_now():
+    """Look back at the current conversation now, and say what was learned.
+
+    Awaited rather than backgrounded, unlike the automatic passes: this
+    one is asked for, so its answer is the point. The history is left
+    alone — reflecting is not the same as ending the conversation, and you
+    may well want to carry on afterwards.
+    """
+    settings = get_settings()
+    if not settings.general.enable_persona_memories:
+        raise HTTPException(
+            status_code=409,
+            detail="Persona memories are switched off in settings.",
+        )
+    history, room, label = _conversation_snapshot()
+    results = await _reflect(history, room, label)
+    return ReflectionResult(
+        room=room,
+        personas=[
+            PersonaReflection(persona=r.persona, saved=r.saved, skipped=len(r.skipped))
+            for r in results
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -176,12 +266,19 @@ def update_active_personas(req: SessionPersonasRequest):
 
 
 @router.get("/load-room/{room_name}")
-def load_room(room_name: str):
+def load_room(room_name: str, background: BackgroundTasks):
     """Load persisted chat history for a room into the active session.
 
     Used when switching chat rooms. Clears any existing in-memory history
     and populates from the room's persisted data.
+
+    Leaving a room ends the conversation you were having in it, so the
+    outgoing one is reflected on first — snapshotted before load_room()
+    replaces the history. Re-loading the room you are already in is a
+    refresh, not a departure, and reflects on nothing.
     """
+    if room_name != session.current_room:
+        _schedule_reflection(background)
     session.load_room(room_name)
     metadata = load_history_with_metadata(room_name)
     return PersistedHistoryResponse(

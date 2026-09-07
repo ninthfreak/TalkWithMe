@@ -50,6 +50,7 @@ def _to_response(cfg: AppSettings) -> SettingsResponse:
             show_tool_calls=cfg.general.show_tool_calls,
             typical_length=cfg.general.typical_length,
             enable_persona_memories=cfg.general.enable_persona_memories,
+            reflect_after_conversation=cfg.general.reflect_after_conversation,
         ),
     )
 

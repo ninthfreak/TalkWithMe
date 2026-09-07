@@ -836,6 +836,21 @@ lands in one of three states:
 | Met, nothing saved | *"Tony: you have met before, but nothing in particular comes to mind."* |
 | Something saved | *"Tony: Tony has never been on a boat and does not intend to start."* |
 
+**How the third row gets written.** When a conversation ends — you start a new
+chat, or change rooms — each persona who spoke is asked once, in a plain
+completion, what it learned about the others, and files the answer. That happens
+whether or not *Allow tool calls* is ticked, which matters because it is off by
+default and its own label says it is about MCP servers. There is also a manual
+`POST /api/session/reflect` if you want to force it, and a switch in **Settings →
+Look back at a finished conversation** if you would rather not spend the
+generation.
+
+It used to be that a persona could only save a memory by invoking the `add_memory`
+tool mid-reply. That still works, and is still there for tool-capable personas —
+but as the only route it meant memory was off for everybody by default, and
+turning it on moved that persona from the transcript prompt format to the instruct
+one, trading conversation quality for it. Asking after the fact costs neither.
+
 **The first row is the one that needed building.** Every model's default is warm
 familiarity — "good to see you again", "how have you been?" — and nothing used to
 contradict it, so first meetings read like reunions. An empty memory file could not fix

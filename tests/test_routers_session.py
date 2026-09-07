@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 import app.config as app_config
+import app.routers.session as session_router
 from app.config import ChatRoomsConfig, PlayerConfig
 from app.models import ChatMessage
 from app.persistence import persist_message
@@ -290,3 +291,178 @@ class TestWipeContext:
         # "Later" is an empty directory, so it is not context; TNG has
         # just been emptied, so it is not either.
         assert body["remaining"]["rooms"] == []
+
+
+# ---------------------------------------------------------------------------
+# Looking back on a finished conversation
+# ---------------------------------------------------------------------------
+
+class TestReflection:
+    """A conversation has no "end" event, so the app takes the two moments
+    where you visibly leave one: New Chat, and changing rooms.
+
+    Both clear the history, so the snapshot has to be taken before they
+    do — that ordering is the whole risk in this feature, and most of what
+    these tests check.
+    """
+
+    @staticmethod
+    def _capture(monkeypatch):
+        """Record what reflection was asked to look at, without an LLM."""
+        seen = []
+
+        async def fake(history, personas, settings, user_label, room=None):
+            seen.append({
+                "messages": [m.content for m in history],
+                "room": room,
+                "user_label": user_label,
+            })
+            return []
+
+        monkeypatch.setattr(
+            session_router.reflection, "reflect_on_conversation", fake,
+        )
+        return seen
+
+    def test_new_chat_reflects_on_what_it_is_about_to_clear(
+        self, client, personas_root, monkeypatch,
+    ):
+        seen = self._capture(monkeypatch)
+        _add_exchange("TNG", "I have never been on a boat.", "Not once?")
+
+        assert client.post("/api/session/new").status_code == 200
+
+        assert seen[0]["messages"] == ["I have never been on a boat.", "Not once?"]
+        assert seen[0]["room"] == "TNG"
+
+    def test_new_chat_on_an_empty_room_reflects_on_nothing(
+        self, client, personas_root, monkeypatch,
+    ):
+        # No conversation, no completion spent.
+        seen = self._capture(monkeypatch)
+        client.post("/api/session/new")
+        assert seen == []
+
+    def test_changing_rooms_reflects_on_the_one_you_are_leaving(
+        self, client, personas_root, monkeypatch,
+    ):
+        seen = self._capture(monkeypatch)
+        _add_exchange("TNG", "Evening.", "Evening.")
+
+        assert client.get("/api/session/load-room/Wardroom").status_code == 200
+
+        assert seen[0]["room"] == "TNG"          # the room being left
+        assert seen[0]["messages"] == ["Evening.", "Evening."]
+
+    def test_reloading_the_same_room_is_a_refresh_not_a_departure(
+        self, client, personas_root, monkeypatch,
+    ):
+        seen = self._capture(monkeypatch)
+        _add_exchange("TNG", "Evening.", "Evening.")
+
+        client.get("/api/session/load-room/TNG")
+
+        assert seen == []
+
+    def test_the_human_is_reported_as_whoever_they_are_playing(
+        self, client, personas_root, monkeypatch,
+    ):
+        seen = self._capture(monkeypatch)
+        monkeypatch.setattr(app_config, "_player_cache", PlayerConfig(persona_name="Luna"))
+        _add_exchange("TNG", "Evening.", "Evening.")
+
+        client.post("/api/session/new")
+
+        assert seen[0]["user_label"] == "Luna"
+
+    def test_the_setting_turns_the_automatic_pass_off(
+        self, client, personas_root, monkeypatch,
+    ):
+        from app.config import GeneralConfig
+        from tests.factories import make_settings
+
+        seen = self._capture(monkeypatch)
+        monkeypatch.setattr(app_config, "_settings_cache", make_settings(
+            general=GeneralConfig(reflect_after_conversation=False)))
+        _add_exchange("TNG", "Evening.", "Evening.")
+
+        client.post("/api/session/new")
+
+        assert seen == []
+
+    def test_the_global_memory_switch_turns_it_off_too(
+        self, client, personas_root, monkeypatch,
+    ):
+        from app.config import GeneralConfig
+        from tests.factories import make_settings
+
+        seen = self._capture(monkeypatch)
+        monkeypatch.setattr(app_config, "_settings_cache", make_settings(
+            general=GeneralConfig(enable_persona_memories=False)))
+        _add_exchange("TNG", "Evening.", "Evening.")
+
+        client.post("/api/session/new")
+
+        assert seen == []
+
+    def test_a_failing_reflection_does_not_break_new_chat(
+        self, client, personas_root, monkeypatch,
+    ):
+        # It runs after the response is sent, but a background task that
+        # raises still has to be contained — and the history must be
+        # cleared regardless.
+        async def boom(*a, **k):
+            raise RuntimeError("backend down")
+        monkeypatch.setattr(
+            session_router.reflection, "reflect_on_conversation", boom)
+        _add_exchange("TNG", "Evening.", "Evening.")
+
+        assert client.post("/api/session/new").status_code == 200
+        assert client.get("/api/session").json()["history"] == []
+
+    # -- the explicit endpoint ------------------------------------------------
+
+    def test_reflect_now_reports_what_was_learned(
+        self, client, personas_root, monkeypatch,
+    ):
+        from app.services.reflection import Reflection
+
+        async def fake(history, personas, settings, user_label, room=None):
+            return [Reflection(persona="Alex", saved=["[Tony] Tony sails."],
+                               skipped=["[Ghost] not here"])]
+        monkeypatch.setattr(
+            session_router.reflection, "reflect_on_conversation", fake)
+        _add_exchange("TNG", "I sail.", "Do you?")
+
+        body = client.post("/api/session/reflect").json()
+
+        assert body["room"] == "TNG"
+        assert body["personas"] == [
+            {"persona": "Alex", "saved": ["[Tony] Tony sails."], "skipped": 1}
+        ]
+
+    def test_reflect_now_leaves_the_conversation_alone(
+        self, client, personas_root, monkeypatch,
+    ):
+        # Reflecting is not the same as ending the conversation — you may
+        # well want to carry on afterwards.
+        self._capture(monkeypatch)
+        _add_exchange("TNG", "I sail.", "Do you?")
+
+        client.post("/api/session/reflect")
+
+        assert len(client.get("/api/session").json()["history"]) == 2
+
+    def test_reflect_now_is_refused_when_memories_are_off(
+        self, client, personas_root, monkeypatch,
+    ):
+        from app.config import GeneralConfig
+        from tests.factories import make_settings
+
+        monkeypatch.setattr(app_config, "_settings_cache", make_settings(
+            general=GeneralConfig(enable_persona_memories=False)))
+
+        resp = client.post("/api/session/reflect")
+
+        assert resp.status_code == 409
+        assert "switched off" in resp.json()["detail"]

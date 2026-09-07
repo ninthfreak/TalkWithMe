@@ -256,6 +256,25 @@ class PersonaResponse(BaseModel):
     tts_capable: bool = False
 
 
+class PersonaReflection(BaseModel):
+    """What one persona took away from one conversation."""
+
+    persona: str
+    saved: List[str] = Field(default_factory=list)
+    # How many lines the model produced that were not filed — named
+    # somebody who was not there, or the persona itself, or came back
+    # unparseable. A count rather than the lines: it answers "did it
+    # understand the question" without putting model chatter in the API.
+    skipped: int = 0
+
+
+class ReflectionResult(BaseModel):
+    """The answer to an explicit POST /api/session/reflect."""
+
+    room: str
+    personas: List[PersonaReflection] = Field(default_factory=list)
+
+
 class PersonaRenameRequest(BaseModel):
     """Rename a saved persona, everywhere it is referred to.
 
@@ -449,6 +468,7 @@ class GeneralSettingsRequest(BaseModel):
     show_tool_calls: Optional[bool] = None
     typical_length: Optional[TypicalLength] = None
     enable_persona_memories: Optional[bool] = None
+    reflect_after_conversation: Optional[bool] = None
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -494,6 +514,7 @@ class GeneralSettingsResponse(BaseModel):
     show_tool_calls: bool
     typical_length: TypicalLength
     enable_persona_memories: bool
+    reflect_after_conversation: bool
 
 
 class SettingsResponse(BaseModel):
