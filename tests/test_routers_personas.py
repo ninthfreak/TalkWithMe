@@ -1617,6 +1617,19 @@ class TestCondenseMemories:
 
         assert body["duplicates_removed"] == 1
 
+    def test_a_rewrite_that_loses_a_fact_is_reported_not_applied(
+        self, client, personas_root, monkeypatch,
+    ):
+        self._remember(personas_root, "[Brad] Brad is 43.", "[Brad] Brad is a banker.")
+        self._stub(monkeypatch, "[Brad] Brad is a middle-aged banker.")
+
+        body = client.post("/api/personas/Alex/condense", json={"apply": False}).json()
+
+        assert body["after"] == ["[Brad] Brad is 43.", "[Brad] Brad is a banker."]
+        assert body["protected"] == [
+            "Brad: kept as written — the rewrite would have lost 43"
+        ]
+
     def test_an_unknown_persona_is_a_404(self, client, personas_root):
         assert client.post(
             "/api/personas/Nobody/condense", json={"apply": False},

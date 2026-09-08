@@ -697,6 +697,7 @@ async def condense_memories(name: str, req: CondenseRequest):
         duplicates_removed=plan.duplicates_removed,
         applied=False,
         note=plan.note,
+        protected=plan.protected,
     )
 
 

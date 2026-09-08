@@ -295,6 +295,9 @@ class CondenseResponse(BaseModel):
     duplicates_removed: int = 0
     applied: bool = False
     note: str = ""
+    # People kept exactly as written because the rewrite would have lost a
+    # hard detail, each naming the detail.
+    protected: List[str] = Field(default_factory=list)
 
 
 class PersonaReflection(BaseModel):

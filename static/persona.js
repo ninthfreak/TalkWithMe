@@ -300,12 +300,18 @@ function renderCondensePlan(plan) {
         ? `Dropped ${plan.duplicates_removed} exact duplicate` +
           `${plan.duplicates_removed === 1 ? "" : "s"}. `
         : "";
+    // Anyone the rewrite would have shortchanged is kept as written, and
+    // that has to be said: a silent refusal looks like the pass not
+    // working on those lines.
+    const kept = (plan.protected || []).length
+        ? " " + plan.protected.join(" ")
+        : "";
 
     // Nothing proposed: say why, and leave the button disabled rather
     // than offering to save what is already there.
     if (!plan.after.length || plan.after.join("\n") === plan.before.join("\n")) {
         pfCondenseStatus.textContent =
-            dupes + (plan.note || "Nothing to merge.");
+            dupes + (plan.note || "Nothing to merge.") + kept;
         pfCondenseStatus.classList.remove("hidden");
         pfCondenseDiff.classList.add("hidden");
         return;
@@ -317,7 +323,7 @@ function renderCondensePlan(plan) {
     pfCondenseStatus.textContent =
         dupes +
         `${plan.before.length} notes become ${plan.after.length}` +
-        `${lines > 0 ? ` (${lines} fewer)` : ""}, saving ${saved} bytes.`;
+        `${lines > 0 ? ` (${lines} fewer)` : ""}, saving ${saved} bytes.` + kept;
     pfCondenseStatus.classList.remove("hidden");
     pfCondenseBefore.textContent = plan.before.join("\n");
     pfCondenseAfter.textContent = plan.after.join("\n");

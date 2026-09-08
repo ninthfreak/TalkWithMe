@@ -927,6 +927,15 @@ point:
   survives. That cull can only happen here, because this is the only place that
   sees somebody's guesses and facts side by side.
 
+  **A fact is never traded for a paraphrase of itself.** Every number, name,
+  date and place in what a persona was *told* about somebody has to survive the
+  rewrite about them — checked mechanically, not by trusting the model. If a
+  rewrite would turn "Brad is 43" into "Brad is middle-aged", Brad's notes are
+  kept exactly as written and the preview says so: *Brad: kept as written — the
+  rewrite would have lost 43.* This is per person, so a bad merge about Brad
+  does not block a good one about Cora. Guesses are the one exception: they are
+  the model's to tidy, and a guess that a fact has settled is meant to go.
+
   It shows you the result before writing anything, and saves exactly the lines it
   showed. Everything else in the memory system only adds a note or removes an
   exact copy; this rewrites sentences the persona will act on, and there is no
