@@ -893,6 +893,15 @@ default and its own label says it is about MCP servers. There is also a manual
 Look back at a finished conversation** if you would rather not spend the
 generation.
 
+**Everyone in the room is somebody to remember**, not just whoever spoke. This
+matters more than it sounds: only one persona answers each message by default, so
+building the cast from who talked usually meant one character plus you — and the
+only person anybody was allowed to write about was whoever you were playing.
+Everyone else sat there, heard it all, and was invisible to the question. The cast
+is the room's roster now. A per-pass cap of three is also shared out one person at
+a time, so a line about another persona survives even when you dominate the
+conversation, which you generally do.
+
 **The persona is shown what it already knows before it is asked.** This is the
 whole reason a memories file stops filling up with the same fact in slightly
 different words. The question used to be asked in ignorance every time: a persona

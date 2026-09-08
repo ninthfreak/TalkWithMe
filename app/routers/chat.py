@@ -27,6 +27,7 @@ from app.config import (
     get_player,
     get_settings,
     resolve_typical_length,
+    room_personas,
     user_label as _canonical_user_label,
 )
 from app.models import (
@@ -70,35 +71,13 @@ NO_USABLE_REPLY_MESSAGE = (
 # ---------------------------------------------------------------------------
 
 def _resolve_room_personas(chat_room: str, exclude_adopted: bool = True) -> list[str]:
-    """Return the list of persona names eligible for the given chat room.
+    """Thin alias for config.room_personas().
 
-    "default" room (or any room not found in config) includes all personas.
-    Named rooms are limited to their assigned persona_names.
-    This is the authoritative source of truth for persona eligibility —
-    no longer dependent on the frontend-maintained session.active_personas.
+    Kept as a name in this module because it is the authoritative source
+    of persona eligibility for the chat flow, and because the reflection
+    pass needs the same answer — so the logic itself lives in config.
     """
-    all_names = [p.name for p in get_personas().personas]
-    # The persona the player has adopted is the player, so it must not also
-    # answer as an AI — you would be talking to yourself.
-    if exclude_adopted:
-        played = get_player().adopted(set(all_names))
-        if played:
-            all_names = [n for n in all_names if n != played]
-
-    if chat_room.lower() == "default":
-        return all_names
-
-    chatrooms_config = get_chatrooms()
-    room = next(
-        (r for r in chatrooms_config.chat_rooms if r.name.lower() == chat_room.lower()),
-        None,
-    )
-    if room is not None:
-        # Only include personas that actually exist in the config (empty list means "no one is here")
-        return [n for n in room.persona_names if n in all_names]
-
-    # Unknown room — fall back to all personas rather than blocking the chat
-    return all_names
+    return room_personas(chat_room, exclude_adopted=exclude_adopted)
 
 
 def _find_room(chat_room: str) -> Optional[ChatRoom]:

@@ -11,6 +11,7 @@ from app.config import (
     get_personas,
     get_player,
     get_settings,
+    room_personas,
     save_player,
     user_label,
 )
@@ -80,7 +81,12 @@ async def _reflect(history, room: str, label: str) -> list:
     """
     try:
         return await reflection.reflect_on_conversation(
-            history, get_personas().personas, get_settings(), label, room=room,
+            history, get_personas().personas, get_settings(), label,
+            room=room,
+            # Who was in the room, not merely who spoke: a persona sitting
+            # there listening is still somebody the others form
+            # impressions of.
+            roster=room_personas(room),
         )
     except Exception:  # noqa: BLE001 — see the docstring
         logger.exception("Reflection on room '%s' failed", room)

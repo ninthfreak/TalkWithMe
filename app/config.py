@@ -834,6 +834,40 @@ def reload_all():
 DEFAULT_USER_LABEL = "User"
 
 
+def room_personas(chat_room: str, exclude_adopted: bool = True) -> List[str]:
+    """The personas eligible in a chat room, by name.
+
+    Lives here rather than in the chat router because it answers a
+    question about *configuration*, and more than the chat flow needs it:
+    the reflection pass has to know who was in the room, not merely who
+    happened to speak.
+
+    "default" (and any unknown room) means everybody. The adopted persona
+    is left out by default — they are the player, so they must not also
+    answer as an AI, and in a reflection cast they appear under the name
+    the transcript gives them rather than twice.
+    """
+    all_names = [p.name for p in get_personas().personas]
+    if exclude_adopted:
+        played = get_player().adopted(set(all_names))
+        if played:
+            all_names = [n for n in all_names if n != played]
+
+    if chat_room.lower() == "default":
+        return all_names
+
+    room = next(
+        (r for r in get_chatrooms().chat_rooms if r.name.lower() == chat_room.lower()),
+        None,
+    )
+    if room is not None:
+        # Only personas that actually exist; an empty list means "nobody is here".
+        return [n for n in room.persona_names if n in all_names]
+
+    # Unknown room — fall back to everybody rather than blocking the chat.
+    return all_names
+
+
 def adopted_persona() -> Optional[Persona]:
     """The persona the human is currently playing, or None.
 

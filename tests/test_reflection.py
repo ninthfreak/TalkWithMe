@@ -453,3 +453,143 @@ class TestReflectOnConversation:
         )
 
         assert [r.persona for r in results] == ["Alex"]
+
+
+# ---------------------------------------------------------------------------
+# Who a persona is allowed to remember
+# ---------------------------------------------------------------------------
+
+class TestTheCastIsTheRoom:
+    """Personas were recording memories only about the human's character.
+
+    The cast was built from who *spoke*, and since only one persona
+    answers each message by default, that was usually one character plus
+    the human — so the only person anybody could write about was whoever
+    the human was playing. Everyone else was in the room, heard it all,
+    and was invisible to the question.
+    """
+
+    @staticmethod
+    def _asked_about(captured):
+        import re
+        out = []
+        for messages, _ in captured:
+            m = re.search(r"Write only about these people: ([^.\n]+)",
+                          messages[-1]["content"])
+            out.append(m.group(1) if m else "")
+        return out
+
+    def _one_speaker(self):
+        return [
+            ChatMessage(role="user", content="Evening all."),
+            ChatMessage(role="assistant", content="Evening.", persona="Alex"),
+            ChatMessage(role="user", content="Marv looks miserable."),
+            ChatMessage(role="assistant", content="He always does.", persona="Alex"),
+        ]
+
+    def test_a_silent_persona_is_still_somebody_to_remember(
+        self, tmp_path, monkeypatch,
+    ):
+        captured = []
+        _stub_llm(monkeypatch, "nothing", capture=captured)
+
+        _reflect_all(
+            self._one_speaker(),
+            [_persona(tmp_path, "Alex"), _persona(tmp_path, "Marv"),
+             _persona(tmp_path, "Luna")],
+            make_settings(), "Kira", roster=["Alex", "Marv", "Luna"],
+        )
+
+        assert self._asked_about(captured) == ["Marv, Luna, Kira"]
+
+    def test_without_a_roster_it_falls_back_to_the_speakers(
+        self, tmp_path, monkeypatch,
+    ):
+        # What a caller with no room context can offer. The old behaviour,
+        # kept so the function is usable without config.
+        captured = []
+        _stub_llm(monkeypatch, "nothing", capture=captured)
+
+        _reflect_all(self._one_speaker(), [_persona(tmp_path, "Alex")],
+                     make_settings(), "Kira")
+
+        assert self._asked_about(captured) == ["Kira"]
+
+    def test_a_speaker_missing_from_the_roster_is_added(
+        self, tmp_path, monkeypatch,
+    ):
+        # Somebody who spoke is unarguably present, even if the room has
+        # been edited since.
+        captured = []
+        _stub_llm(monkeypatch, "nothing", capture=captured)
+
+        _reflect_all(
+            self._one_speaker(),
+            [_persona(tmp_path, "Alex"), _persona(tmp_path, "Marv")],
+            make_settings(), "Kira", roster=["Marv"],
+        )
+
+        assert self._asked_about(captured) == ["Marv, Kira"]
+
+    def test_the_persona_is_never_asked_about_itself(self, tmp_path, monkeypatch):
+        captured = []
+        _stub_llm(monkeypatch, "nothing", capture=captured)
+
+        _reflect_all(
+            self._one_speaker(), [_persona(tmp_path, "Alex")],
+            make_settings(), "Kira", roster=["Alex", "Marv"],
+        )
+
+        assert self._asked_about(captured) == ["Marv, Kira"]
+
+    def test_memories_about_another_persona_are_filed(self, tmp_path, monkeypatch):
+        # The end of the reported symptom: a line about Marv is saved.
+        alex = _persona(tmp_path, "Alex")
+        _stub_llm(monkeypatch, "[Marv] Marv is miserable at work.")
+
+        _reflect_all(self._one_speaker(), [alex], make_settings(), "Kira",
+                     roster=["Alex", "Marv"])
+
+        assert _memories(alex) == "[Marv] Marv is miserable at work.\n"
+
+
+class TestOnePersonCannotTakeEverySlot:
+    """The human drives the conversation, so a look back over it is mostly
+    about them — and a plain head-slice let them take the whole cap."""
+
+    def test_the_cap_is_shared_round_robin(self):
+        rows = [Memory("Kira", f"k{i}") for i in range(4)] + [Memory("Marv", "m1")]
+
+        taken = reflection._fair_share(rows, 3)
+
+        assert [(m.subject, m.text) for m in taken] == [
+            ("Kira", "k0"), ("Marv", "m1"), ("Kira", "k1"),
+        ]
+
+    def test_one_subject_still_fills_the_cap_alone(self):
+        rows = [Memory("Kira", f"k{i}") for i in range(5)]
+        assert len(reflection._fair_share(rows, 3)) == 3
+
+    def test_order_within_a_person_is_kept(self):
+        rows = [Memory("Kira", "first"), Memory("Kira", "second")]
+        assert [m.text for m in reflection._fair_share(rows, 2)] == ["first", "second"]
+
+    def test_fewer_than_the_cap_is_everything(self):
+        rows = [Memory("Kira", "k"), Memory("Marv", "m")]
+        assert len(reflection._fair_share(rows, 3)) == 2
+
+    def test_a_line_about_somebody_else_survives_the_cap(
+        self, tmp_path, monkeypatch,
+    ):
+        # End to end: four lines about the human and one about Marv, cap
+        # of three — Marv's line is kept.
+        alex = _persona(tmp_path, "Alex")
+        _stub_llm(monkeypatch, "\n".join([
+            "[Kira] Kira sails.", "[Kira] Kira is 43.",
+            "[Kira] Kira likes tea.", "[Kira] Kira hates boats.",
+            "[Marv] Marv is miserable.",
+        ]))
+
+        _reflect(alex, ["Kira", "Marv"], _history(), make_settings(), "Kira")
+
+        assert "[Marv] Marv is miserable." in _memories(alex)

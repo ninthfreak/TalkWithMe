@@ -311,7 +311,7 @@ class TestReflection:
         """Record what reflection was asked to look at, without an LLM."""
         seen = []
 
-        async def fake(history, personas, settings, user_label, room=None):
+        async def fake(history, personas, settings, user_label, room=None, roster=None):
             seen.append({
                 "messages": [m.content for m in history],
                 "room": room,
@@ -375,6 +375,25 @@ class TestReflection:
 
         assert seen[0]["user_label"] == "Luna"
 
+    def test_the_rooms_whole_roster_is_the_cast(
+        self, client, personas_root, monkeypatch,
+    ):
+        # Only Alex speaks, but Luna is in the room and is somebody the
+        # others form impressions of. Without the roster the cast
+        # collapses to Alex plus the human.
+        seen = []
+
+        async def fake(history, personas, settings, user_label, room=None, roster=None):
+            seen.append(roster)
+            return []
+        monkeypatch.setattr(
+            session_router.reflection, "reflect_on_conversation", fake)
+        _add_exchange("TNG", "Evening.", "Evening.")
+
+        client.post("/api/session/new")
+
+        assert sorted(seen[0]) == ["Alex", "Luna"]
+
     def test_the_setting_turns_the_automatic_pass_off(
         self, client, personas_root, monkeypatch,
     ):
@@ -427,7 +446,7 @@ class TestReflection:
     ):
         from app.services.reflection import Reflection
 
-        async def fake(history, personas, settings, user_label, room=None):
+        async def fake(history, personas, settings, user_label, room=None, roster=None):
             return [Reflection(persona="Alex", saved=["[Tony] Tony sails."],
                                skipped=["[Ghost] not here"])]
         monkeypatch.setattr(

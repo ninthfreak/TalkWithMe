@@ -230,6 +230,42 @@ def parse_reflection(
     return saved, skipped
 
 
+def _fair_share(
+    memories: Sequence[persona_store.Memory], cap: int,
+) -> List[persona_store.Memory]:
+    """The first *cap* memories, one person at a time.
+
+    A plain head-slice let whoever the model wrote about first take every
+    slot, and that is reliably the human: they drive the conversation, so
+    they are what a look back over it is mostly about. Round-robin by
+    subject means a line about somebody else survives the cap whenever
+    the model bothered to write one — which is the difference between
+    "personas remember the player" and "personas remember each other".
+
+    Order within a person is preserved, and so is the order the subjects
+    first appear, so the model's own priorities still decide what goes
+    first.
+    """
+    by_subject: Dict[str, List[persona_store.Memory]] = {}
+    order: List[str] = []
+    for memory in memories:
+        key = memory.subject.casefold()
+        if key not in by_subject:
+            by_subject[key] = []
+            order.append(key)
+        by_subject[key].append(memory)
+
+    taken: List[persona_store.Memory] = []
+    while len(taken) < cap and any(by_subject[k] for k in order):
+        for key in order:
+            if not by_subject[key]:
+                continue
+            taken.append(by_subject[key].pop(0))
+            if len(taken) >= cap:
+                break
+    return taken
+
+
 async def reflect(
     persona: Persona,
     present: Sequence[str],
@@ -278,7 +314,7 @@ async def reflect(
     memories, skipped = parse_reflection(answer, persona.name, others)
     result.skipped = skipped
 
-    for memory in memories[:MAX_MEMORIES_PER_REFLECTION]:
+    for memory in _fair_share(memories, MAX_MEMORIES_PER_REFLECTION):
         outcome = persona_store.append_memory(
             persona.persona_dir, memory.subject, memory.text,
             persona.memory_size, assumed=memory.assumed,
@@ -330,12 +366,22 @@ async def reflect_on_conversation(
     settings: AppSettings,
     user_label: str,
     room: Optional[str] = None,
+    roster: Optional[Sequence[str]] = None,
 ) -> List[Reflection]:
     """Run the pass for everybody who spoke. Never raises.
 
     Sequential rather than gathered: the backend serves one slot, so
     firing these in parallel would not finish sooner and would make the
     queue behind them unpredictable.
+
+    *roster* is who was in the room. It matters more than it looks: the
+    cast used to be built from who *spoke*, and since only one persona
+    answers each message by default, that was usually a single character
+    plus the human — so the only person anybody was allowed to write
+    about was whoever the human was playing. Everyone else was in the
+    room, heard everything, and was invisible to the question. Falls back
+    to the speakers when no roster is given, which is what a caller
+    without room context can offer.
     """
     if not settings.general.enable_persona_memories:
         return []
@@ -345,10 +391,14 @@ async def reflect_on_conversation(
     if not speakers:
         return []
 
-    # Everybody with a voice in the conversation, the human included under
-    # whatever name they were playing: a persona learns about the person
-    # it was talking to, not only about the other characters.
-    cast = speakers + [user_label]
+    # Everybody who was there, the human included under whatever name they
+    # were playing. Speakers are folded in as well: somebody who spoke is
+    # unarguably present, even if the roster has since changed.
+    present_names = list(roster) if roster else list(speakers)
+    for name in speakers:
+        if not any(n.casefold() == name.casefold() for n in present_names):
+            present_names.append(name)
+    cast = present_names + [user_label]
 
     results = []
     for name in speakers:
