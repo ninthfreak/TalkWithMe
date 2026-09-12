@@ -513,6 +513,37 @@ def forget_acquaintances(persona_dir: Path) -> bool:
     return False
 
 
+def forget_acquaintance(persona_dir: Path, name: str) -> bool:
+    """Drop one name from the met-list. True if it was there.
+
+    The counterpart to forgetting somebody's memories: the met-list is a
+    memory too, and the shortest one — it is what makes "we have met"
+    true. Deleting the notes about Alex and leaving Alex on the list
+    produces a persona who cannot say a thing about Alex and greets them
+    as an old friend, which is a stranger picture than either state.
+
+    Raises OSError on a failed write: this is somebody pressing a button.
+    """
+    wanted = name.strip()
+    if not wanted:
+        return False
+
+    known = read_acquaintances(persona_dir)
+    matches = {n for n in known if n.casefold() == wanted.casefold()}
+    if not matches:
+        return False
+
+    path = persona_dir / ACQUAINTANCES_FILENAME
+    remaining = known - matches
+    if remaining:
+        path.write_text("\n".join(sorted(remaining)) + "\n", encoding="utf-8")
+    else:
+        # An empty file and no file mean the same thing to every reader,
+        # and no file is the one the rest of the app already produces.
+        path.unlink(missing_ok=True)
+    return True
+
+
 def read_memories(persona_dir: Path) -> str:
     """Read the persona's memories file, or "" when absent/unreadable.
 
@@ -679,6 +710,75 @@ def memories_by_subject(persona_dir: Path) -> Dict[str, List[Memory]]:
         memory = parse_memory_line(line)
         grouped.setdefault(memory.subject.casefold(), []).append(memory)
     return grouped
+
+
+def forget_subject(persona_dir: Path, subject: str) -> int:
+    """Delete every memory line about *subject*. Returns how many went.
+
+    Matched on the ``[Subject]`` tag alone, whole and case-insensitively
+    — the same rule a rename uses, because it is the same question: which
+    lines are about this person.
+
+    A line about somebody else that happens to name them ("[Tony] Tony
+    met Alex at the bar") is left alone. It is not a memory of Alex, it
+    is a memory of Tony, and deleting it to be thorough would take a fact
+    about Tony with it. Callers show the count instead (see
+    count_name_mentions) so the choice is the user's rather than a
+    surprise.
+
+    Untagged legacy lines belong to nobody and can never match, so they
+    survive every forget — which is right, since they are shown to
+    everyone and pre-date memories being about anybody.
+
+    Raises OSError on a failed write: a forget that silently did nothing
+    is worse than one that fails loudly, because the user goes on to
+    trust it.
+    """
+    wanted = subject.strip()
+    if not wanted:
+        return 0
+
+    lines = _memory_lines(read_memories(persona_dir))
+    if not lines:
+        return 0
+
+    kept = [
+        line for line in lines
+        if parse_memory_line(line).subject.casefold() != wanted.casefold()
+    ]
+    removed = len(lines) - len(kept)
+    if not removed:
+        return 0
+
+    if kept:
+        _write_memories_file(persona_dir, kept)
+    else:
+        # Same reasoning as the met-list: the rest of the app treats a
+        # missing file as "no memories", so leave that state and not an
+        # empty file that only this path could produce.
+        remove_memories_file(persona_dir)
+    return removed
+
+
+def count_name_mentions(persona_dir: Path, name: str) -> int:
+    """Memory lines about somebody *else* that name *name* in their text.
+
+    Reported before a forget so the user knows what is staying. Matched
+    whole-word and case-sensitively, the same loose-but-honest rule as
+    replace_name_in_text — a persona called Will or May will be
+    over-counted, and an over-count here only shows a larger number on a
+    screen.
+    """
+    wanted = name.strip()
+    if not wanted:
+        return 0
+    pattern = re.compile(r"\b%s\b" % re.escape(wanted))
+    return sum(
+        1 for line in _memory_lines(read_memories(persona_dir))
+        for memory in [parse_memory_line(line)]
+        if memory.subject.casefold() != wanted.casefold()
+        and pattern.search(memory.text)
+    )
 
 
 # ---------------------------------------------------------------------------

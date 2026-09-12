@@ -1856,6 +1856,44 @@ html, body {
     overflow-y: auto;
 }
 
+/* Forget-someone list: one row per person, each a checkbox and what
+   would go with them. */
+.pf-forget-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 46vh;
+    overflow-y: auto;
+}
+
+.pf-forget-list.hidden {
+    display: none;
+}
+
+.pf-forget-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-input);
+    cursor: pointer;
+}
+
+.pf-forget-row input {
+    cursor: pointer;
+}
+
+.pf-forget-name {
+    font-weight: 600;
+}
+
+.pf-forget-detail {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
 /* One column on a narrow window: two columns of wrapped sentences at
    half width is harder to compare than one above the other. */
 @media (max-width: 720px) {

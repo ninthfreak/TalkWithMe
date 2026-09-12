@@ -43,7 +43,11 @@ from app.config import (
 from app.models import (
     CondenseRequest,
     CondenseResponse,
+    ForgetRequest,
+    ForgetResult,
+    MemorySubject,
     PersonaDetailResponse,
+    PersonaMemorySubjects,
     PersonaDraftRequest,
     PersonaDraftResponse,
     PersonaPreviewReply,
@@ -455,6 +459,15 @@ def update_persona(
         if clear_memories:
             # Explicit user action: propagate I/O failures as 500 (the
             # persona fields ARE saved; a silent no-op clear is worse).
+            #
+            # The met-list goes too. It is a memory — the shortest one,
+            # and the one that decides whether a persona greets somebody
+            # as a stranger. Clearing the notes and leaving it behind
+            # produced a persona who knew nothing about Alex and still
+            # treated them as an old acquaintance, which is neither the
+            # before state nor the after one. The context wipe has always
+            # taken both together; this path had not.
+            persona_store.forget_acquaintances(persona_dir)
             persona_store.remove_memories_file(persona_dir)
         else:
             # Best-effort: shrink an over-limit memories file to the new
@@ -636,6 +649,123 @@ def rename_persona(name: str, req: PersonaRenameRequest):
         own_prose_updated=own_prose_updated,
         directory_renamed=moved != persona_dir,
         warnings=warnings,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Forgetting one person
+# ---------------------------------------------------------------------------
+#
+# "Clear saved memories" is the only eraser the editor had, and it is the
+# wrong size for the common case: one character should not know another
+# any more, because a scene went badly, or was a test, or happened to
+# somebody who has since been rewritten. Clearing everything to fix one
+# relationship throws away every other one in the file.
+#
+# Memories are already filed by subject, so the smaller eraser is the
+# natural one — and it has to include the met-list, or forgetting Alex
+# leaves behind the one line that says they have met.
+
+
+def _memory_subjects(persona: Persona) -> PersonaMemorySubjects:
+    """Everybody this persona holds something about. Read from disk."""
+    persona_dir = persona.persona_dir
+    grouped = persona_store.memories_by_subject(persona_dir)
+    met = persona_store.read_acquaintances(persona_dir)
+
+    # Keyed by casefolded name so a met-list "alex" and a memory tagged
+    # "[Alex]" are one row, and shown under the spelling the memories
+    # use, since that is the one the model reads back.
+    display = {}
+    for name in sorted(met):
+        display.setdefault(name.casefold(), name)
+    for memories in grouped.values():
+        for memory in memories:
+            if memory.subject:
+                display[memory.subject.casefold()] = memory.subject
+
+    subjects = []
+    for key in sorted(display, key=lambda k: display[k].casefold()):
+        name = display[key]
+        memories = grouped.get(key, [])
+        subjects.append(
+            MemorySubject(
+                subject=name,
+                memories=len(memories),
+                assumed=sum(1 for m in memories if m.assumed),
+                met=any(n.casefold() == key for n in met),
+                mentions=persona_store.count_name_mentions(persona_dir, name),
+            )
+        )
+    return PersonaMemorySubjects(
+        persona=persona.name,
+        subjects=subjects,
+        untagged=len(grouped.get("", [])),
+    )
+
+
+def _require_persona_dir(name: str) -> Persona:
+    """The named persona, or the right HTTP error for why not."""
+    persona = next((p for p in get_personas().personas if p.name == name), None)
+    if not persona:
+        raise HTTPException(status_code=404, detail=f"Persona '{name}' not found")
+    if persona.persona_dir is None or not persona.persona_dir.is_dir():
+        raise HTTPException(
+            status_code=500, detail=f"Persona '{name}' has no directory on disk",
+        )
+    return persona
+
+
+@router.get("/{name}/memory-subjects", response_model=PersonaMemorySubjects)
+def list_memory_subjects(name: str):
+    """Who this persona remembers, with the size of each relationship."""
+    return _memory_subjects(_require_persona_dir(name))
+
+
+@router.post("/{name}/forget", response_model=ForgetResult)
+def forget_subjects(name: str, req: ForgetRequest):
+    """Remove this persona's memories of specific other people.
+
+    One-sided, deliberately: forgetting Alex changes what this persona
+    knows, not what Alex knows about them. Memory here has always been
+    per-persona, and a forget that reached into other files would be a
+    different, much larger operation than the one the button offers.
+    """
+    persona = _require_persona_dir(name)
+    persona_dir = persona.persona_dir
+
+    forgotten, met_removed, removed = [], [], 0
+    for subject in req.subjects:
+        wanted = subject.strip()
+        if not wanted:
+            continue
+        try:
+            gone = persona_store.forget_subject(persona_dir, wanted)
+            unmet = persona_store.forget_acquaintance(persona_dir, wanted)
+        except OSError as exc:
+            # Surfaced, not swallowed: see the context wipe. A forget the
+            # user believes happened is worse than one that failed.
+            logger.error("Failed to forget '%s' for persona '%s': %s", wanted, name, exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not remove {name}'s memories of {wanted}: {exc}",
+            ) from exc
+        if unmet:
+            met_removed.append(wanted)
+        if gone or unmet:
+            forgotten.append(wanted)
+        removed += gone
+
+    logger.info(
+        "Persona %s forgot %s: %d memory line(s), %d met-list entr(ies)",
+        name, ", ".join(forgotten) or "nobody", removed, len(met_removed),
+    )
+    return ForgetResult(
+        persona=name,
+        forgotten=forgotten,
+        memories_removed=removed,
+        met_removed=met_removed,
+        remaining=_memory_subjects(persona),
     )
 
 

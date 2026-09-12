@@ -18,7 +18,10 @@ from app.services.persona_store import (
     PersonaStorageError,
     append_memory,
     build_prompt_md,
+    count_name_mentions,
     find_avatar_file,
+    forget_acquaintance,
+    forget_subject,
     load_persona_from_dir,
     load_personas_yaml,
     migrate_from_legacy_yaml,
@@ -979,3 +982,125 @@ class TestLoadPersonaMemorySize:
             persona = load_persona_from_dir(d)
         assert persona.memory_size == DEFAULT_MEMORY_SIZE
         assert "invalid memory_size" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Forgetting one person
+# ---------------------------------------------------------------------------
+
+class TestForgetSubject:
+    """The small eraser: one relationship out, everything else untouched."""
+
+    def _remember(self, persona_dir, *lines):
+        (persona_dir / "memories.txt").write_text("\n".join(lines) + "\n")
+
+    def test_removes_only_that_subjects_lines(self, tmp_path):
+        d = _dir(tmp_path)
+        self._remember(
+            d,
+            "[Brad] Brad is a banker.",
+            "[Tony] Tony has two dogs.",
+            "[Brad] Brad hates boats.",
+        )
+        assert forget_subject(d, "Brad") == 2
+        assert read_memories(d).splitlines() == ["[Tony] Tony has two dogs."]
+
+    def test_subject_match_is_case_insensitive(self, tmp_path):
+        # Same rule a rename uses: the tag is structural, and a persona
+        # filed under "brad" by a hand-edit is still Brad.
+        d = _dir(tmp_path)
+        self._remember(d, "[brad] Brad is a banker.")
+        assert forget_subject(d, "Brad") == 1
+        assert read_memories(d) == ""
+
+    def test_a_mention_inside_someone_elses_memory_survives(self, tmp_path):
+        # It is a memory of Tony that happens to name Brad. Deleting it
+        # to be thorough would take a fact about Tony with it.
+        d = _dir(tmp_path)
+        self._remember(d, "[Tony] Tony met Brad at the bar.")
+        assert forget_subject(d, "Brad") == 0
+        assert "Brad" in read_memories(d)
+
+    def test_untagged_legacy_lines_are_never_matched(self, tmp_path):
+        d = _dir(tmp_path)
+        self._remember(d, "Likes tea.", "[Brad] Brad is a banker.")
+        assert forget_subject(d, "Brad") == 1
+        assert read_memories(d).splitlines() == ["Likes tea."]
+
+    def test_forgetting_the_last_subject_removes_the_file(self, tmp_path):
+        # No file and an empty file mean the same thing to every reader,
+        # and no file is the state the rest of the app produces.
+        d = _dir(tmp_path)
+        self._remember(d, "[Brad] Brad is a banker.")
+        assert forget_subject(d, "Brad") == 1
+        assert not (d / "memories.txt").exists()
+
+    def test_unknown_subject_changes_nothing(self, tmp_path):
+        d = _dir(tmp_path)
+        self._remember(d, "[Brad] Brad is a banker.")
+        assert forget_subject(d, "Nobody") == 0
+        assert read_memories(d).splitlines() == ["[Brad] Brad is a banker."]
+
+    def test_empty_subject_is_a_no_op(self, tmp_path):
+        d = _dir(tmp_path)
+        self._remember(d, "[Brad] Brad is a banker.")
+        assert forget_subject(d, "   ") == 0
+        assert read_memories(d).splitlines() == ["[Brad] Brad is a banker."]
+
+
+class TestForgetAcquaintance:
+    """The met-list is a memory too — the one that decides whether the
+    next meeting is a first meeting."""
+
+    def test_removes_one_name_and_keeps_the_rest(self, tmp_path):
+        d = _dir(tmp_path)
+        (d / "met.txt").write_text("Brad\nTony\n")
+        assert forget_acquaintance(d, "Brad") is True
+        assert persona_store.read_acquaintances(d) == {"Tony"}
+
+    def test_match_is_case_insensitive(self, tmp_path):
+        d = _dir(tmp_path)
+        (d / "met.txt").write_text("brad\n")
+        assert forget_acquaintance(d, "Brad") is True
+        assert persona_store.read_acquaintances(d) == set()
+
+    def test_forgetting_the_last_name_removes_the_file(self, tmp_path):
+        d = _dir(tmp_path)
+        (d / "met.txt").write_text("Brad\n")
+        assert forget_acquaintance(d, "Brad") is True
+        assert not (d / "met.txt").exists()
+
+    def test_unknown_name_reports_false(self, tmp_path):
+        d = _dir(tmp_path)
+        (d / "met.txt").write_text("Tony\n")
+        assert forget_acquaintance(d, "Brad") is False
+        assert persona_store.read_acquaintances(d) == {"Tony"}
+
+    def test_no_met_file_is_not_an_error(self, tmp_path):
+        assert forget_acquaintance(_dir(tmp_path), "Brad") is False
+
+
+class TestCountNameMentions:
+    """What a forget is about to leave behind, counted before it runs."""
+
+    def _remember(self, persona_dir, *lines):
+        (persona_dir / "memories.txt").write_text("\n".join(lines) + "\n")
+
+    def test_counts_lines_about_others_that_name_them(self, tmp_path):
+        d = _dir(tmp_path)
+        self._remember(
+            d,
+            "[Tony] Tony met Brad at the bar.",
+            "[Luna] Luna thinks Brad is funny.",
+            "[Brad] Brad is a banker.",
+        )
+        # The line filed under Brad is not a mention: it is going.
+        assert count_name_mentions(d, "Brad") == 2
+
+    def test_matches_whole_words_only(self, tmp_path):
+        d = _dir(tmp_path)
+        self._remember(d, "[Tony] Tony collects Bradbury first editions.")
+        assert count_name_mentions(d, "Brad") == 0
+
+    def test_no_memories_is_zero(self, tmp_path):
+        assert count_name_mentions(_dir(tmp_path), "Brad") == 0

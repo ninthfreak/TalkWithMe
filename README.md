@@ -987,6 +987,38 @@ point:
   or comes back longer than it started, it is discarded and the file is left
   alone.
 
+**Forgetting one person.** *Clear saved memories* is all or nothing, and the
+thing that usually needs undoing is one relationship — a scene that went badly, a
+test conversation, a character you have since rewritten. Clearing the whole file
+to fix that throws away every other relationship in it.
+
+**Forget someone…** in the persona editor lists everybody this persona holds
+anything about, with the size of each relationship, and removes exactly the ones
+you tick:
+
+```
+Alex no longer remembers Brad — 4 notes removed. They meet as strangers next time.
+```
+
+**The met-list goes with the notes.** Which other characters a persona has met is
+a memory too — the shortest one there is, and the one that decides whether the
+next meeting is a first meeting. Forgetting Brad's notes and leaving Brad on the
+met-list produced a persona who could not say a thing about him and still greeted
+him as an old friend, which is a stranger state than either end. *Clear saved
+memories* now deletes `met.txt` as well, which it should always have done.
+
+Three things stay, and the dialog says so rather than leaving you to notice:
+
+- **A mention inside somebody else's memory.** `[Tony] Tony met Brad at the bar`
+  is a memory of *Tony*. Deleting it to be thorough would take a fact about Tony
+  with it, so the count is shown and the line is left alone.
+- **Untagged notes.** Legacy lines belong to nobody in particular and are shown to
+  everyone, so no forget can match them.
+- **The other persona's memories.** A forget is one-sided: it changes what this
+  persona knows, not what Brad knows about them. Memory here has always been
+  per-persona, and reaching into other files would be a much larger operation than
+  a tickbox should perform.
+
 Deliberately *not* done: fuzzy matching on the way in. "Tony likes tea" and "Tony
 likes coffee" overlap heavily and are different facts, so a similarity threshold
 loose enough to catch a restatement is loose enough to eat one of those.

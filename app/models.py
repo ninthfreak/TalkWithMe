@@ -300,6 +300,51 @@ class CondenseResponse(BaseModel):
     protected: List[str] = Field(default_factory=list)
 
 
+class MemorySubject(BaseModel):
+    """One person a persona holds something about."""
+
+    subject: str
+    memories: int = 0
+    # How many of those the persona worked out rather than was told.
+    assumed: int = 0
+    # On the met-list. True with memories=0 is a real state: they have
+    # met and nothing stuck.
+    met: bool = False
+    # Lines about somebody else that name this person. Not removed by a
+    # forget — shown so that is a known fact rather than a surprise.
+    mentions: int = 0
+
+
+class PersonaMemorySubjects(BaseModel):
+    """Who one persona could be made to forget, and how much that is."""
+
+    persona: str
+    subjects: List[MemorySubject] = Field(default_factory=list)
+    # Legacy lines belonging to nobody in particular. They are shown to
+    # everyone and no forget can match them, so they are counted apart
+    # rather than silently missing from the totals.
+    untagged: int = 0
+
+
+class ForgetRequest(BaseModel):
+    """Remove one persona's memories of specific other people."""
+
+    subjects: List[str] = Field(..., min_length=1)
+
+
+class ForgetResult(BaseModel):
+    """What the forget actually removed, and what is left."""
+
+    persona: str
+    forgotten: List[str] = Field(default_factory=list)
+    memories_removed: int = 0
+    # Names taken off the met-list, so the persona meets them fresh.
+    met_removed: List[str] = Field(default_factory=list)
+    # Read back from disk afterwards, not predicted — the same round trip
+    # the context wipe does, for the same reason.
+    remaining: PersonaMemorySubjects
+
+
 class PersonaReflection(BaseModel):
     """What one persona took away from one conversation."""
 

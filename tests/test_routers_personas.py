@@ -467,6 +467,142 @@ class TestUpdatePersona:
         # The persona itself is still fine — only the memories went.
         assert resp.json()["name"] == "Alex"
 
+    def test_update_clear_memories_takes_the_met_list_too(self, client, personas_root):
+        # The met-list is a memory, and the shortest one: leaving it
+        # behind produced a persona who knew nothing about Luna and
+        # still greeted her as an old friend.
+        memories = personas_root / "Alex" / "memories.txt"
+        met = personas_root / "Alex" / "met.txt"
+        memories.write_text("[Luna] Luna likes tea\n")
+        met.write_text("Luna\n")
+
+        resp = client.put(
+            "/api/personas/Alex",
+            data=self._data(memory_size="8192", clear_memories="true"),
+        )
+
+        assert resp.status_code == 200
+        assert not memories.exists()
+        assert not met.exists()
+
+
+# ---------------------------------------------------------------------------
+# Forgetting one person
+# ---------------------------------------------------------------------------
+
+class TestForgetOnePerson:
+    """"Clear saved memories" is all or nothing, and the usual repair is
+    one relationship. These two routes are the smaller eraser: read who
+    is in there, then remove exactly those."""
+
+    def _remember(self, personas_root, *lines, persona="Alex"):
+        (personas_root / persona / "memories.txt").write_text("\n".join(lines) + "\n")
+
+    def test_subjects_list_counts_notes_met_and_mentions(self, client, personas_root):
+        self._remember(
+            personas_root,
+            "[Brad] Brad is a banker.",
+            "[Brad] (assumed) Brad is about forty.",
+            "[Tony] Tony met Brad at the bar.",
+        )
+        (personas_root / "Alex" / "met.txt").write_text("Brad\nLuna\n")
+
+        body = client.get("/api/personas/Alex/memory-subjects").json()
+
+        rows = {r["subject"]: r for r in body["subjects"]}
+        assert rows["Brad"] == {
+            "subject": "Brad", "memories": 2, "assumed": 1, "met": True, "mentions": 1,
+        }
+        # Met with nothing stored is a real state, not an empty row.
+        assert rows["Luna"]["memories"] == 0 and rows["Luna"]["met"] is True
+        assert rows["Tony"]["met"] is False
+
+    def test_untagged_lines_are_counted_apart(self, client, personas_root):
+        # They belong to nobody, are shown to everyone, and no forget can
+        # match them — so a file with content left over is explainable.
+        self._remember(personas_root, "Likes tea.", "[Brad] Brad is a banker.")
+        body = client.get("/api/personas/Alex/memory-subjects").json()
+        assert body["untagged"] == 1
+        assert [r["subject"] for r in body["subjects"]] == ["Brad"]
+
+    def test_forget_removes_notes_and_the_met_entry(self, client, personas_root):
+        self._remember(
+            personas_root,
+            "[Brad] Brad is a banker.",
+            "[Brad] Brad hates boats.",
+            "[Tony] Tony has two dogs.",
+        )
+        (personas_root / "Alex" / "met.txt").write_text("Brad\nTony\n")
+
+        body = client.post("/api/personas/Alex/forget", json={"subjects": ["Brad"]}).json()
+
+        assert body["memories_removed"] == 2
+        assert body["met_removed"] == ["Brad"]
+        assert body["forgotten"] == ["Brad"]
+        assert (personas_root / "Alex" / "memories.txt").read_text() == (
+            "[Tony] Tony has two dogs.\n"
+        )
+        assert persona_store.read_acquaintances(personas_root / "Alex") == {"Tony"}
+
+    def test_forget_reads_back_what_is_left(self, client, personas_root):
+        # The wipe's round trip: what remains comes off disk, not from a
+        # prediction about what the delete did.
+        self._remember(personas_root, "[Brad] Brad is a banker.", "[Tony] Tony has dogs.")
+        body = client.post("/api/personas/Alex/forget", json={"subjects": ["Brad"]}).json()
+        assert [r["subject"] for r in body["remaining"]["subjects"]] == ["Tony"]
+
+    def test_forget_is_one_sided(self, client, personas_root):
+        # Alex forgetting Luna says nothing about what Luna remembers.
+        self._remember(personas_root, "[Luna] Luna likes tea.")
+        self._remember(personas_root, "[Alex] Alex likes tea.", persona="Luna")
+
+        client.post("/api/personas/Alex/forget", json={"subjects": ["Luna"]})
+
+        assert (personas_root / "Luna" / "memories.txt").read_text() == (
+            "[Alex] Alex likes tea.\n"
+        )
+
+    def test_forget_several_people_at_once(self, client, personas_root):
+        self._remember(
+            personas_root,
+            "[Brad] Brad is a banker.",
+            "[Tony] Tony has two dogs.",
+            "[Luna] Luna likes tea.",
+        )
+        body = client.post(
+            "/api/personas/Alex/forget", json={"subjects": ["Brad", "Tony"]},
+        ).json()
+        assert body["memories_removed"] == 2
+        assert (personas_root / "Alex" / "memories.txt").read_text() == (
+            "[Luna] Luna likes tea.\n"
+        )
+
+    def test_forgetting_someone_only_on_the_met_list(self, client, personas_root):
+        # Nothing stuck from the conversation, but they have met. That is
+        # still something to erase.
+        (personas_root / "Alex" / "met.txt").write_text("Brad\n")
+        body = client.post("/api/personas/Alex/forget", json={"subjects": ["Brad"]}).json()
+        assert body["memories_removed"] == 0
+        assert body["met_removed"] == ["Brad"]
+        assert body["forgotten"] == ["Brad"]
+
+    def test_forgetting_a_stranger_removes_nothing(self, client, personas_root):
+        self._remember(personas_root, "[Brad] Brad is a banker.")
+        body = client.post("/api/personas/Alex/forget", json={"subjects": ["Nobody"]}).json()
+        assert body["forgotten"] == [] and body["memories_removed"] == 0
+        assert (personas_root / "Alex" / "memories.txt").read_text() == (
+            "[Brad] Brad is a banker.\n"
+        )
+
+    def test_forget_needs_at_least_one_subject(self, client, personas_root):
+        assert client.post("/api/personas/Alex/forget", json={"subjects": []}).status_code == 422
+
+    def test_unknown_persona_is_404(self, client, personas_root):
+        assert client.get("/api/personas/Ghost/memory-subjects").status_code == 404
+        assert client.post(
+            "/api/personas/Ghost/forget", json={"subjects": ["Brad"]},
+        ).status_code == 404
+
 
 # ---------------------------------------------------------------------------
 # DELETE /api/personas/{name}

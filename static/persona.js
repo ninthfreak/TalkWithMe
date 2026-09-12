@@ -213,6 +213,14 @@ bind(pfAudioPlayBtn, "click", playPersonaReferenceAudio, "Play reference audio")
 bind(pfMemoriesClearBtn, "click", () => { peMemoriesClearRequested = true; },
      "Clear saved memories");
 
+bind(pfForgetBtn, "click", openForgetDialog, "Forget someone");
+bind(pfForgetClose, "click", closeForgetDialog, "the forget close button");
+bind(pfForgetCancel, "click", closeForgetDialog, "the forget cancel button");
+bind(pfForgetApply, "click", applyForget, "the forget button");
+bind(pfForgetOverlay, "click", (e) => {
+    if (e.target === pfForgetOverlay) closeForgetDialog();
+}, "the forget backdrop");
+
 bind(pfCondenseBtn, "click", openCondenseDialog, "Condense memories");
 bind(pfCondenseClose, "click", closeCondenseDialog, "the condense close button");
 bind(pfCondenseCancel, "click", closeCondenseDialog, "the condense cancel button");
@@ -239,6 +247,171 @@ bind(personaEditorOverlay, "click", (e) => {
 bind(peConfirmOverlay, "click", (e) => {
     if (e.target === peConfirmOverlay) peConfirmOverlay.classList.add("hidden");
 }, "the persona delete backdrop");
+
+/* ==========================================================================
+   Persona Editor — forgetting one person
+
+   "Clear saved memories" is all or nothing, and most of the time the
+   thing that needs undoing is one relationship: a scene that went wrong,
+   a test conversation, a character since rewritten. Memories are already
+   filed by who they are about, so the smaller eraser is a list of people
+   with a tick beside each.
+
+   The met-list goes with the notes. It is the shortest memory there is —
+   the one that decides whether the next meeting is a first meeting — and
+   leaving it behind produces a persona who knows nothing about Alex and
+   still greets them as an old friend.
+   ========================================================================== */
+
+async function openForgetDialog() {
+    if (!peEditingName) return;
+    pfForgetError.classList.add("hidden");
+    pfForgetList.classList.add("hidden");
+    pfForgetList.innerHTML = "";
+    pfForgetUntagged.classList.add("hidden");
+    pfForgetApply.disabled = true;
+    pfForgetWho.textContent = peEditingName;
+    pfForgetStatus.textContent = "Reading the notes\u2026";
+    pfForgetStatus.classList.remove("hidden");
+    pfForgetOverlay.classList.remove("hidden");
+
+    try {
+        const resp = await fetch(
+            `/api/personas/${encodeURIComponent(peEditingName)}/memory-subjects`,
+        );
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showForgetError(extractApiErrorMessage(err, resp.status));
+            return;
+        }
+        renderForgetList(await resp.json());
+    } catch (err) {
+        console.error("Forget list error:", err);
+        showForgetError("Request failed. Is the server running?");
+    }
+}
+
+function closeForgetDialog() {
+    pfForgetOverlay.classList.add("hidden");
+}
+
+function showForgetError(message) {
+    pfForgetStatus.classList.add("hidden");
+    pfForgetError.textContent = message;
+    pfForgetError.classList.remove("hidden");
+}
+
+function renderForgetList(body) {
+    const subjects = body.subjects || [];
+    if (!subjects.length) {
+        pfForgetStatus.textContent =
+            `${body.persona} has not met anyone and remembers nobody in particular.`;
+        pfForgetStatus.classList.remove("hidden");
+        return;
+    }
+
+    pfForgetStatus.textContent = "Tick everyone this persona should no longer know.";
+    pfForgetStatus.classList.remove("hidden");
+
+    for (const row of subjects) {
+        const label = document.createElement("label");
+        label.className = "pf-forget-row";
+
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.value = row.subject;
+        box.addEventListener("change", refreshForgetButton);
+
+        const name = document.createElement("span");
+        name.className = "pf-forget-name";
+        name.textContent = row.subject;
+
+        const detail = document.createElement("span");
+        detail.className = "pf-forget-detail";
+        detail.textContent = describeForgetRow(row);
+
+        label.append(box, name, detail);
+        pfForgetList.appendChild(label);
+    }
+    pfForgetList.classList.remove("hidden");
+
+    // Untagged lines belong to nobody, are shown to everyone, and no
+    // forget can match them. Said out loud so a file that still has
+    // content after forgetting everybody is not a mystery.
+    if (body.untagged) {
+        const one = body.untagged === 1;
+        pfForgetUntagged.textContent =
+            `${body.untagged} note${one ? " in" : "s in"} this file ` +
+            `${one ? "is" : "are"} not about anyone in particular, so ` +
+            `${one ? "it stays" : "they stay"}.`;
+        pfForgetUntagged.classList.remove("hidden");
+    }
+    refreshForgetButton();
+}
+
+function describeForgetRow(row) {
+    const parts = [];
+    if (row.memories) {
+        parts.push(`${row.memories} note${row.memories === 1 ? "" : "s"}` +
+                   (row.assumed ? `, ${row.assumed} assumed` : ""));
+    }
+    if (row.met) parts.push("met");
+    if (!parts.length) parts.push("nothing stored");
+    // Lines about somebody else that name this person survive the
+    // forget, because they are memories of that somebody else.
+    if (row.mentions) {
+        parts.push(row.mentions === 1
+            ? "1 note about somebody else names them, and stays"
+            : `${row.mentions} notes about other people name them, and stay`);
+    }
+    return `\u2014 ${parts.join(" \u00b7 ")}`;
+}
+
+function selectedForgetSubjects() {
+    return Array.from(pfForgetList.querySelectorAll("input:checked"))
+        .map((box) => box.value);
+}
+
+function refreshForgetButton() {
+    pfForgetApply.disabled = selectedForgetSubjects().length === 0;
+}
+
+async function applyForget() {
+    const subjects = selectedForgetSubjects();
+    if (!peEditingName || !subjects.length) return;
+    pfForgetApply.disabled = true;
+    try {
+        const resp = await fetch(
+            `/api/personas/${encodeURIComponent(peEditingName)}/forget`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ subjects }),
+            },
+        );
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showForgetError(extractApiErrorMessage(err, resp.status));
+            refreshForgetButton();
+            return;
+        }
+        const body = await resp.json();
+        closeForgetDialog();
+        // Counts, not "done": the same read-back the context wipe does,
+        // because "I think it cleared" is the thing worth replacing.
+        const who = body.forgotten.length ? body.forgotten.join(", ") : subjects.join(", ");
+        const lines = `${body.memories_removed} note${body.memories_removed === 1 ? "" : "s"}`;
+        const met = body.met_removed.length
+            ? ` They meet as strangers next time.` : "";
+        showPersonaFormNotice(
+            `${peEditingName} no longer remembers ${who} \u2014 ${lines} removed.${met}`
+        );
+    } catch (err) {
+        console.error("Forget error:", err);
+        showForgetError("Request failed. Is the server running?");
+        refreshForgetButton();
+    }
+}
 
 /* ==========================================================================
    Persona Editor — condensing memories
@@ -536,6 +709,7 @@ function closePersonaEditor() {
     // under one would strand it over the chat.
     closeRenameDialog();
     closeCondenseDialog();
+    closeForgetDialog();
     personaEditorOverlay.classList.add("hidden");
 }
 
@@ -544,6 +718,7 @@ function showPersonaList() {
     stopPersonaAvatarPreview();
     closeRenameDialog();
     closeCondenseDialog();
+    closeForgetDialog();
     peListView.classList.remove("hidden");
     peFormView.classList.add("hidden");
     renderPersonaEditorList();
@@ -677,6 +852,7 @@ async function openPersonaForm(name) {
     // "Clear saved memories" only makes sense when editing an existing
     // persona — a new one has nothing to clear.
     pfMemoriesClearBtn.classList.toggle("hidden", !name);
+    pfForgetBtn.classList.toggle("hidden", !name);
     pfCondenseBtn.classList.toggle("hidden", !name);
 
     // The name is an identifier, not a label: it is a memory's subject
