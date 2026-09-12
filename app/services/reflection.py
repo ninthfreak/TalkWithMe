@@ -368,20 +368,31 @@ async def reflect_on_conversation(
     room: Optional[str] = None,
     roster: Optional[Sequence[str]] = None,
 ) -> List[Reflection]:
-    """Run the pass for everybody who spoke. Never raises.
+    """Run the pass for the room's speakers. Never raises.
 
     Sequential rather than gathered: the backend serves one slot, so
     firing these in parallel would not finish sooner and would make the
     queue behind them unpredictable.
 
-    *roster* is who was in the room. It matters more than it looks: the
-    cast used to be built from who *spoke*, and since only one persona
-    answers each message by default, that was usually a single character
-    plus the human — so the only person anybody was allowed to write
-    about was whoever the human was playing. Everyone else was in the
-    room, heard everything, and was invisible to the question. Falls back
-    to the speakers when no roster is given, which is what a caller
-    without room context can offer.
+    *roster* is who is in the room, and it does two jobs.
+
+    It is the **cast**: who a persona may write about. The cast used to be
+    built from who *spoke*, and since only one persona answers each
+    message by default, that was usually a single character plus the human
+    — so the only person anybody was allowed to write about was whoever
+    the human was playing. Everyone else was in the room, heard
+    everything, and was invisible to the question.
+
+    It is also the **guest list**: who reflects at all. A room's stored
+    transcript outlives its membership — leaving a persona out of the room
+    does not delete the lines they spoke in it last month — so "everybody
+    with a turn in this history" is not the same question as "everybody
+    who is here", and answering the first one had personas who are no
+    longer in the room waking up at the end of every conversation to
+    write memories of people they have never met.
+
+    Both fall back to the speakers when no roster is given, which is what
+    a caller without room context can offer.
     """
     if not settings.general.enable_persona_memories:
         return []
@@ -392,16 +403,30 @@ async def reflect_on_conversation(
         return []
 
     # Everybody who was there, the human included under whatever name they
-    # were playing. Speakers are folded in as well: somebody who spoke is
-    # unarguably present, even if the roster has since changed.
-    present_names = list(roster) if roster else list(speakers)
+    # were playing. Speakers are folded in as well: their lines are in the
+    # transcript the others are reading, so they are people who can be
+    # remembered even when they are no longer people who remember.
+    # `roster is None` is "no room context, use the speakers"; an empty
+    # roster is a real answer — nobody is in this room — and must not be
+    # read as the same thing.
+    present_names = list(speakers) if roster is None else list(roster)
     for name in speakers:
         if not any(n.casefold() == name.casefold() for n in present_names):
             present_names.append(name)
     cast = present_names + [user_label]
 
+    here = None if roster is None else {n.casefold() for n in roster}
+
     results = []
     for name in speakers:
+        if here is not None and name.casefold() not in here:
+            # Spoke in this room once; not in it now. The transcript
+            # remembers them, which is not the same as them being here.
+            logger.debug(
+                "Reflection: '%s' spoke in room '%s' but is not in it now — skipped",
+                name, room or "?",
+            )
+            continue
         persona = by_name.get(name.casefold())
         if persona is None:
             # Renamed or deleted since they spoke.

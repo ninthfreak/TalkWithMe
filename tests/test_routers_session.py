@@ -10,7 +10,7 @@ from app.config import ChatRoomsConfig, PlayerConfig
 from app.models import ChatMessage
 from app.persistence import persist_message
 from app.services import persona_store
-from tests.factories import make_personas_in_dir
+from tests.factories import make_personas_in_dir, rescan_personas
 
 
 @pytest.fixture
@@ -423,6 +423,40 @@ class TestReflection:
         client.post("/api/session/new")
 
         assert seen == []
+
+    def test_a_former_member_of_the_room_does_not_reflect(
+        self, client, personas_root, monkeypatch,
+    ):
+        # The reported symptom: "persona 'Frank' saved 3 memory line(s)"
+        # for somebody who was not in the room. A room's stored transcript
+        # outlives its membership — loading the room reads the whole file,
+        # so Frank's lines from when he was a member are still there, and
+        # "everybody who spoke" picked him up.
+        from app.session import session
+
+        # Frank exists as a persona, but TNG's roster is Alex and Luna.
+        frank_dir = personas_root / "Frank"
+        frank_dir.mkdir(parents=True, exist_ok=True)
+        persona_store.write_prompt_md(
+            frank_dir, name="Frank", description="A former regular.",
+            system_prompt="You are Frank.", router_hints="frank",
+            avatar_color="#888888", allow_tool_calls=False,
+        )
+        app_config.set_personas_cache(rescan_personas(personas_root))
+
+        async def fake(messages, **kwargs):
+            return "[Tony] Tony has never been on a boat."
+        monkeypatch.setattr(session_router.reflection, "chat_completion", fake)
+
+        session.set_current_room("TNG")
+        session.add_user_message("I have never been on a boat.", "id-u1")
+        session.add_assistant_message("Not once?", "Alex", "id-a1")
+        session.add_assistant_message("Nor me.", "Frank", "id-a2")
+
+        body = client.post("/api/session/reflect").json()
+
+        assert [p["persona"] for p in body["personas"]] == ["Alex"]
+        assert not (personas_root / "Frank" / "memories.txt").exists()
 
     def test_a_failing_reflection_does_not_break_new_chat(
         self, client, personas_root, monkeypatch,

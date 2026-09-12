@@ -515,21 +515,25 @@ class TestTheCastIsTheRoom:
 
         assert self._asked_about(captured) == ["Kira"]
 
-    def test_a_speaker_missing_from_the_roster_is_added(
+    def test_a_speaker_missing_from_the_roster_is_still_somebody_to_remember(
         self, tmp_path, monkeypatch,
     ):
-        # Somebody who spoke is unarguably present, even if the room has
-        # been edited since.
+        # Frank's lines are in the transcript Alex is reading, so Frank is
+        # somebody Alex can form an impression of — even though Frank is
+        # no longer in the room, and so no longer writes memories himself.
         captured = []
         _stub_llm(monkeypatch, "nothing", capture=captured)
+        history = self._one_speaker() + [
+            ChatMessage(role="assistant", content="Evening.", persona="Frank"),
+        ]
 
         _reflect_all(
-            self._one_speaker(),
-            [_persona(tmp_path, "Alex"), _persona(tmp_path, "Marv")],
-            make_settings(), "Kira", roster=["Marv"],
+            history,
+            [_persona(tmp_path, "Alex"), _persona(tmp_path, "Frank")],
+            make_settings(), "Kira", roster=["Alex"],
         )
 
-        assert self._asked_about(captured) == ["Marv, Kira"]
+        assert self._asked_about(captured) == ["Frank, Kira"]
 
     def test_the_persona_is_never_asked_about_itself(self, tmp_path, monkeypatch):
         captured = []
@@ -551,6 +555,80 @@ class TestTheCastIsTheRoom:
                      roster=["Alex", "Marv"])
 
         assert _memories(alex) == "[Marv] Marv is miserable at work.\n"
+
+
+class TestOnlyTheRoomReflects:
+    """A room's stored transcript outlives its membership.
+
+    Loading a room reads the whole file, so "everybody with a turn in this
+    history" includes anyone who spoke in it back when they were a member.
+    Answering that question instead of "everybody who is here" had a
+    persona who was not in the room waking up at the end of a conversation
+    to write memories about people they had never met.
+    """
+
+    def _with_a_former_member(self):
+        return [
+            ChatMessage(role="user", content="Evening all."),
+            ChatMessage(role="assistant", content="Evening.", persona="Alex"),
+            # Spoken months ago, when Frank was still in this room.
+            ChatMessage(role="assistant", content="Evening.", persona="Frank"),
+        ]
+
+    def test_a_speaker_who_is_no_longer_in_the_room_does_not_reflect(
+        self, tmp_path, monkeypatch,
+    ):
+        alex = _persona(tmp_path, "Alex")
+        frank = _persona(tmp_path, "Frank")
+        _stub_llm(monkeypatch, "[Kira] Kira has never been on a boat.")
+
+        results = _reflect_all(
+            self._with_a_former_member(), [alex, frank], make_settings(), "Kira",
+            room="TNG", roster=["Alex"],
+        )
+
+        assert [r.persona for r in results] == ["Alex"]
+        assert _memories(frank) == ""
+
+    def test_the_roster_match_ignores_case(self, tmp_path, monkeypatch):
+        alex = _persona(tmp_path, "Alex")
+        _stub_llm(monkeypatch, "nothing")
+
+        results = _reflect_all(
+            self._with_a_former_member(), [alex], make_settings(), "Kira",
+            roster=["alex"],
+        )
+
+        assert [r.persona for r in results] == ["Alex"]
+
+    def test_without_a_roster_every_speaker_still_reflects(
+        self, tmp_path, monkeypatch,
+    ):
+        # The fallback for a caller with no room context: with nothing to
+        # check against, refusing everybody would be worse than the leak.
+        _stub_llm(monkeypatch, "nothing")
+
+        results = _reflect_all(
+            self._with_a_former_member(),
+            [_persona(tmp_path, "Alex"), _persona(tmp_path, "Frank")],
+            make_settings(), "Kira",
+        )
+
+        assert [r.persona for r in results] == ["Alex", "Frank"]
+
+    def test_an_empty_room_reflects_on_nobody(self, tmp_path, monkeypatch):
+        # Every persona taken out of the room. An empty roster is a real
+        # answer ("nobody is here"), not a missing one.
+        frank = _persona(tmp_path, "Frank")
+        _stub_llm(monkeypatch, "[Kira] Kira likes tea.")
+
+        results = _reflect_all(
+            self._with_a_former_member(), [frank], make_settings(), "Kira",
+            roster=[],
+        )
+
+        assert results == []
+        assert _memories(frank) == ""
 
 
 class TestOnePersonCannotTakeEverySlot:

@@ -937,6 +937,18 @@ is the room's roster now. A per-pass cap of three is also shared out one person 
 a time, so a line about another persona survives even when you dominate the
 conversation, which you generally do.
 
+**Only the room looks back.** A room's saved conversation outlives its
+membership: taking a persona out of a room does not delete the lines they spoke in
+it last month, and opening the room loads the whole transcript. So "everybody with
+a turn in this conversation" is not the same question as "everybody who is here" —
+and asking the first one meant a persona who left the room months ago woke up at
+the end of every conversation in it to write memories about people they had never
+met. The room's roster decides who reflects.
+
+The two halves are deliberately asymmetric. A former member's lines are still in
+the transcript everybody else is reading, so they remain somebody to *be*
+remembered — just not somebody who remembers.
+
 **The persona is shown what it already knows before it is asked.** This is the
 whole reason a memories file stops filling up with the same fact in slightly
 different words. The question used to be asked in ignorance every time: a persona
