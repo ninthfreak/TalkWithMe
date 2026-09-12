@@ -674,6 +674,41 @@ what was said, and a line tagged with your name is something you said**. Phrased
 a fact rather than "don't deny things", because naming a behaviour is how "bored,
 angry, fixated" ended up in every persona's head once before.
 
+## Why four distinct personas sound alike in a room
+
+Personas refined to answer very differently one-to-one can give nearly identical
+answers when they share a room. The cause is positional, not a failure of the
+character prompts.
+
+The prompt sent for a reply is a flat script ending on the speaker's own tag.
+One-to-one, nothing sits between the question and that tag:
+
+```
+[User]: what do you make of the sea?
+[Luna]:
+```
+
+In a room, the personas who reply after the first one read a *complete answer to
+their own question* in the last position before they speak — the place a
+continuation model weights most heavily. With four replies to a message, the
+fourth persona has three finished answers to work from:
+
+```
+Alex  saw User
+Marv  saw User + Alex
+Cora  saw User + Alex + Marv
+Luna  saw User + Alex + Marv + Cora
+```
+
+So **Each persona answers you, not the reply before it** (Settings, on by default)
+gives every persona the conversation as it stood when you sent the message. They
+all start from the same place, which is the same place they start from one-to-one.
+They still see each other's replies from *earlier* turns — only the current turn's
+are withheld — so the room keeps its memory of itself.
+
+Turn it off to let them build on each other within a turn. They will sound more
+like a conversation, and more like each other.
+
 ## Keeping personas in their own voice
 
 Three things personas do in a group chat that they should not:

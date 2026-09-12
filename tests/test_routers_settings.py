@@ -47,6 +47,7 @@ class TestGetSettings:
             "typical_length": "detailed",
             "enable_persona_memories": True,
             "reflect_after_conversation": True,
+            "independent_replies": True,
         }
 
 
@@ -109,6 +110,7 @@ class TestUpdateSettings:
             "typical_length": "detailed",     # preserved
             "enable_persona_memories": False, # preserved
             "reflect_after_conversation": True,
+            "independent_replies": True,
         }
 
     def test_missing_general_section_preserves_everything(self, client, monkeypatch):
@@ -136,6 +138,7 @@ class TestUpdateSettings:
             "typical_length": "detailed",
             "enable_persona_memories": False,
             "reflect_after_conversation": True,
+            "independent_replies": True,
         }
 
     def test_reflect_after_conversation_round_trips(self, client):

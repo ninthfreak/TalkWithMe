@@ -67,6 +67,7 @@ async function loadGenSettingsIntoForm() {
         gsfTypicalLength.value = data.general.typical_length || "normal";
         gsfEnablePersonaMemories.checked = data.general.enable_persona_memories ?? true;
         gsfReflectAfterConversation.checked = data.general.reflect_after_conversation ?? true;
+        gsfIndependentReplies.checked = data.general.independent_replies ?? true;
         return true;
     } catch (err) {
         console.error("Failed to load settings:", err);
@@ -139,6 +140,7 @@ async function submitGenSettings(e) {
             typical_length: gsfTypicalLength.value,
             enable_persona_memories: gsfEnablePersonaMemories.checked,
             reflect_after_conversation: gsfReflectAfterConversation.checked,
+            independent_replies: gsfIndependentReplies.checked,
         },
     };
 

@@ -336,8 +336,13 @@ class TestMultiPersonaReplies:
         starts = sse_events_by_type(events, "start")
         assert [e["persona"] for e in starts] == ["Luna"]  # only one persona available
 
-    def test_second_reply_sees_first_reply_in_history(self, client, monkeypatch):
-        _patch_general(monkeypatch, max_persona_replies=2)
+    def test_second_reply_sees_first_reply_when_they_build_on_each_other(
+        self, client, monkeypatch,
+    ):
+        # independent_replies OFF: the old behaviour, kept as an option
+        # because personas answering each other is a real thing to want.
+        # What it costs is in TestRepliesAreIndependent below.
+        _patch_general(monkeypatch, max_persona_replies=2, independent_replies=False)
         seen_contexts = []
 
         async def capturing_stream(messages, max_tokens=None, stop=None, persona_name=None):
@@ -1131,7 +1136,10 @@ class TestTruncation:
     def test_next_persona_sees_a_truncated_reply_trimmed_to_a_full_sentence(
         self, client, monkeypatch
     ):
-        _patch_general(monkeypatch, max_persona_replies=2)
+        # The relay this tests only happens between personas that can see
+        # each other's replies, so this is the independent_replies OFF
+        # path. Across turns the trimming still applies either way.
+        _patch_general(monkeypatch, max_persona_replies=2, independent_replies=False)
         seen = []
 
         async def fake_stream(messages, max_tokens=None, stop=None, persona_name=None):
@@ -1149,7 +1157,7 @@ class TestTruncation:
         assert relayed == ["[Alex]: One. Two."]
 
     def test_untruncated_reply_is_relayed_verbatim(self, client, monkeypatch):
-        _patch_general(monkeypatch, max_persona_replies=2)
+        _patch_general(monkeypatch, max_persona_replies=2, independent_replies=False)
         seen = []
 
         async def fake_stream(messages, max_tokens=None, stop=None, persona_name=None):
@@ -2207,3 +2215,92 @@ class TestThePersonaOwnsItsOwnLines:
         script = render_transcript(captured[-1]["messages"], "Alex")
         assert "[Alex]: Right." in script
         assert "[Alex]: Alex, you just said we had." not in script  # that is the human's
+
+
+# ---------------------------------------------------------------------------
+# Four distinct personas sounding alike in a room
+# ---------------------------------------------------------------------------
+
+class TestRepliesAreIndependent:
+    """Personas refined to answer very differently one-to-one were giving
+    nearly identical answers in a room.
+
+    A transcript prompt ends on the responding persona's tag. With
+    siblings visible, the persona replying second reads a *complete answer
+    to its own question* in the last position before it speaks — the
+    place a continuation model weights most heavily — so it paraphrases
+    it. One-to-one there is nothing between the question and the tag, and
+    the same personas come out distinct. That difference is the whole
+    complaint.
+    """
+
+    @staticmethod
+    def _contexts(monkeypatch):
+        seen = []
+
+        async def capturing(messages, max_tokens=None, stop=None, persona_name=None):
+            seen.append([m["content"] for m in messages if m["role"] != "system"])
+            yield {"type": "token", "token": "a distinctive answer"}
+            yield {"type": "finish", "reason": "stop"}
+
+        monkeypatch.setattr(chat_router, "stream_chat", capturing)
+        return seen
+
+    def test_the_second_persona_does_not_see_the_first(self, client, monkeypatch):
+        _patch_general(monkeypatch, max_persona_replies=2)   # on by default
+        seen = self._contexts(monkeypatch)
+
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert len(seen) == 2
+        # Both see exactly the same thing: the question, and nothing else.
+        assert seen[0] == ["[User]: hello there"]
+        assert seen[1] == ["[User]: hello there"]
+
+    def test_everyone_answers_from_the_same_starting_point(
+        self, client, monkeypatch,
+    ):
+        # Three personas, three identical prompts — whatever they say
+        # afterwards is their own prompt talking, not each other's.
+        _patch_chatrooms(monkeypatch, [
+            ChatRoom(name="Big", persona_names=["Alex", "Luna"]),
+        ])
+        _patch_general(monkeypatch, max_persona_replies=2)
+        seen = self._contexts(monkeypatch)
+
+        _chat(client, who_answers="Alex", chat_room="Big")
+
+        assert len({tuple(c) for c in seen}) == 1
+
+    def test_earlier_turns_are_still_shared(self, client, monkeypatch):
+        # Only THIS turn's replies are withheld. A persona still knows
+        # what everyone said before the current message — otherwise the
+        # room would have no memory of itself at all.
+        _patch_general(monkeypatch, max_persona_replies=1)
+        seen = self._contexts(monkeypatch)
+
+        _chat(client, who_answers="Alex", chat_room="TNG", message="first")
+        _chat(client, who_answers="Luna", chat_room="TNG", message="second")
+
+        assert seen[-1] == [
+            "[User]: first",
+            "[Alex]: a distinctive answer",
+            "[User]: second",
+        ]
+
+    def test_turning_it_off_restores_the_old_behaviour(self, client, monkeypatch):
+        _patch_general(monkeypatch, max_persona_replies=2, independent_replies=False)
+        seen = self._contexts(monkeypatch)
+
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert seen[1] == ["[User]: hello there", "[Alex]: a distinctive answer"]
+
+    def test_a_single_reply_is_unaffected(self, client, monkeypatch):
+        # One-to-one was always fine; this must not change it.
+        _patch_general(monkeypatch, max_persona_replies=1)
+        seen = self._contexts(monkeypatch)
+
+        _chat(client, who_answers="Alex", chat_room="TNG")
+
+        assert seen == [["[User]: hello there"]]

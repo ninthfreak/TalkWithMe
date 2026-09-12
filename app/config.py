@@ -279,6 +279,29 @@ class GeneralConfig(BaseModel):
     # is different in kind — injecting saved memories is free, and looking
     # back over a conversation is a completion per speaker.
     reflect_after_conversation: bool = True
+    # When several personas answer one message, whether each answers *you*
+    # or the reply before it.
+    #
+    # A transcript prompt ends on the responding persona's tag, so with
+    # this off the persona replying second reads:
+    #
+    #     [User]: what do you make of the sea?
+    #     [Alex]: the sea is a graveyard with a nice view.
+    #     [Luna]:
+    #
+    # Alex's complete answer to Luna's question is the most recent text in
+    # the prompt, in the position a continuation model weights most
+    # heavily — so Luna paraphrases it. The same personas one-to-one, with
+    # nothing between the question and their tag, answer as themselves.
+    # That is the whole of the "everyone in the room sounds the same"
+    # complaint.
+    #
+    # On, each persona is given the conversation as it stood when the
+    # message arrived. They still see each other's replies from previous
+    # turns; they just do not answer one. Off restores the old behaviour,
+    # where they can build on each other — more like a conversation, and
+    # more like each other.
+    independent_replies: bool = True
     # Where persona subdirectories live. Absolute, or relative to the
     # project root; None/empty falls back to <project root>/Personas.
     # yaml-only for now (no UI) — like the mcp: section, changes need a

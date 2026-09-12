@@ -513,6 +513,7 @@ class GeneralSettingsRequest(BaseModel):
     typical_length: Optional[TypicalLength] = None
     enable_persona_memories: Optional[bool] = None
     reflect_after_conversation: Optional[bool] = None
+    independent_replies: Optional[bool] = None
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -559,6 +560,7 @@ class GeneralSettingsResponse(BaseModel):
     typical_length: TypicalLength
     enable_persona_memories: bool
     reflect_after_conversation: bool
+    independent_replies: bool
 
 
 class SettingsResponse(BaseModel):

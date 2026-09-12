@@ -173,6 +173,7 @@ class TestGeneralSettingsRequestPartialUpdate:
             "typical_length": None,
             "enable_persona_memories": None,
             "reflect_after_conversation": None,
+            "independent_replies": None,
         }
 
     def test_general_settings_request_exclude_none_drops_omitted_fields(self):

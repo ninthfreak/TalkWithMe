@@ -720,6 +720,12 @@ async def _chat_stream(
 
     user_label = _user_label()
 
+    # The conversation as it stands now, before anybody in this turn has
+    # answered. Every persona that replies this turn is built from this
+    # rather than from the live history, so each answers the message
+    # instead of the reply before it — see general.independent_replies.
+    turn_start_history = list(session.history)
+
     # A cut reply costs an attempt but not a slot. Tracking attempts per
     # persona (rather than a flat "already tried" list) lets a persona whose
     # reply was cut be re-rolled once everyone untried has had a go — which
@@ -795,6 +801,9 @@ async def _chat_stream(
                 addressed_to=addressed_to,
             ),
             user_label=user_label,
+            # None means the live history, which includes whoever has
+            # already answered this turn.
+            history=turn_start_history if settings.general.independent_replies else None,
         )
 
         # Layer 1: stop before the backend generates another persona's

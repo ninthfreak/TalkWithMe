@@ -295,6 +295,7 @@ class SessionManager:
         # Literal, not config.DEFAULT_USER_LABEL: this module imports no
         # config by design, and every real caller passes the label anyway.
         user_label: str = "User",
+        history: Optional[List[ChatMessage]] = None,
     ) -> List[Dict[str, str]]:
         """Build the messages list for an LLM call.
 
@@ -325,7 +326,12 @@ class SessionManager:
             {"role": "system", "content": system_content}
         ]
 
-        history_slice = recent_exchanges(self._history, max_turns_for_context)
+        # *history* lets a caller build the prompt from a conversation
+        # other than the live one — specifically, the conversation as it
+        # stood before this turn's other personas answered. Defaults to
+        # the session's own, which is every other caller.
+        source = self._history if history is None else list(history)
+        history_slice = recent_exchanges(source, max_turns_for_context)
 
         for msg in history_slice:
             if msg.role == "user":

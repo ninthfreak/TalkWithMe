@@ -248,3 +248,4 @@ const gsfMaxTurnsForContext = document.getElementById("gsf-max-turns-for-context
 const gsfShowToolCalls = document.getElementById("gsf-show-tool-calls");
 const gsfEnablePersonaMemories = document.getElementById("gsf-enable-persona-memories");
 const gsfReflectAfterConversation = document.getElementById("gsf-reflect-after-conversation");
+const gsfIndependentReplies = document.getElementById("gsf-independent-replies");
