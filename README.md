@@ -1031,6 +1031,89 @@ Three things stay, and the dialog says so rather than leaving you to notice:
   per-persona, and reaching into other files would be a much larger operation than
   a tickbox should perform.
 
+## Interview rooms
+
+A room can be an **interview** instead of a conversation — a toggle and a goal
+in the room editor. The persona draws the other person out and writes down what
+they say, and the notes go somewhere that can hold a life story rather than a
+handful of impressions.
+
+Three things change, and nothing else does:
+
+- **The question.** The ordinary memory pass asks what impressions you formed.
+  An interview asks for facts: names, dates, places, sequence, in the
+  interviewee's own terms.
+- **When it happens.** Notes are taken every few exchanges, not only when you
+  leave the room. The reply window is six exchanges, so anything written down
+  only at the end was already out of the prompt when it mattered.
+- **Where they go.** Not `memories.txt` — a separate dossier, one file per
+  person being interviewed, at `Personas/<Name>/notes/<subject>.txt`.
+
+### The dossier
+
+`memories.txt` is capped at 16 KB because every byte of it goes into every
+reply. A dossier has no cap, because it is **read two levels at a time**.
+
+```
+[Tony] #work #vickers @1978 Started at Vickers straight from school.
+[Tony] #work #vickers @1986 Left after the second round of layoffs.
+[Tony] (assumed) #work He resented the move to management.
+[Tony] #family #father @1960s Father was a fitter at the same yard.
+[Tony] (open) #work Why did he leave Vickers, really?
+```
+
+`#topic` is what makes a selective read possible. `@when` is the era the fact is
+*about*, not when it was written down. Both are stripped before the model sees
+the line, and both count only at the front of a line — a `#` in the middle of a
+sentence is part of the sentence.
+
+**The index is always in the prompt; the contents are not.** Asked about somebody's
+father, a 229-note dossier contributes 381 characters:
+
+```
+What you have written down about Tony:
+  work (183) · vickers (182) · union (40) · family (3) · father (2) · army (1)
+
+On what you are discussing now — father:
+  Father was a fitter at the same yard, thirty years. (1960s)
+  Father died the winter after Tony married. (1989)
+
+You still want to know:
+  Why did he leave Vickers, really?
+```
+
+That top line is why this works. The interviewer can see it has one note about
+the army without opening it — which is what lets it say "we have barely touched
+your army years" instead of forgetting the army exists.
+
+### Keeping it usable
+
+Two passes, split by whether a judgement is needed — the same split as memories:
+
+- **Automatic and mechanical.** Byte-identical notes lose their copies, and a
+  hand-written `#schools` beside an established `#school` folds into it. It runs
+  whenever the notes are read, changes nothing on a healthy file, and reports
+  what it cannot fix: notes with no topic at all (findable only by recency) and
+  topics grown larger than a read can ever show.
+- **Topics come from the model, tidied by the app.** The note pass is shown the
+  topics already in use and asked to reuse one — that is the only thing that
+  keeps `job` and `work` together, since no spelling comparison will ever merge
+  them. Underneath, `schools`→`school` and `working`→`work` are merged
+  mechanically, and every merge is logged, because filing a genuinely new topic
+  under an old name is the one thing this can quietly get wrong.
+
+**Open questions are replaced, not deleted.** The pass is shown the questions
+that stand and writes back the ones that still stand; a question the conversation
+answered disappears because it was left out. Nothing here ever asks a model to
+remove a line.
+
+### What an interview does not touch
+
+Every other room runs exactly the code it ran before — the flag lives on the
+room, and the implicit "All Personas" room has no room record to put it on. The
+two stores are exclusive: in an interview room the notes go to the dossier and
+the ordinary memory pass does not run, so the same fact never lands in both.
+
 Deliberately *not* done: fuzzy matching on the way in. "Tony likes tea" and "Tony
 likes coffee" overlap heavily and are different facts, so a similarity threshold
 loose enough to catch a restatement is loose enough to eat one of those.

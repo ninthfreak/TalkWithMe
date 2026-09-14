@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from app import persistence
 from app.config import (
     PlayerConfig,
+    get_chatrooms,
     get_personas,
     get_player,
     get_settings,
@@ -29,7 +30,7 @@ from app.models import (
     WipeResult,
 )
 from app.persistence import load_history_with_metadata
-from app.services import persona_store, reflection
+from app.services import interview, persona_store, reflection
 from app.session import session
 
 logger = logging.getLogger(__name__)
@@ -72,13 +73,34 @@ def _conversation_snapshot():
     return list(session.history), session.current_room, user_label()
 
 
+def _interview_room(room: str):
+    """The ChatRoom for *room* when it is an interview, else None.
+
+    The implicit "default" room has no ChatRoom object at all, so it can
+    never be one — which is what makes "an ordinary room is untouched"
+    structural rather than a promise.
+    """
+    found = next(
+        (r for r in get_chatrooms().chat_rooms if r.name.lower() == room.lower()),
+        None,
+    )
+    return found if found is not None and found.interview else None
+
+
 async def _reflect(history, room: str, label: str) -> list:
     """Run the pass, swallowing anything it throws.
 
     This is triggered by starting a new chat and by changing rooms. Losing
     the memories of one conversation is a disappointment; taking out the
     action that triggered it is a bug.
+
+    An interview room takes notes instead of reflecting, and the two are
+    exclusive on purpose: running both would file the same facts into two
+    stores, and the dossier is the one that can hold a life.
     """
+    sitting = _interview_room(room)
+    if sitting is not None:
+        return await _take_final_notes(history, sitting, label)
     try:
         return await reflection.reflect_on_conversation(
             history, get_personas().personas, get_settings(), label,
@@ -91,6 +113,39 @@ async def _reflect(history, room: str, label: str) -> list:
     except Exception:  # noqa: BLE001 — see the docstring
         logger.exception("Reflection on room '%s' failed", room)
         return []
+
+
+async def _take_final_notes(history, sitting, label: str) -> list:
+    """The last note pass of a sitting, over the whole conversation.
+
+    The whole conversation rather than the usual window: this is the one
+    pass with no successor to recover what it misses, and leaving the
+    room is exactly when the stretch since the last pass would otherwise
+    be lost.
+    """
+    settings = get_settings()
+    results = []
+    for name in reflection.spoke_in(history):
+        if name not in sitting.persona_names:
+            continue
+        persona = next(
+            (p for p in get_personas().personas if p.name == name), None,
+        )
+        if persona is None:
+            continue
+        try:
+            notes = await interview.take_notes(
+                persona, label, sitting.interview_goal, history, settings, label,
+                whole_conversation=True,
+            )
+        except Exception:  # noqa: BLE001 — see _reflect's docstring
+            logger.exception("Interview notes on room '%s' failed", sitting.name)
+            continue
+        if notes is not None:
+            results.append(
+                reflection.Reflection(persona=notes.persona, saved=list(notes.filed))
+            )
+    return results
 
 
 def _schedule_reflection(background: BackgroundTasks) -> None:

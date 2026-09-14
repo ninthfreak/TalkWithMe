@@ -458,6 +458,63 @@ class TestReflection:
         assert [p["persona"] for p in body["personas"]] == ["Alex"]
         assert not (personas_root / "Frank" / "memories.txt").exists()
 
+    def test_an_interview_room_takes_notes_instead_of_reflecting(
+        self, client, personas_root, monkeypatch,
+    ):
+        # The two stores are exclusive on purpose: running both would
+        # file the same facts into a 16 KB file and a file that can hold
+        # a life, and only one of those is the interview's record.
+        import app.config as app_config
+        from app.config import ChatRoom, ChatRoomsConfig
+
+        monkeypatch.setattr(app_config, "_chatrooms_cache", ChatRoomsConfig(
+            chat_rooms=[ChatRoom(
+                name="Sitting", persona_names=["Alex"], interview=True,
+                interview_goal="His working life.",
+            )],
+        ))
+        reflected, noted = [], []
+
+        async def no_reflect(*a, **k):
+            reflected.append(True)
+            return []
+
+        async def fake_notes(persona, subject, goal, history, settings, label, **kw):
+            noted.append((persona.name, subject, goal, kw.get("whole_conversation")))
+            return None
+
+        monkeypatch.setattr(
+            session_router.reflection, "reflect_on_conversation", no_reflect)
+        monkeypatch.setattr(session_router.interview, "take_notes", fake_notes)
+        _add_exchange("Sitting", "I started at the yard in 1978.", "Go on.")
+
+        assert client.post("/api/session/new").status_code == 200
+
+        assert reflected == []
+        assert noted == [("Alex", "User", "His working life.", True)]
+
+    def test_an_ordinary_room_still_reflects(
+        self, client, personas_root, monkeypatch,
+    ):
+        reflected, noted = [], []
+
+        async def fake_reflect(*a, **k):
+            reflected.append(True)
+            return []
+
+        async def fake_notes(*a, **k):
+            noted.append(True)
+            return None
+
+        monkeypatch.setattr(
+            session_router.reflection, "reflect_on_conversation", fake_reflect)
+        monkeypatch.setattr(session_router.interview, "take_notes", fake_notes)
+        _add_exchange("TNG", "Evening.", "Evening.")
+
+        client.post("/api/session/new")
+
+        assert reflected == [True] and noted == []
+
     def test_a_failing_reflection_does_not_break_new_chat(
         self, client, personas_root, monkeypatch,
     ):

@@ -5,6 +5,7 @@ or explicit selection), streams tokens back via SSE, and appends the full
 response to session history. Messages are persisted to disk per chat room.
 """
 
+import asyncio
 import json
 import logging
 import random
@@ -39,7 +40,7 @@ from app.models import (
 )
 from app import persistence
 from app.session import recent_exchanges, session
-from app.services import builtin, persona_store
+from app.services import builtin, interview, persona_store
 from app.services.llm import PROSE_TIMEOUT, chat_completion, stream_chat, stream_chat_with_tools
 from app.services.reply_guard import ReplyGuard, stop_sequences
 from app.services.tool_registry import get_all_tools
@@ -242,6 +243,7 @@ def _build_room_preamble(
     length: TypicalLength,
     player: Optional[Persona] = None,
     addressed_to: Optional[str] = None,
+    interview_goal: Optional[str] = None,
 ) -> str:
     """The app-generated block appended to a persona's system prompt.
 
@@ -341,6 +343,12 @@ def _build_room_preamble(
                 f"You are listening in. Answer as yourself, about what you "
                 f"heard — the question was not put to {persona.name}."
             )
+
+    # An interview room says what the sitting is for. Two lines at most:
+    # this block is capped at about 200 words for a measured reason, and
+    # the notes block carries everything else the interviewer needs.
+    if interview_goal is not None:
+        lines.extend(interview.preamble_lines(persona, speaker, interview_goal))
 
     spec = TYPICAL_LENGTH_SPECS[length]
     if spec.words:
@@ -595,6 +603,30 @@ def _who_is_here_block(persona, present: list[str], settings) -> str:
     return "\n".join(lines)
 
 
+def _system_prompt_with_notes(
+    persona, settings, present: list[str], subject: str, query: str,
+) -> str:
+    """The interview version: the persona's prompt, the room, and the dossier.
+
+    The who-is-here block stays as it is — an interview room can hold
+    more than one persona, and what they know of *each other* is ordinary
+    memory. What is added is the interviewer's notes on the person being
+    interviewed, which live in a different store for a different reason:
+    memories.txt is injected whole and capped at 16 KB, and a life story
+    is not 16 KB.
+
+    The two never double up in practice, because in an interview room the
+    note pass writes to the dossier and the reflection pass does not run.
+    """
+    base = _system_prompt_with_memories(persona, settings, present)
+    if not settings.general.enable_persona_memories:
+        return base
+    block = interview.notes_block(persona, subject, query)
+    if not block:
+        return base
+    return f"{base}\n\nYour notes on {subject}:\n{block}"
+
+
 def _system_prompt_with_memories(persona, settings, present: list[str]) -> str:
     """The persona's system prompt, plus what they know about the room.
 
@@ -726,6 +758,19 @@ async def _chat_stream(
     # instead of the reply before it — see general.independent_replies.
     turn_start_history = list(session.history)
 
+    # Whether this room is an interview, worked out once for the turn.
+    # None for interview_goal means "not an interview" and is what keeps
+    # the preamble identical for every other room; the implicit "default"
+    # room has no ChatRoom object, so it can never be one.
+    is_interview = bool(room is not None and room.interview)
+    interview_goal = room.interview_goal if is_interview else None
+    # What the interviewer looks up. The message when there is one, and
+    # the tail of the transcript on a Continue turn, so carrying on
+    # reads the notes for what is actually being discussed.
+    notes_query = message or interview.recent_conversation(
+        turn_start_history, user_label, exchanges=1,
+    )
+
     # A cut reply costs an attempt but not a slot. Tracking attempts per
     # persona (rather than a flat "already tried" list) lets a persona whose
     # reply was cut be re-rolled once everyone untried has had a go — which
@@ -789,16 +834,28 @@ async def _chat_stream(
         # name they are playing under.
         present = [n for n in eligible if n != persona_name] + [user_label]
 
+        # In an interview the persona reads its dossier on the person in
+        # front of it instead of relying on memories.txt alone — the index
+        # of everything it has written down, plus the topics that match
+        # what is being asked about right now.
+        if is_interview:
+            system_prompt = _system_prompt_with_notes(
+                persona, settings, present, user_label, notes_query,
+            )
+        else:
+            system_prompt = _system_prompt_with_memories(persona, settings, present)
+
         messages = session.build_llm_messages(
             # The persona's own prompt, plus who is here and what they
             # know of them (docs/feature_persona_memory.md).
-            system_prompt=_system_prompt_with_memories(persona, settings, present),
+            system_prompt=system_prompt,
             responding_persona=persona_name,
             max_turns_for_context=settings.general.max_turns_for_context,
             room_preamble=_build_room_preamble(
                 persona, chat_room, eligible, length,
                 player=_adopted_persona(),
                 addressed_to=addressed_to,
+                interview_goal=interview_goal,
             ),
             user_label=user_label,
             # None means the live history, which includes whoever has
@@ -924,7 +981,54 @@ async def _chat_stream(
         )
         yield f'data: {json.dumps({"type": "error", "message": NO_USABLE_REPLY_MESSAGE})}\n\n'
 
+    # An interview writes itself down as it goes. Scheduled rather than
+    # awaited: the reply has already streamed, so the user is reading
+    # while this runs, and the note pass queues against the backend
+    # rather than against them.
+    if is_interview and replied_personas and interview.due_for_notes(session.history):
+        for name in replied_personas:
+            speaker = next((p for p in config.personas if p.name == name), None)
+            if speaker is not None:
+                _schedule_notes(speaker, user_label, interview_goal or "",
+                                list(session.history), settings, turn_room)
+
     yield f'data: {json.dumps({"type": "complete"})}\n\n'
+
+
+# Note passes already running, keyed by persona and subject.
+#
+# Two passes over the same dossier would race to write the same file and
+# the loser's notes would vanish silently. Skipping is safe rather than
+# lossy: the note window overlaps the previous one by an exchange, so
+# whatever this pass would have read, the next one reads.
+_notes_in_flight: set[tuple[str, str]] = set()
+
+
+def _schedule_notes(persona, subject: str, goal: str, history, settings, room: str) -> None:
+    """Run a note-taking pass in the background, at most one at a time."""
+    key = (persona.name.casefold(), subject.casefold())
+    if key in _notes_in_flight:
+        logger.debug(
+            "Interview notes for '%s' are already running; the next pass "
+            "covers this stretch", persona.name,
+        )
+        return
+
+    async def run():
+        try:
+            await interview.take_notes(
+                persona, subject, goal, history, settings, subject,
+            )
+        except Exception:  # noqa: BLE001
+            # take_notes never raises, so this is the belt to its braces.
+            # An exception escaping a background task is a traceback in
+            # the log and nothing else to act on.
+            logger.exception("Interview notes failed in room '%s'", room)
+        finally:
+            _notes_in_flight.discard(key)
+
+    _notes_in_flight.add(key)
+    asyncio.create_task(run())
 
 
 _SSE_HEADERS = {
