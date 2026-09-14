@@ -134,6 +134,8 @@ const paListEl = document.getElementById("pa-list");
 const roomEditOverlay = document.getElementById("room-edit-overlay");
 const reTypicalLength = document.getElementById("re-typical-length");
 const reRequirePersona = document.getElementById("re-require-persona");
+const reInterview = document.getElementById("re-interview");
+const reInterviewGoal = document.getElementById("re-interview-goal");
 
 // "Speak as" — the player writes a line and a persona says it verbatim
 const speakAsOverlay = document.getElementById("speak-as-overlay");

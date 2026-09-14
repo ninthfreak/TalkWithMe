@@ -39,6 +39,8 @@ class TestCreateChatroom:
             "persona_names": [],
             "typical_length": "detailed",
             "require_player_persona": False,
+            "interview": False,
+            "interview_goal": "",
         }
         assert [r["name"] for r in client.get("/api/chatrooms").json()] == ["TNG", "Enterprise"]
 
@@ -230,3 +232,74 @@ class TestRequirePlayerPersona:
 
     def test_default_room_reports_no_requirement(self, client):
         assert client.get("/api/chatrooms/default").json()["require_player_persona"] is False
+
+
+# ---------------------------------------------------------------------------
+# Interview rooms
+# ---------------------------------------------------------------------------
+
+class TestInterviewRoom:
+    """An interview is a kind of conversation, so it is a property of the
+    room. The implicit "default" room has no ChatRoom object, which is
+    what makes "today's behaviour there is untouched" structural rather
+    than a promise."""
+
+    def test_a_new_room_is_not_an_interview(self, client):
+        body = client.post("/api/chatrooms", json={"name": "Sitting"}).json()
+        assert body["interview"] is False and body["interview_goal"] == ""
+
+    def test_the_toggle_and_the_goal_persist(self, client):
+        resp = client.put("/api/chatrooms/TNG", json={
+            "interview": True,
+            "interview_goal": "Tony's working life, 1978 to retirement.",
+        })
+        assert resp.status_code == 200
+
+        body = client.get("/api/chatrooms/TNG").json()
+        assert body["interview"] is True
+        assert body["interview_goal"] == "Tony's working life, 1978 to retirement."
+
+    def test_the_goal_survives_the_toggle_going_off(self, client):
+        # Turning a room back into an interview should not mean retyping
+        # what it was for.
+        client.put("/api/chatrooms/TNG", json={
+            "interview": True, "interview_goal": "His working life."})
+        client.put("/api/chatrooms/TNG", json={"interview": False})
+
+        body = client.get("/api/chatrooms/TNG").json()
+        assert body["interview"] is False
+        assert body["interview_goal"] == "His working life."
+
+    def test_the_interview_fields_survive_an_unrelated_update(self, client):
+        client.put("/api/chatrooms/TNG", json={
+            "interview": True, "interview_goal": "His working life."})
+        client.put("/api/chatrooms/TNG", json={"typical_length": "brief"})
+
+        body = client.get("/api/chatrooms/TNG").json()
+        assert body["interview"] is True
+        assert body["interview_goal"] == "His working life."
+
+    def test_an_overlong_goal_is_refused(self, client):
+        from app.config import MAX_INTERVIEW_GOAL
+        resp = client.put("/api/chatrooms/TNG", json={
+            "interview_goal": "x" * (MAX_INTERVIEW_GOAL + 1)})
+        assert resp.status_code == 422
+
+    def test_the_default_room_is_never_an_interview(self, client):
+        rooms = {r["name"]: r for r in client.get("/api/chatrooms/all").json()}
+        assert rooms["default"]["interview"] is False
+        assert client.put(
+            "/api/chatrooms/default", json={"interview": True}).status_code == 400
+
+    def test_an_old_chatrooms_file_loads_with_the_flag_off(self, tmp_project_root):
+        # A new key with a default needs no migration; an existing
+        # chatrooms.yaml written before this field must still load.
+        import yaml
+        from app.config import ChatRoomsConfig
+        raw = yaml.safe_load(
+            "chat_rooms:\n  - name: TNG\n    persona_names: [Alex]\n"
+            "    typical_length: brief\n"
+        )
+        config = ChatRoomsConfig(**raw)
+        assert config.chat_rooms[0].interview is False
+        assert config.chat_rooms[0].interview_goal == ""

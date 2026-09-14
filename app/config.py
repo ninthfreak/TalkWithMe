@@ -50,6 +50,11 @@ DEFAULT_MEMORY_SIZE = 8192
 MAX_MEMORY_SIZE = 16384
 """Hard cap for a persona's memory_size; larger values are invalid."""
 MAX_MEMORY_LINE_CHARS = 1024
+
+# An interview's goal is a sentence or two of direction, not a brief. It
+# rides in the room preamble, which is held to about 200 words, so a long
+# one would crowd out the persona it is supposed to be steering.
+MAX_INTERVIEW_GOAL = 500
 """Max length of a single memory, in characters. Longer memories are
 rejected, never truncated — the LLM can reformulate a shorter one."""
 
@@ -453,6 +458,24 @@ class ChatRoom(BaseModel):
     # before you can chat. *Who* you are playing is not the room's —
     # that lives in player.yaml.
     require_player_persona: bool = False
+    # Whether this room is an interview rather than a conversation.
+    #
+    # On the room and not on the persona, deliberately. An interview is a
+    # kind of *conversation*, and a room already owns the three things one
+    # is made of: the transcript, who is present, and who writes notes
+    # afterwards. The same flag on a persona would follow an interviewer
+    # into every other room and have it taking notes on everybody there —
+    # the "mode on a character" shape this app has moved off twice.
+    #
+    # The implicit "default" room has no ChatRoom object at all, so it can
+    # never be an interview. Today's behaviour there is untouched by
+    # construction rather than by discipline.
+    interview: bool = False
+    # What this interview is for, in the interviewer's own words. Reaches
+    # two prompts with two different jobs: the reply, where it decides
+    # what to ask next, and the note pass, where it decides what is worth
+    # writing down. Empty is legal and means "follow what you find".
+    interview_goal: str = ""
 
 
 class ChatRoomsConfig(BaseModel):

@@ -721,6 +721,8 @@ function openRoomEditor(roomName) {
     document.getElementById("re-title").textContent = `Edit “${room.name}”`;
     reTypicalLength.value = room.typical_length || "normal";
     reRequirePersona.checked = !!room.require_player_persona;
+    reInterview.checked = !!room.interview;
+    reInterviewGoal.value = room.interview_goal || "";
     document.getElementById("re-personas").textContent =
         room.persona_names.length
             ? `${room.persona_names.length} assigned: ${room.persona_names.join(", ")}`
@@ -767,6 +769,11 @@ async function submitRoomEditor(e) {
     const patch = {
         typical_length: reTypicalLength.value,
         require_player_persona: reRequirePersona.checked,
+        // Sent whether or not the toggle is on: the goal is what the
+        // interview is for, and turning the room back into one should
+        // not mean retyping it.
+        interview: reInterview.checked,
+        interview_goal: reInterviewGoal.value.trim(),
     };
 
     try {

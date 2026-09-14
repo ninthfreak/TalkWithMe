@@ -38,6 +38,8 @@ def _to_response(room: ChatRoom) -> ChatRoomResponse:
         persona_names=list(room.persona_names),
         typical_length=room.typical_length,
         require_player_persona=room.require_player_persona,
+        interview=room.interview,
+        interview_goal=room.interview_goal,
     )
 
 

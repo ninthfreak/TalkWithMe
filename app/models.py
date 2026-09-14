@@ -6,7 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import LengthBias, PromptFormat, TypicalLength
 
-from app.config import DEFAULT_MEMORY_SIZE, MAX_MEMORY_SIZE, MAX_PERSONA_NAME
+from app.config import (
+    DEFAULT_MEMORY_SIZE, MAX_INTERVIEW_GOAL, MAX_MEMORY_SIZE, MAX_PERSONA_NAME,
+)
 
 from app.services.persona_draft import MAX_REFINE_INSTRUCTION
 
@@ -643,6 +645,8 @@ class ChatRoomResponse(BaseModel):
     persona_names: List[str] = Field(default_factory=list)
     typical_length: TypicalLength = TypicalLength.NORMAL
     require_player_persona: bool = False
+    interview: bool = False
+    interview_goal: str = ""
 
 
 class ChatRoomCreateRequest(BaseModel):
@@ -687,6 +691,11 @@ class ChatRoomUpdateRequest(BaseModel):
 
     typical_length: Optional[TypicalLength] = None
     require_player_persona: Optional[bool] = None
+    # An interview is a kind of conversation, so it is a property of the
+    # room. The goal is kept even while the toggle is off: turning the
+    # room back into an interview should not mean retyping what it is for.
+    interview: Optional[bool] = None
+    interview_goal: Optional[str] = Field(default=None, max_length=MAX_INTERVIEW_GOAL)
 
 
 class PlayerResponse(BaseModel):
