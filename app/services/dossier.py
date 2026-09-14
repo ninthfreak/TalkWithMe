@@ -96,6 +96,14 @@ _RELEVANCE_FLOOR = 0.5
 # spends the whole budget on itself and the block stops being legible.
 MAX_NOTES_PER_TOPIC = 8
 
+# When a topic holds more than this, most of it can never be retrieved:
+# only MAX_NOTES_PER_TOPIC of it is ever shown, so the rest is on disk
+# and out of reach. Three times the cap is the point at which that stops
+# being a rounding error and starts being the bulk of the topic. Reported
+# rather than fixed, because splitting "work" into "the yard", "the union"
+# and "management" is a judgement only the model can make.
+CROWDED_TOPIC = MAX_NOTES_PER_TOPIC * 3
+
 
 # ---------------------------------------------------------------------------
 # The note format
@@ -476,6 +484,144 @@ def topics(notes: Sequence[Note]) -> List[Topic]:
         Topic(tag=tag, count=count, sensitive=tender.get(tag, False))
         for tag, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
+
+
+# ---------------------------------------------------------------------------
+# Keeping the index usable
+# ---------------------------------------------------------------------------
+#
+# The memory system tidies memories.txt to save *bytes*, because every
+# byte of it is injected. A dossier has bytes to spare — the whole point
+# is that it outgrows a prompt — so nothing here is about size. What
+# degrades instead is **retrieval**, in two ways:
+#
+#   * the index fragments. The write path snaps a proposed tag against
+#     the topics already in the file, so the app's own writes arrive
+#     tidy — but these files are meant to be opened and edited (the
+#     README says so), and a hand-written "#schools" beside an
+#     established "#school" splits a topic in two. The index is the one
+#     part of a dossier that *is* injected every turn, so a split topic
+#     costs something every turn.
+#   * topics outgrow what can be shown. A topic of four hundred notes
+#     surfaces eight, so the other three hundred and ninety-two are held
+#     and unreachable.
+#
+# This pass fixes the first mechanically and reports the second, which
+# needs a model. Same division as the memory system: dedupe_memories()
+# runs itself because it can only ever remove an exact copy, and condense
+# is behind a button because it rewrites sentences.
+
+class ReindexReport(NamedTuple):
+    """What a reindex did, and what it could not do without a model.
+
+    *untagged* and *crowded* are the interesting half: both are notes the
+    dossier holds and retrieval cannot reach, which is invisible from the
+    file and from the conversation.
+    """
+
+    merges: List[Tuple[str, str]]
+    crowded: List[Topic]
+    duplicates_removed: int = 0
+    untagged: int = 0
+    changed: bool = False
+
+
+def reindex(persona_dir: Path, subject: str) -> ReindexReport:
+    """Tidy one dossier's index without a model. Never raises.
+
+    Three mechanical steps, each of which can only ever collapse two
+    spellings of one thing into one of them:
+
+      * byte-identical notes lose their copies, first kept, like
+        dedupe_memories — the note pass re-reads an overlapping window by
+        design, so a file written only by this app can still hold them
+        after a hand-edit;
+      * every tag is re-snapped against the tags better established than
+        it, biggest first, so a hand-written "#schools" folds into the
+        "#school" that already holds forty notes and never the other way
+        round;
+      * nothing else. Merging two notes that say the same thing in
+        different words is a judgement, and it belongs to the condense
+        pass with a preview in front of it.
+
+    Deterministic and idempotent: the surviving tags do not snap to each
+    other, so a second run finds nothing. Writes only when something
+    actually changed, since this runs on the read path.
+    """
+    notes = read_notes(persona_dir, subject)
+    if not notes:
+        return ReindexReport(merges=[], crowded=[])
+
+    seen = set()
+    deduped = []
+    for note in notes:
+        key = note.text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(note)
+    duplicates = len(notes) - len(deduped)
+
+    # Established first, so a small topic folds into a big one and never
+    # the other way round. First appearance breaks ties, which keeps two
+    # equally-sized neighbours from swapping places on alternate runs.
+    counts: Dict[str, int] = {}
+    first: Dict[str, int] = {}
+    for position, note in enumerate(deduped):
+        for tag in note.tags:
+            counts[tag] = counts.get(tag, 0) + 1
+            first.setdefault(tag, position)
+    ranked = sorted(counts, key=lambda t: (-counts[t], first[t], t))
+
+    established: List[str] = []
+    folded: Dict[str, str] = {}
+    merges: List[Tuple[str, str]] = []
+    for tag in ranked:
+        settled, merged_from = snap_tag(tag, established)
+        if merged_from and settled != tag:
+            folded[tag] = settled
+            merges.append((tag, settled))
+            continue
+        established.append(settled)
+
+    rewritten = []
+    for note in deduped:
+        tags = tuple(dict.fromkeys(folded.get(t, t) for t in note.tags))
+        rewritten.append(note if tags == note.tags else note._replace(tags=tags))
+
+    changed = bool(duplicates or merges)
+    if changed:
+        try:
+            write_notes(persona_dir, subject, rewritten)
+        except OSError as exc:
+            # The state it was called to improve is the state it leaves,
+            # which is not a reason to fail a reply.
+            logger.warning("Could not reindex %s/%s: %s", persona_dir.name, subject, exc)
+            changed = False
+        else:
+            for was, now in merges:
+                logger.info("Dossier %s/%s: folded '#%s' into '#%s'",
+                            persona_dir.name, subject, was, now)
+            if duplicates:
+                logger.info("Dossier %s/%s: dropped %d duplicate note(s)",
+                            persona_dir.name, subject, duplicates)
+
+    index = topics(rewritten)
+    untagged = sum(1 for n in rewritten if not n.tags and not n.open_question)
+    crowded = [t for t in index if t.count > CROWDED_TOPIC]
+    if untagged:
+        # Only the recency fallback can ever show these. Said out loud
+        # because nothing about the file looks wrong.
+        logger.info("Dossier %s/%s: %d note(s) carry no topic and can only "
+                    "be reached by recency", persona_dir.name, subject, untagged)
+    for topic in crowded:
+        logger.info("Dossier %s/%s: '#%s' holds %d notes and shows at most %d",
+                    persona_dir.name, subject, topic.tag, topic.count, MAX_NOTES_PER_TOPIC)
+
+    return ReindexReport(
+        merges=merges, duplicates_removed=duplicates,
+        untagged=untagged, crowded=crowded, changed=changed,
+    )
 
 
 _STOPWORDS = {

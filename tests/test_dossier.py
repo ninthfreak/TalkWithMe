@@ -303,6 +303,156 @@ class TestOpenQuestions:
 
 
 # ---------------------------------------------------------------------------
+# Keeping the index usable
+# ---------------------------------------------------------------------------
+
+class TestReindex:
+    """The dossier's equivalent of dedupe_memories, and it exists for a
+    different reason: nothing here saves bytes, because a dossier has
+    bytes to spare. What it saves is retrieval."""
+
+    def test_a_hand_written_spelling_folds_into_the_established_topic(self, tmp_path):
+        # The case this pass is for. These files are meant to be opened
+        # and edited, and a hand-written "#schooling" beside an
+        # established "#school" splits a topic in two — which costs
+        # something every turn, since the index is always injected.
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir,
+               *[f"[Tony] #school School memory {i}." for i in range(5)],
+               "[Tony] #schooling Hated the grammar.")
+
+        report = dossier.reindex(persona_dir, "Tony")
+
+        assert report.merges == [("schooling", "school")]
+        assert {t.tag for t in dossier.topics(dossier.read_notes(persona_dir, "Tony"))} == {"school"}
+
+    def test_the_write_path_already_keeps_the_apps_own_tags_together(self, tmp_path):
+        # Worth pinning: append_notes snaps against what is in the file,
+        # so nothing the app writes needs repairing. The first spelling
+        # to arrive is the one that survives, which is why a reindex
+        # never renames a topic that is not split.
+        persona_dir = _dir(tmp_path)
+        dossier.append_notes(persona_dir, "Tony", [_note("Hated the grammar.", "schooling")])
+        dossier.append_notes(persona_dir, "Tony", [
+            _note(f"School memory {i}.", "school") for i in range(5)])
+
+        assert {t.tag for t in dossier.topics(dossier.read_notes(persona_dir, "Tony"))} == {"schooling"}
+        assert dossier.reindex(persona_dir, "Tony").changed is False
+
+    def test_a_big_topic_never_folds_into_a_small_one(self, tmp_path):
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir,
+               *[f"[Tony] #work Fact {i}." for i in range(10)],
+               "[Tony] #works One stray.")
+        dossier.reindex(persona_dir, "Tony")
+        assert {t.tag for t in dossier.topics(dossier.read_notes(persona_dir, "Tony"))} == {"work"}
+
+    def test_byte_identical_notes_lose_their_copies(self, tmp_path):
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir,
+               "[Tony] #family Born in Leeds.",
+               "[Tony] #family Born in Leeds.",
+               "[Tony] #work Started at the yard.")
+
+        report = dossier.reindex(persona_dir, "Tony")
+
+        assert report.duplicates_removed == 1
+        assert len(dossier.read_notes(persona_dir, "Tony")) == 2
+
+    def test_the_first_copy_survives_so_order_is_kept(self, tmp_path):
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir,
+               "[Tony] #family @1961 Born in Leeds.",
+               "[Tony] #work Started at the yard.",
+               "[Tony] #family Born in Leeds.")
+        dossier.reindex(persona_dir, "Tony")
+        kept = dossier.read_notes(persona_dir, "Tony")
+        assert [n.when for n in kept] == ["1961", ""]
+
+    def test_running_it_twice_changes_nothing_the_second_time(self, tmp_path):
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir,
+               *[f"[Tony] #work Fact {i}." for i in range(5)],
+               "[Tony] #working One more.",
+               "[Tony] #family Born in Leeds.",
+               "[Tony] #family Born in Leeds.")
+
+        first = dossier.reindex(persona_dir, "Tony")
+        after = _file(persona_dir).read_text()
+        second = dossier.reindex(persona_dir, "Tony")
+
+        assert first.changed is True
+        assert second.changed is False and second.merges == []
+        assert _file(persona_dir).read_text() == after
+
+    def test_a_clean_dossier_is_not_rewritten(self, tmp_path):
+        # It runs on the read path, so a healthy file must cost a read.
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir, "[Tony] #work Started at the yard.")
+        before = _file(persona_dir).stat().st_mtime_ns
+        assert dossier.reindex(persona_dir, "Tony").changed is False
+        assert _file(persona_dir).stat().st_mtime_ns == before
+
+    def test_untagged_notes_are_counted_because_only_recency_finds_them(self, tmp_path):
+        # Nothing about the file looks wrong, and the notes are
+        # unreachable by topic.
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir,
+               "[Tony] #work Started at the yard.",
+               "[Tony] He hated the cold.",
+               "[Tony] His knees went first.")
+        assert dossier.reindex(persona_dir, "Tony").untagged == 2
+
+    def test_an_open_question_is_not_counted_as_untagged(self, tmp_path):
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir, "[Tony] (open) Why Leeds?")
+        assert dossier.reindex(persona_dir, "Tony").untagged == 0
+
+    def test_a_topic_bigger_than_retrieval_can_show_is_reported(self, tmp_path):
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir, *[f"[Tony] #work Fact {i}." for i in range(dossier.CROWDED_TOPIC + 1)])
+
+        report = dossier.reindex(persona_dir, "Tony")
+
+        assert [t.tag for t in report.crowded] == ["work"]
+        assert report.crowded[0].count > dossier.MAX_NOTES_PER_TOPIC
+
+    def test_a_topic_retrieval_can_show_whole_is_not_reported(self, tmp_path):
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir, *[f"[Tony] #work Fact {i}." for i in range(4)])
+        assert dossier.reindex(persona_dir, "Tony").crowded == []
+
+    def test_a_missing_dossier_reindexes_to_nothing(self, tmp_path):
+        report = dossier.reindex(_dir(tmp_path), "Nobody")
+        assert report.changed is False and report.merges == []
+
+    def test_notes_keep_their_text_and_era_through_a_fold(self, tmp_path):
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir,
+               *[f"[Tony] #school Fact {i}." for i in range(5)],
+               "[Tony] (assumed) #schools @1969 He was bullied.")
+
+        dossier.reindex(persona_dir, "Tony")
+
+        folded = dossier.read_notes(persona_dir, "Tony")[-1]
+        assert folded.text == "He was bullied."
+        assert folded.when == "1969" and folded.assumed is True
+        assert folded.tags == ("school",)
+
+    def test_a_fold_does_not_leave_a_note_tagged_twice(self, tmp_path):
+        # A note carrying both spellings must end up with one tag, not
+        # the same tag written out twice.
+        persona_dir = _dir(tmp_path)
+        _write(persona_dir,
+               *[f"[Tony] #school Fact {i}." for i in range(5)],
+               "[Tony] #school #schools Sat the eleven-plus.")
+
+        dossier.reindex(persona_dir, "Tony")
+
+        assert dossier.read_notes(persona_dir, "Tony")[-1].tags == ("school",)
+
+
+# ---------------------------------------------------------------------------
 # The index
 # ---------------------------------------------------------------------------
 
