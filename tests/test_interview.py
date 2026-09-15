@@ -73,7 +73,7 @@ def _run(coro):
         loop.close()
 
 
-def _notes(persona, subject="Tony"):
+def _notes(persona, subject="Wes"):
     return dossier.read_notes(persona.persona_dir, subject)
 
 
@@ -119,12 +119,12 @@ class TestCadence:
             ("user", "Second question."), ("Marion", "Second answer."),
             ("user", "Third question."), ("Marion", "Third answer."),
         )
-        window = interview.recent_conversation(history, "Tony", exchanges=2)
-        assert window.startswith("[Tony]: Second question.")
+        window = interview.recent_conversation(history, "Wes", exchanges=2)
+        assert window.startswith("[Wes]: Second question.")
         assert "First question" not in window
 
     def test_a_short_conversation_is_the_whole_window(self):
-        window = interview.recent_conversation(_sitting(1), "Tony", exchanges=4)
+        window = interview.recent_conversation(_sitting(1), "Wes", exchanges=4)
         assert "Answer number 0" in window
 
 
@@ -136,7 +136,7 @@ class TestNotesPrompt:
     def test_the_goal_is_what_the_pass_is_told_to_look_for(self):
         messages = interview.build_notes_prompt(
             Persona(name="Marion", system_prompt="You are Marion."),
-            "Tony", "His working life, 1978 to retirement.", "[Tony]: I started in 78.",
+            "Wes", "His working life, 1978 to retirement.", "[Wes]: I started in 78.",
         )
         assert "His working life, 1978 to retirement." in messages[-1]["content"]
 
@@ -145,7 +145,7 @@ class TestNotesPrompt:
         # snap_tag will never merge "job" into "work".
         messages = interview.build_notes_prompt(
             Persona(name="Marion", system_prompt="You are Marion."),
-            "Tony", "", "[Tony]: I started in 78.",
+            "Wes", "", "[Wes]: I started in 78.",
             index=[dossier.Topic("work", 12), dossier.Topic("family", 3)],
         )
         content = messages[-1]["content"]
@@ -156,8 +156,8 @@ class TestNotesPrompt:
         # Nothing here asks a model to delete a line.
         messages = interview.build_notes_prompt(
             Persona(name="Marion", system_prompt="You are Marion."),
-            "Tony", "", "[Tony]: I started in 78.",
-            open_questions=[Note(subject="Tony", text="Why did he leave?",
+            "Wes", "", "[Wes]: I started in 78.",
+            open_questions=[Note(subject="Wes", text="Why did he leave?",
                                  open_question=True)],
         )
         content = messages[-1]["content"]
@@ -169,7 +169,7 @@ class TestNotesPrompt:
         # invents a fact about somebody's life.
         messages = interview.build_notes_prompt(
             Persona(name="Marion", system_prompt="You are Marion."),
-            "Tony", "", "[Tony]: Morning.",
+            "Wes", "", "[Wes]: Morning.",
         )
         assert "answer with the single word: nothing" in messages[-1]["content"]
 
@@ -178,11 +178,11 @@ class TestNotesPrompt:
         # parser reads.
         messages = interview.build_notes_prompt(
             Persona(name="Marion", system_prompt="You are Marion."),
-            "Tony", "", "[Tony]: I started in 78.",
+            "Wes", "", "[Wes]: I started in 78.",
         )
         shown = [
             line.strip() for line in messages[-1]["content"].splitlines()
-            if line.strip().startswith("[Tony]")
+            if line.strip().startswith("[Wes]")
         ]
         assert shown
         for line in shown:
@@ -196,9 +196,9 @@ class TestNotesPrompt:
 class TestParseNotes:
     def test_facts_and_questions_come_back_apart(self):
         facts, questions, dropped = interview.parse_notes(
-            "[Tony] #work @1978 Started at the yard.\n"
-            "[Tony] (open) #work Why did he leave?\n",
-            "Tony",
+            "[Wes] #work @1978 Started at the yard.\n"
+            "[Wes] (open) #work Why did he leave?\n",
+            "Wes",
         )
         assert [n.text for n in facts] == ["Started at the yard."]
         assert [n.text for n in questions] == ["Why did he leave?"]
@@ -206,36 +206,36 @@ class TestParseNotes:
 
     def test_tags_and_eras_survive(self):
         facts, _, _ = interview.parse_notes(
-            "[Tony] #work #vickers @1978 Started at the yard.", "Tony")
+            "[Wes] #work #vickers @1978 Started at the yard.", "Wes")
         assert facts[0].tags == ("work", "vickers") and facts[0].when == "1978"
 
     def test_a_line_about_somebody_else_is_dropped(self):
         # A dossier is one person's. A fact about their mother is a fact
         # about them, filed under their name.
         facts, _, dropped = interview.parse_notes(
-            "[Tony] #family Mother taught at the grammar.\n"
+            "[Wes] #family Mother taught at the grammar.\n"
             "[Mother] She taught at the grammar.\n",
-            "Tony",
+            "Wes",
         )
         assert len(facts) == 1 and len(dropped) == 1
 
     def test_nothing_is_read_as_nothing(self):
         for answer in ("nothing", "Nothing.", "none", "nothing new"):
-            facts, questions, _ = interview.parse_notes(answer, "Tony")
+            facts, questions, _ = interview.parse_notes(answer, "Wes")
             assert facts == [] and questions == []
 
     def test_list_bullets_are_tolerated(self):
         facts, _, _ = interview.parse_notes(
-            "- [Tony] #work Started at the yard.", "Tony")
+            "- [Wes] #work Started at the yard.", "Wes")
         assert len(facts) == 1
 
     def test_a_line_with_only_markers_is_dropped(self):
-        facts, _, dropped = interview.parse_notes("[Tony] #work @1978", "Tony")
+        facts, _, dropped = interview.parse_notes("[Wes] #work @1978", "Wes")
         assert facts == [] and len(dropped) == 1
 
     def test_an_untagged_line_is_still_filed_under_the_subject(self):
-        facts, _, _ = interview.parse_notes("He hated the cold.", "Tony")
-        assert facts[0].subject == "Tony" and facts[0].text == "He hated the cold."
+        facts, _, _ = interview.parse_notes("He hated the cold.", "Wes")
+        assert facts[0].subject == "Wes" and facts[0].text == "He hated the cold."
 
 
 # ---------------------------------------------------------------------------
@@ -245,12 +245,12 @@ class TestParseNotes:
 class TestTakeNotes:
     def test_notes_are_written_to_the_dossier(self, tmp_path, monkeypatch):
         marion = _persona(tmp_path)
-        _stub(monkeypatch, "[Tony] #work @1978 Started at the yard.")
+        _stub(monkeypatch, "[Wes] #work @1978 Started at the yard.")
 
         result = _run(interview.take_notes(
-            marion, "Tony", "His working life", _sitting(), make_settings(), "Tony"))
+            marion, "Wes", "His working life", _sitting(), make_settings(), "Wes"))
 
-        assert result.filed == ["[Tony] #work @1978 Started at the yard."]
+        assert result.filed == ["[Wes] #work @1978 Started at the yard."]
         assert [n.text for n in _notes(marion)] == ["Started at the yard."]
 
     def test_nothing_is_written_to_memories(self, tmp_path, monkeypatch):
@@ -258,56 +258,56 @@ class TestTakeNotes:
         # same fact in a 16 KB file and a file that can hold a life.
         from app.services import persona_store
         marion = _persona(tmp_path)
-        _stub(monkeypatch, "[Tony] #work Started at the yard.")
+        _stub(monkeypatch, "[Wes] #work Started at the yard.")
 
         _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), make_settings(), "Tony"))
+            marion, "Wes", "", _sitting(), make_settings(), "Wes"))
 
         assert persona_store.read_memories(marion.persona_dir) == ""
 
     def test_open_questions_replace_rather_than_accumulate(self, tmp_path, monkeypatch):
         marion = _persona(tmp_path)
-        _stub(monkeypatch, "[Tony] (open) Why did he leave?\n"
-                           "[Tony] (open) What about 1986?")
+        _stub(monkeypatch, "[Wes] (open) Why did he leave?\n"
+                           "[Wes] (open) What about 1986?")
         _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), make_settings(), "Tony"))
+            marion, "Wes", "", _sitting(), make_settings(), "Wes"))
 
-        _stub(monkeypatch, "[Tony] (open) What about 1986?")
+        _stub(monkeypatch, "[Wes] (open) What about 1986?")
         _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), make_settings(), "Tony"))
+            marion, "Wes", "", _sitting(), make_settings(), "Wes"))
 
         standing = [n.text for n in _notes(marion) if n.open_question]
         assert standing == ["What about 1986?"]
 
     def test_a_pass_is_shown_the_topics_already_in_use(self, tmp_path, monkeypatch):
         marion = _persona(tmp_path)
-        dossier.append_notes(marion.persona_dir, "Tony", [
-            Note(subject="Tony", text="Started at the yard.", tags=("work",))])
+        dossier.append_notes(marion.persona_dir, "Wes", [
+            Note(subject="Wes", text="Started at the yard.", tags=("work",))])
         captured = []
         _stub(monkeypatch, "nothing", capture=captured)
 
         _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), make_settings(), "Tony"))
+            marion, "Wes", "", _sitting(), make_settings(), "Wes"))
 
         assert "work" in captured[0][0][-1]["content"]
 
     def test_the_cap_holds(self, tmp_path, monkeypatch):
         marion = _persona(tmp_path)
         _stub(monkeypatch, "\n".join(
-            f"[Tony] #work Fact number {i}." for i in range(40)))
+            f"[Wes] #work Fact number {i}." for i in range(40)))
 
         _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), make_settings(), "Tony"))
+            marion, "Wes", "", _sitting(), make_settings(), "Wes"))
 
         assert len(_notes(marion)) == interview.MAX_NOTES_PER_PASS
 
     def test_the_open_question_cap_holds(self, tmp_path, monkeypatch):
         marion = _persona(tmp_path)
         _stub(monkeypatch, "\n".join(
-            f"[Tony] (open) Question {i}?" for i in range(30)))
+            f"[Wes] (open) Question {i}?" for i in range(30)))
 
         _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), make_settings(), "Tony"))
+            marion, "Wes", "", _sitting(), make_settings(), "Wes"))
 
         standing = [n for n in _notes(marion) if n.open_question]
         assert len(standing) == interview.MAX_OPEN_QUESTIONS
@@ -315,11 +315,11 @@ class TestTakeNotes:
     def test_a_repeated_fact_is_filed_once(self, tmp_path, monkeypatch):
         # The window overlaps by design, so the same stretch is read twice.
         marion = _persona(tmp_path)
-        _stub(monkeypatch, "[Tony] #work Started at the yard.")
+        _stub(monkeypatch, "[Wes] #work Started at the yard.")
         _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), make_settings(), "Tony"))
+            marion, "Wes", "", _sitting(), make_settings(), "Wes"))
         _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), make_settings(), "Tony"))
+            marion, "Wes", "", _sitting(), make_settings(), "Wes"))
 
         assert len(_notes(marion)) == 1
 
@@ -333,7 +333,7 @@ class TestTakeNotes:
         monkeypatch.setattr(interview, "chat_completion", boom)
 
         assert _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), make_settings(), "Tony")) is None
+            marion, "Wes", "", _sitting(), make_settings(), "Wes")) is None
         assert _notes(marion) == []
 
     def test_an_empty_answer_is_reported_at_info(self, tmp_path, monkeypatch, caplog):
@@ -343,18 +343,18 @@ class TestTakeNotes:
         _stub(monkeypatch, "")
         with caplog.at_level(logging.INFO):
             _run(interview.take_notes(
-                marion, "Tony", "", _sitting(), make_settings(), "Tony"))
+                marion, "Wes", "", _sitting(), make_settings(), "Wes"))
         assert "returned nothing" in caplog.text
 
     def test_memories_switched_off_stops_the_pass(self, tmp_path, monkeypatch):
         from app.config import GeneralConfig
         marion = _persona(tmp_path)
-        _stub(monkeypatch, "[Tony] #work Started at the yard.")
+        _stub(monkeypatch, "[Wes] #work Started at the yard.")
         settings = make_settings()
         settings.general = GeneralConfig(enable_persona_memories=False)
 
         assert _run(interview.take_notes(
-            marion, "Tony", "", _sitting(), settings, "Tony")) is None
+            marion, "Wes", "", _sitting(), settings, "Wes")) is None
         assert _notes(marion) == []
 
     def test_the_final_pass_reads_the_whole_conversation(self, tmp_path, monkeypatch):
@@ -364,7 +364,7 @@ class TestTakeNotes:
         _stub(monkeypatch, "nothing", capture=captured)
 
         _run(interview.take_notes(
-            marion, "Tony", "", _sitting(exchanges=9), make_settings(), "Tony",
+            marion, "Wes", "", _sitting(exchanges=9), make_settings(), "Wes",
             whole_conversation=True))
 
         content = captured[0][0][-1]["content"]
@@ -378,7 +378,7 @@ class TestTakeNotes:
 class TestWhatTheInterviewerReads:
     def test_the_preamble_says_what_the_sitting_is_for(self):
         lines = interview.preamble_lines(
-            Persona(name="Marion", system_prompt="x"), "Tony",
+            Persona(name="Marion", system_prompt="x"), "Wes",
             "His working life, 1978 to retirement.")
         assert any("This is an interview" in line for line in lines)
         assert any("1978 to retirement" in line for line in lines)
@@ -392,35 +392,35 @@ class TestWhatTheInterviewerReads:
 
     def test_an_empty_goal_adds_no_second_line(self):
         lines = interview.preamble_lines(
-            Persona(name="Marion", system_prompt="x"), "Tony", "")
+            Persona(name="Marion", system_prompt="x"), "Wes", "")
         assert len(lines) == 1
 
     def test_the_notes_block_is_the_index_plus_what_matches(self, tmp_path):
         marion = _persona(tmp_path)
-        dossier.append_notes(marion.persona_dir, "Tony", [
-            Note(subject="Tony", text="Started at the yard.", tags=("work",)),
-            Note(subject="Tony", text="Father was a fitter.", tags=("family",)),
+        dossier.append_notes(marion.persona_dir, "Wes", [
+            Note(subject="Wes", text="Started at the yard.", tags=("work",)),
+            Note(subject="Wes", text="Father was a fitter.", tags=("family",)),
         ])
 
-        block = interview.notes_block(marion, "Tony", "tell me about your father")
+        block = interview.notes_block(marion, "Wes", "tell me about your father")
 
-        assert "What you have written down about Tony:" in block
+        assert "What you have written down about Wes:" in block
         assert "Father was a fitter." in block
         assert "Started at the yard." not in block
 
     def test_an_empty_dossier_adds_nothing_to_the_prompt(self, tmp_path):
-        assert interview.notes_block(_persona(tmp_path), "Tony", "anything") == ""
+        assert interview.notes_block(_persona(tmp_path), "Wes", "anything") == ""
 
     def test_reading_the_notes_tidies_the_index_on_the_way_past(self, tmp_path):
         # reindex runs on the read path, like dedupe_memories.
         marion = _persona(tmp_path)
-        path = dossier.notes_path(marion.persona_dir, "Tony")
+        path = dossier.notes_path(marion.persona_dir, "Wes")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            "\n".join(f"[Tony] #school Fact {i}." for i in range(5))
-            + "\n[Tony] #schools One more.\n"
+            "\n".join(f"[Wes] #school Fact {i}." for i in range(5))
+            + "\n[Wes] #schools One more.\n"
         )
 
-        interview.notes_block(marion, "Tony", "school")
+        interview.notes_block(marion, "Wes", "school")
 
         assert {t.tag for t in dossier.topics(_notes(marion))} == {"school"}

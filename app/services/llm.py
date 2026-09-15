@@ -15,7 +15,7 @@ separates this app's dialogue from a dedicated roleplay front-end:
 * ``PromptFormat.TRANSCRIPT`` (the default) sends one flat script to
   /v1/completions, ending at the responding persona's own name:
 
-      [Tony]: what about the harbour?
+      [Wes]: what about the harbour?
       [Alex]:
 
   The model is not being asked for an answer; it is continuing a

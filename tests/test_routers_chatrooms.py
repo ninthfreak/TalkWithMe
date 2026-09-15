@@ -251,13 +251,13 @@ class TestInterviewRoom:
     def test_the_toggle_and_the_goal_persist(self, client):
         resp = client.put("/api/chatrooms/TNG", json={
             "interview": True,
-            "interview_goal": "Tony's working life, 1978 to retirement.",
+            "interview_goal": "Wes's working life, 1978 to retirement.",
         })
         assert resp.status_code == 200
 
         body = client.get("/api/chatrooms/TNG").json()
         assert body["interview"] is True
-        assert body["interview_goal"] == "Tony's working life, 1978 to retirement."
+        assert body["interview_goal"] == "Wes's working life, 1978 to retirement."
 
     def test_the_goal_survives_the_toggle_going_off(self, client):
         # Turning a room back into an interview should not mean retyping

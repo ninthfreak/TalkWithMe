@@ -24,15 +24,15 @@ def _dir(tmp_path, name="Marion"):
     return persona_dir
 
 
-def _note(text, *tags, when="", subject="Tony", **flags):
+def _note(text, *tags, when="", subject="Wes", **flags):
     return Note(subject=subject, text=text, tags=tuple(tags), when=when, **flags)
 
 
-def _file(persona_dir, subject="Tony"):
+def _file(persona_dir, subject="Wes"):
     return dossier.notes_path(persona_dir, subject)
 
 
-def _write(persona_dir, *lines, subject="Tony"):
+def _write(persona_dir, *lines, subject="Wes"):
     path = _file(persona_dir, subject)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -46,53 +46,53 @@ def _write(persona_dir, *lines, subject="Tony"):
 class TestParseNoteLine:
     def test_a_plain_tagged_note(self):
         note = dossier.parse_note_line(
-            "[Tony] #work #vickers @1978 Started at Vickers straight from school."
+            "[Wes] #work #vickers @1978 Started at Vickers straight from school."
         )
-        assert note.subject == "Tony"
+        assert note.subject == "Wes"
         assert note.tags == ("work", "vickers")
         assert note.when == "1978"
         assert note.text == "Started at Vickers straight from school."
         assert not note.assumed and not note.open_question
 
     def test_flags_are_read(self):
-        assert dossier.parse_note_line("[Tony] (assumed) #work He resented it.").assumed
-        assert dossier.parse_note_line("[Tony] (open) #work Why did he leave?").open_question
-        assert dossier.parse_note_line("[Tony] (sensitive) #health Not 2003.").sensitive
+        assert dossier.parse_note_line("[Wes] (assumed) #work He resented it.").assumed
+        assert dossier.parse_note_line("[Wes] (open) #work Why did he leave?").open_question
+        assert dossier.parse_note_line("[Wes] (sensitive) #health Not 2003.").sensitive
 
     def test_the_memory_files_assumed_spellings_are_accepted(self):
         # Same tolerance as parse_memory_line: these files are hand-edited
         # and a guess written as "(guess)" is still a guess.
         for spelling in ("(assumed)", "(assumption)", "(guess)", "(guessed)"):
-            assert dossier.parse_note_line(f"[Tony] {spelling} He resented it.").assumed
+            assert dossier.parse_note_line(f"[Wes] {spelling} He resented it.").assumed
 
     def test_marker_order_is_not_enforced_on_input(self):
         # Hand-edited files. Insisting on an order would silently lose a tag.
-        note = dossier.parse_note_line("[Tony] #work (assumed) @1986 #vickers He was bitter.")
+        note = dossier.parse_note_line("[Wes] #work (assumed) @1986 #vickers He was bitter.")
         assert note.assumed and note.tags == ("work", "vickers") and note.when == "1986"
 
     def test_a_hash_inside_prose_stays_in_the_prose(self):
-        note = dossier.parse_note_line("[Tony] #work He joined the #2 machine shop.")
+        note = dossier.parse_note_line("[Wes] #work He joined the #2 machine shop.")
         assert note.tags == ("work",)
         assert note.text == "He joined the #2 machine shop."
 
     def test_an_untagged_line_is_still_a_note(self):
-        note = dossier.parse_note_line("[Tony] He hated the cold.")
+        note = dossier.parse_note_line("[Wes] He hated the cold.")
         assert note.tags == () and note.text == "He hated the cold."
 
     def test_a_line_with_no_subject_parses_rather_than_raising(self):
         assert dossier.parse_note_line("loose text").text == "loose text"
 
     def test_tags_are_normalised_on_the_way_in(self):
-        note = dossier.parse_note_line("[Tony] #Work #WORK #war-years Fought.")
+        note = dossier.parse_note_line("[Wes] #Work #WORK #war-years Fought.")
         assert note.tags == ("work", "war-years")   # deduped, lowercased
 
     def test_round_trips_through_stored(self):
-        line = "[Tony] (assumed) #work #vickers @1978 He resented it."
+        line = "[Wes] (assumed) #work #vickers @1978 He resented it."
         assert dossier.parse_note_line(line).stored() == line
 
     def test_stored_writes_markers_in_one_canonical_order(self):
         note = _note("He was bitter.", "work", when="1986", assumed=True)
-        assert note.stored() == "[Tony] (assumed) #work @1986 He was bitter."
+        assert note.stored() == "[Wes] (assumed) #work @1986 He was bitter."
 
 
 class TestNormaliseTag:
@@ -179,54 +179,54 @@ class TestSnapTag:
 class TestStorage:
     def test_notes_live_in_a_per_subject_file_under_notes(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("Born in Leeds.", "family")])
-        path = persona_dir / "notes" / "tony.txt"
+        dossier.append_notes(persona_dir, "Wes", [_note("Born in Leeds.", "family")])
+        path = persona_dir / "notes" / "wes.txt"
         assert path.is_file()
-        assert path.read_text() == "[Tony] #family Born in Leeds.\n"
+        assert path.read_text() == "[Wes] #family Born in Leeds.\n"
 
     def test_the_filename_is_casefolded_so_a_hand_edit_cannot_split_it(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        assert dossier.notes_path(persona_dir, "TONY") == dossier.notes_path(persona_dir, "tony")
+        assert dossier.notes_path(persona_dir, "WES") == dossier.notes_path(persona_dir, "wes")
 
     def test_the_display_spelling_survives_inside_the_file(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("Born in Leeds.")])
-        assert dossier.read_notes(persona_dir, "tony")[0].subject == "Tony"
+        dossier.append_notes(persona_dir, "Wes", [_note("Born in Leeds.")])
+        assert dossier.read_notes(persona_dir, "wes")[0].subject == "Wes"
 
     def test_a_missing_dossier_reads_as_empty(self, tmp_path):
         assert dossier.read_notes(_dir(tmp_path), "Nobody") == []
 
     def test_subjects_lists_everyone_with_a_dossier(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("Born in Leeds.")])
+        dossier.append_notes(persona_dir, "Wes", [_note("Born in Leeds.")])
         dossier.append_notes(persona_dir, "Kira", [_note("Sails.", subject="Kira")])
-        assert sorted(dossier.subjects(persona_dir)) == ["Kira", "Tony"]
+        assert sorted(dossier.subjects(persona_dir)) == ["Kira", "Wes"]
 
     def test_writing_an_empty_dossier_removes_the_file(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("Born in Leeds.")])
-        dossier.write_notes(persona_dir, "Tony", [])
+        dossier.append_notes(persona_dir, "Wes", [_note("Born in Leeds.")])
+        dossier.write_notes(persona_dir, "Wes", [])
         assert not _file(persona_dir).exists()
 
     def test_the_file_grows_past_the_memory_ceiling(self, tmp_path):
         # The whole reason this store exists: memories.txt caps at 16 KB
         # because every byte is injected. Nothing here caps.
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [
+        dossier.append_notes(persona_dir, "Wes", [
             _note(f"Fact number {i} about a long working life.", "work")
             for i in range(800)
         ])
         assert len(_file(persona_dir).read_bytes()) > 32_000
-        assert len(dossier.read_notes(persona_dir, "Tony")) == 800
+        assert len(dossier.read_notes(persona_dir, "Wes")) == 800
 
 
 class TestAppendNotes:
     def test_tags_snap_to_what_is_already_filed(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("Left school at 15.", "school")])
+        dossier.append_notes(persona_dir, "Wes", [_note("Left school at 15.", "school")])
 
         result = dossier.append_notes(
-            persona_dir, "Tony", [_note("Hated the grammar.", "schools")])
+            persona_dir, "Wes", [_note("Hated the grammar.", "schools")])
 
         assert result.filed[0].tags == ("school",)
         assert result.merges == [("schools", "school")]
@@ -234,42 +234,42 @@ class TestAppendNotes:
     def test_a_merge_is_reported_so_it_can_be_seen(self, tmp_path, caplog):
         import logging
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("A.", "school")])
+        dossier.append_notes(persona_dir, "Wes", [_note("A.", "school")])
         with caplog.at_level(logging.INFO):
-            dossier.append_notes(persona_dir, "Tony", [_note("B.", "schools")])
+            dossier.append_notes(persona_dir, "Wes", [_note("B.", "schools")])
         assert "filed '#schools' under existing '#school'" in caplog.text
 
     def test_the_same_fact_twice_is_filed_once(self, tmp_path):
         # The note pass re-reads the same conversation by design.
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("Born in Leeds.", "family")])
+        dossier.append_notes(persona_dir, "Wes", [_note("Born in Leeds.", "family")])
 
         result = dossier.append_notes(
-            persona_dir, "Tony", [_note("born in leeds.", "childhood")])
+            persona_dir, "Wes", [_note("born in leeds.", "childhood")])
 
         assert result.filed == [] and len(result.duplicates) == 1
-        assert len(dossier.read_notes(persona_dir, "Tony")) == 1
+        assert len(dossier.read_notes(persona_dir, "Wes")) == 1
 
     def test_notes_append_in_order(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("First.")])
-        dossier.append_notes(persona_dir, "Tony", [_note("Second.")])
-        assert [n.text for n in dossier.read_notes(persona_dir, "Tony")] == ["First.", "Second."]
+        dossier.append_notes(persona_dir, "Wes", [_note("First.")])
+        dossier.append_notes(persona_dir, "Wes", [_note("Second.")])
+        assert [n.text for n in dossier.read_notes(persona_dir, "Wes")] == ["First.", "Second."]
 
     def test_the_subject_is_forced_to_the_file_it_is_filed_in(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("Sails.", subject="Somebody Else")])
-        assert dossier.read_notes(persona_dir, "Tony")[0].subject == "Tony"
+        dossier.append_notes(persona_dir, "Wes", [_note("Sails.", subject="Somebody Else")])
+        assert dossier.read_notes(persona_dir, "Wes")[0].subject == "Wes"
 
     def test_an_empty_note_is_not_filed(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        result = dossier.append_notes(persona_dir, "Tony", [_note("   ")])
+        result = dossier.append_notes(persona_dir, "Wes", [_note("   ")])
         assert result.filed == [] and not _file(persona_dir).exists()
 
     def test_too_many_tags_are_cut_to_the_cap(self, tmp_path):
         persona_dir = _dir(tmp_path)
         result = dossier.append_notes(
-            persona_dir, "Tony", [_note("A.", "a1", "b2", "c3", "d4", "e5", "f6")])
+            persona_dir, "Wes", [_note("A.", "a1", "b2", "c3", "d4", "e5", "f6")])
         assert len(result.filed[0].tags) == dossier.MAX_TAGS_PER_NOTE
 
 
@@ -279,27 +279,27 @@ class TestOpenQuestions:
 
     def test_questions_replace_rather_than_append(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.replace_open_questions(persona_dir, "Tony", [
+        dossier.replace_open_questions(persona_dir, "Wes", [
             _note("Why did he leave Vickers?"), _note("What about 1986-89?"),
         ])
-        dossier.replace_open_questions(persona_dir, "Tony", [_note("What about 1986-89?")])
+        dossier.replace_open_questions(persona_dir, "Wes", [_note("What about 1986-89?")])
 
-        questions = [n.text for n in dossier.read_notes(persona_dir, "Tony") if n.open_question]
+        questions = [n.text for n in dossier.read_notes(persona_dir, "Wes") if n.open_question]
         assert questions == ["What about 1986-89?"]
 
     def test_replacing_questions_leaves_the_facts_alone(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("Born in Leeds.", "family")])
-        dossier.replace_open_questions(persona_dir, "Tony", [_note("Which hospital?")])
-        dossier.replace_open_questions(persona_dir, "Tony", [])
+        dossier.append_notes(persona_dir, "Wes", [_note("Born in Leeds.", "family")])
+        dossier.replace_open_questions(persona_dir, "Wes", [_note("Which hospital?")])
+        dossier.replace_open_questions(persona_dir, "Wes", [])
 
-        remaining = dossier.read_notes(persona_dir, "Tony")
+        remaining = dossier.read_notes(persona_dir, "Wes")
         assert [n.text for n in remaining] == ["Born in Leeds."]
 
     def test_questions_are_stored_with_the_open_marker(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        dossier.replace_open_questions(persona_dir, "Tony", [_note("Why Leeds?")])
-        assert _file(persona_dir).read_text() == "[Tony] (open) Why Leeds?\n"
+        dossier.replace_open_questions(persona_dir, "Wes", [_note("Why Leeds?")])
+        assert _file(persona_dir).read_text() == "[Wes] (open) Why Leeds?\n"
 
 
 # ---------------------------------------------------------------------------
@@ -318,13 +318,13 @@ class TestReindex:
         # something every turn, since the index is always injected.
         persona_dir = _dir(tmp_path)
         _write(persona_dir,
-               *[f"[Tony] #school School memory {i}." for i in range(5)],
-               "[Tony] #schooling Hated the grammar.")
+               *[f"[Wes] #school School memory {i}." for i in range(5)],
+               "[Wes] #schooling Hated the grammar.")
 
-        report = dossier.reindex(persona_dir, "Tony")
+        report = dossier.reindex(persona_dir, "Wes")
 
         assert report.merges == [("schooling", "school")]
-        assert {t.tag for t in dossier.topics(dossier.read_notes(persona_dir, "Tony"))} == {"school"}
+        assert {t.tag for t in dossier.topics(dossier.read_notes(persona_dir, "Wes"))} == {"school"}
 
     def test_the_write_path_already_keeps_the_apps_own_tags_together(self, tmp_path):
         # Worth pinning: append_notes snaps against what is in the file,
@@ -332,54 +332,54 @@ class TestReindex:
         # to arrive is the one that survives, which is why a reindex
         # never renames a topic that is not split.
         persona_dir = _dir(tmp_path)
-        dossier.append_notes(persona_dir, "Tony", [_note("Hated the grammar.", "schooling")])
-        dossier.append_notes(persona_dir, "Tony", [
+        dossier.append_notes(persona_dir, "Wes", [_note("Hated the grammar.", "schooling")])
+        dossier.append_notes(persona_dir, "Wes", [
             _note(f"School memory {i}.", "school") for i in range(5)])
 
-        assert {t.tag for t in dossier.topics(dossier.read_notes(persona_dir, "Tony"))} == {"schooling"}
-        assert dossier.reindex(persona_dir, "Tony").changed is False
+        assert {t.tag for t in dossier.topics(dossier.read_notes(persona_dir, "Wes"))} == {"schooling"}
+        assert dossier.reindex(persona_dir, "Wes").changed is False
 
     def test_a_big_topic_never_folds_into_a_small_one(self, tmp_path):
         persona_dir = _dir(tmp_path)
         _write(persona_dir,
-               *[f"[Tony] #work Fact {i}." for i in range(10)],
-               "[Tony] #works One stray.")
-        dossier.reindex(persona_dir, "Tony")
-        assert {t.tag for t in dossier.topics(dossier.read_notes(persona_dir, "Tony"))} == {"work"}
+               *[f"[Wes] #work Fact {i}." for i in range(10)],
+               "[Wes] #works One stray.")
+        dossier.reindex(persona_dir, "Wes")
+        assert {t.tag for t in dossier.topics(dossier.read_notes(persona_dir, "Wes"))} == {"work"}
 
     def test_byte_identical_notes_lose_their_copies(self, tmp_path):
         persona_dir = _dir(tmp_path)
         _write(persona_dir,
-               "[Tony] #family Born in Leeds.",
-               "[Tony] #family Born in Leeds.",
-               "[Tony] #work Started at the yard.")
+               "[Wes] #family Born in Leeds.",
+               "[Wes] #family Born in Leeds.",
+               "[Wes] #work Started at the yard.")
 
-        report = dossier.reindex(persona_dir, "Tony")
+        report = dossier.reindex(persona_dir, "Wes")
 
         assert report.duplicates_removed == 1
-        assert len(dossier.read_notes(persona_dir, "Tony")) == 2
+        assert len(dossier.read_notes(persona_dir, "Wes")) == 2
 
     def test_the_first_copy_survives_so_order_is_kept(self, tmp_path):
         persona_dir = _dir(tmp_path)
         _write(persona_dir,
-               "[Tony] #family @1961 Born in Leeds.",
-               "[Tony] #work Started at the yard.",
-               "[Tony] #family Born in Leeds.")
-        dossier.reindex(persona_dir, "Tony")
-        kept = dossier.read_notes(persona_dir, "Tony")
+               "[Wes] #family @1961 Born in Leeds.",
+               "[Wes] #work Started at the yard.",
+               "[Wes] #family Born in Leeds.")
+        dossier.reindex(persona_dir, "Wes")
+        kept = dossier.read_notes(persona_dir, "Wes")
         assert [n.when for n in kept] == ["1961", ""]
 
     def test_running_it_twice_changes_nothing_the_second_time(self, tmp_path):
         persona_dir = _dir(tmp_path)
         _write(persona_dir,
-               *[f"[Tony] #work Fact {i}." for i in range(5)],
-               "[Tony] #working One more.",
-               "[Tony] #family Born in Leeds.",
-               "[Tony] #family Born in Leeds.")
+               *[f"[Wes] #work Fact {i}." for i in range(5)],
+               "[Wes] #working One more.",
+               "[Wes] #family Born in Leeds.",
+               "[Wes] #family Born in Leeds.")
 
-        first = dossier.reindex(persona_dir, "Tony")
+        first = dossier.reindex(persona_dir, "Wes")
         after = _file(persona_dir).read_text()
-        second = dossier.reindex(persona_dir, "Tony")
+        second = dossier.reindex(persona_dir, "Wes")
 
         assert first.changed is True
         assert second.changed is False and second.merges == []
@@ -388,9 +388,9 @@ class TestReindex:
     def test_a_clean_dossier_is_not_rewritten(self, tmp_path):
         # It runs on the read path, so a healthy file must cost a read.
         persona_dir = _dir(tmp_path)
-        _write(persona_dir, "[Tony] #work Started at the yard.")
+        _write(persona_dir, "[Wes] #work Started at the yard.")
         before = _file(persona_dir).stat().st_mtime_ns
-        assert dossier.reindex(persona_dir, "Tony").changed is False
+        assert dossier.reindex(persona_dir, "Wes").changed is False
         assert _file(persona_dir).stat().st_mtime_ns == before
 
     def test_untagged_notes_are_counted_because_only_recency_finds_them(self, tmp_path):
@@ -398,29 +398,29 @@ class TestReindex:
         # unreachable by topic.
         persona_dir = _dir(tmp_path)
         _write(persona_dir,
-               "[Tony] #work Started at the yard.",
-               "[Tony] He hated the cold.",
-               "[Tony] His knees went first.")
-        assert dossier.reindex(persona_dir, "Tony").untagged == 2
+               "[Wes] #work Started at the yard.",
+               "[Wes] He hated the cold.",
+               "[Wes] His knees went first.")
+        assert dossier.reindex(persona_dir, "Wes").untagged == 2
 
     def test_an_open_question_is_not_counted_as_untagged(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        _write(persona_dir, "[Tony] (open) Why Leeds?")
-        assert dossier.reindex(persona_dir, "Tony").untagged == 0
+        _write(persona_dir, "[Wes] (open) Why Leeds?")
+        assert dossier.reindex(persona_dir, "Wes").untagged == 0
 
     def test_a_topic_bigger_than_retrieval_can_show_is_reported(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        _write(persona_dir, *[f"[Tony] #work Fact {i}." for i in range(dossier.CROWDED_TOPIC + 1)])
+        _write(persona_dir, *[f"[Wes] #work Fact {i}." for i in range(dossier.CROWDED_TOPIC + 1)])
 
-        report = dossier.reindex(persona_dir, "Tony")
+        report = dossier.reindex(persona_dir, "Wes")
 
         assert [t.tag for t in report.crowded] == ["work"]
         assert report.crowded[0].count > dossier.MAX_NOTES_PER_TOPIC
 
     def test_a_topic_retrieval_can_show_whole_is_not_reported(self, tmp_path):
         persona_dir = _dir(tmp_path)
-        _write(persona_dir, *[f"[Tony] #work Fact {i}." for i in range(4)])
-        assert dossier.reindex(persona_dir, "Tony").crowded == []
+        _write(persona_dir, *[f"[Wes] #work Fact {i}." for i in range(4)])
+        assert dossier.reindex(persona_dir, "Wes").crowded == []
 
     def test_a_missing_dossier_reindexes_to_nothing(self, tmp_path):
         report = dossier.reindex(_dir(tmp_path), "Nobody")
@@ -429,12 +429,12 @@ class TestReindex:
     def test_notes_keep_their_text_and_era_through_a_fold(self, tmp_path):
         persona_dir = _dir(tmp_path)
         _write(persona_dir,
-               *[f"[Tony] #school Fact {i}." for i in range(5)],
-               "[Tony] (assumed) #schools @1969 He was bullied.")
+               *[f"[Wes] #school Fact {i}." for i in range(5)],
+               "[Wes] (assumed) #schools @1969 He was bullied.")
 
-        dossier.reindex(persona_dir, "Tony")
+        dossier.reindex(persona_dir, "Wes")
 
-        folded = dossier.read_notes(persona_dir, "Tony")[-1]
+        folded = dossier.read_notes(persona_dir, "Wes")[-1]
         assert folded.text == "He was bullied."
         assert folded.when == "1969" and folded.assumed is True
         assert folded.tags == ("school",)
@@ -444,12 +444,12 @@ class TestReindex:
         # the same tag written out twice.
         persona_dir = _dir(tmp_path)
         _write(persona_dir,
-               *[f"[Tony] #school Fact {i}." for i in range(5)],
-               "[Tony] #school #schools Sat the eleven-plus.")
+               *[f"[Wes] #school Fact {i}." for i in range(5)],
+               "[Wes] #school #schools Sat the eleven-plus.")
 
-        dossier.reindex(persona_dir, "Tony")
+        dossier.reindex(persona_dir, "Wes")
 
-        assert dossier.read_notes(persona_dir, "Tony")[-1].tags == ("school",)
+        assert dossier.read_notes(persona_dir, "Wes")[-1].tags == ("school",)
 
 
 # ---------------------------------------------------------------------------
@@ -608,9 +608,9 @@ class TestRenderBlock:
             _note("Mother taught at the grammar.", "family"),
             _note("Why did he leave, really?", "work", open_question=True),
         ]
-        block = dossier.render_block(dossier.select(notes, "about your work"), "Tony")
+        block = dossier.render_block(dossier.select(notes, "about your work"), "Wes")
 
-        assert "What you have written down about Tony:" in block
+        assert "What you have written down about Wes:" in block
         assert "work (1)" in block and "family (1)" in block
         assert "Started at Vickers straight from school. (1978)" in block
         assert "You still want to know:" in block
@@ -620,23 +620,23 @@ class TestRenderBlock:
         # Two spellings of one idea is a worse use of a small model than
         # remembering the sentence.
         notes = [_note("He resented management.", "work", assumed=True)]
-        block = dossier.render_block(dossier.select(notes, "work"), "Tony")
+        block = dossier.render_block(dossier.select(notes, "work"), "Wes")
         assert "You have assumed, though nobody said so:" in block
 
     def test_a_boundary_is_marked_in_the_index(self):
         notes = [_note("He would rather not discuss 2003.", "health", sensitive=True)]
-        block = dossier.render_block(dossier.select(notes, "hello"), "Tony")
+        block = dossier.render_block(dossier.select(notes, "hello"), "Wes")
         assert "health (1, he would rather not)" in block
 
     def test_the_fallback_says_it_is_the_last_of_what_there_is(self):
         notes = [_note("Born in Leeds.", "family")]
-        block = dossier.render_block(dossier.select(notes, "unrelated"), "Tony")
+        block = dossier.render_block(dossier.select(notes, "unrelated"), "Wes")
         assert "The last of what you wrote down:" in block
 
     def test_an_empty_dossier_renders_nothing(self):
-        assert dossier.render_block(dossier.select([], "anything"), "Tony") == ""
+        assert dossier.render_block(dossier.select([], "anything"), "Wes") == ""
 
     def test_dashes_in_tags_and_eras_read_as_words(self):
         notes = [_note("Fought.", "war-years", when="after-the-war")]
-        block = dossier.render_block(dossier.select(notes, "war years"), "Tony")
+        block = dossier.render_block(dossier.select(notes, "war years"), "Wes")
         assert "war years" in block and "(after the war)" in block

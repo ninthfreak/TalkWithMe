@@ -147,11 +147,11 @@ class TestAddMemoryTool:
 
         result = call_builtin_tool(
             persona, ADD_MEMORY_NAME,
-            {"about": "Tony", "memory": "Tony likes tea."},
+            {"about": "Wes", "memory": "Wes likes tea."},
         )
 
         assert result == "The memory was saved successfully."
-        assert (persona.persona_dir / "memories.txt").read_text() == "[Tony] Tony likes tea.\n"
+        assert (persona.persona_dir / "memories.txt").read_text() == "[Wes] Wes likes tea.\n"
 
     def test_the_same_memory_twice_is_stored_once(self, tmp_path):
         # Dedup used to be a sentence in the tool description, which a
@@ -159,7 +159,7 @@ class TestAddMemoryTool:
         # same conversation and re-derives the same facts by design, so
         # without this a persona's whole budget fills with one thing.
         persona = _persona(tmp_path)
-        args = {"about": "Tony", "memory": "Tony likes tea."}
+        args = {"about": "Wes", "memory": "Wes likes tea."}
 
         assert call_builtin_tool(persona, ADD_MEMORY_NAME, args) == (
             "The memory was saved successfully."
@@ -169,19 +169,19 @@ class TestAddMemoryTool:
         )
 
         assert (persona.persona_dir / "memories.txt").read_text() == (
-            "[Tony] Tony likes tea.\n"
+            "[Wes] Wes likes tea.\n"
         )
 
     def test_the_same_line_about_two_people_is_two_memories(self, tmp_path):
         # Compared on the stored form, so the subject counts.
         persona = _persona(tmp_path)
         call_builtin_tool(persona, ADD_MEMORY_NAME,
-                          {"about": "Tony", "memory": "They sail."})
+                          {"about": "Wes", "memory": "They sail."})
         call_builtin_tool(persona, ADD_MEMORY_NAME,
                           {"about": "Marv", "memory": "They sail."})
 
         assert (persona.persona_dir / "memories.txt").read_text() == (
-            "[Tony] They sail.\n[Marv] They sail.\n"
+            "[Wes] They sail.\n[Marv] They sail.\n"
         )
 
     def test_a_memory_about_nobody_is_refused(self, tmp_path):

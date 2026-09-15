@@ -480,7 +480,7 @@ separates this app's dialogue from a dedicated roleplay front-end. It is under
 stops at the speaker's own name:
 
 ```
-[Tony]: what about the harbour?
+[Wes]: what about the harbour?
 [Alex]:
 ```
 
@@ -899,7 +899,7 @@ the outside.
 
 A persona's memories are **about somebody**. Each one is filed under the name the
 transcript tags them with, which means the human is filed under **whoever they are
-playing** — play Kira today and Tony tomorrow and you are two different people to the
+playing** — play Kira today and Wes tomorrow and you are two different people to the
 room, which is the point of playing someone.
 
 That separation is enforced in both directions, and it is the whole reason the human is
@@ -915,9 +915,9 @@ lands in one of three states:
 
 | | What the persona is told |
 |---|---|
-| Never met | *"Tony: you have never met."* |
-| Met, nothing saved | *"Tony: you have met before, but nothing in particular comes to mind."* |
-| Something saved | *"Tony: Tony has never been on a boat and does not intend to start."* |
+| Never met | *"Wes: you have never met."* |
+| Met, nothing saved | *"Wes: you have met before, but nothing in particular comes to mind."* |
+| Something saved | *"Wes: Wes has never been on a boat and does not intend to start."* |
 
 **How the third row gets written.** When a conversation ends — you start a new
 chat, or change rooms — each persona who spoke is asked once, in a plain
@@ -1021,8 +1021,8 @@ memories* now deletes `met.txt` as well, which it should always have done.
 
 Three things stay, and the dialog says so rather than leaving you to notice:
 
-- **A mention inside somebody else's memory.** `[Tony] Tony met Brad at the bar`
-  is a memory of *Tony*. Deleting it to be thorough would take a fact about Tony
+- **A mention inside somebody else's memory.** `[Wes] Wes met Brad at the bar`
+  is a memory of *Wes*. Deleting it to be thorough would take a fact about Wes
   with it, so the count is shown and the line is left alone.
 - **Untagged notes.** Legacy lines belong to nobody in particular and are shown to
   everyone, so no forget can match them.
@@ -1055,11 +1055,11 @@ Three things change, and nothing else does:
 reply. A dossier has no cap, because it is **read two levels at a time**.
 
 ```
-[Tony] #work #vickers @1978 Started at Vickers straight from school.
-[Tony] #work #vickers @1986 Left after the second round of layoffs.
-[Tony] (assumed) #work He resented the move to management.
-[Tony] #family #father @1960s Father was a fitter at the same yard.
-[Tony] (open) #work Why did he leave Vickers, really?
+[Wes] #work #vickers @1978 Started at Vickers straight from school.
+[Wes] #work #vickers @1986 Left after the second round of layoffs.
+[Wes] (assumed) #work He resented the move to management.
+[Wes] #family #father @1960s Father was a fitter at the same yard.
+[Wes] (open) #work Why did he leave Vickers, really?
 ```
 
 `#topic` is what makes a selective read possible. `@when` is the era the fact is
@@ -1071,12 +1071,12 @@ sentence is part of the sentence.
 father, a 229-note dossier contributes 381 characters:
 
 ```
-What you have written down about Tony:
+What you have written down about Wes:
   work (183) · vickers (182) · union (40) · family (3) · father (2) · army (1)
 
 On what you are discussing now — father:
   Father was a fitter at the same yard, thirty years. (1960s)
-  Father died the winter after Tony married. (1989)
+  Father died the winter after Wes married. (1989)
 
 You still want to know:
   Why did he leave Vickers, really?
@@ -1114,7 +1114,7 @@ room, and the implicit "All Personas" room has no room record to put it on. The
 two stores are exclusive: in an interview room the notes go to the dossier and
 the ordinary memory pass does not run, so the same fact never lands in both.
 
-Deliberately *not* done: fuzzy matching on the way in. "Tony likes tea" and "Tony
+Deliberately *not* done: fuzzy matching on the way in. "Wes likes tea" and "Wes
 likes coffee" overlap heavily and are different facts, so a similarity threshold
 loose enough to catch a restatement is loose enough to eat one of those.
 
@@ -1131,12 +1131,12 @@ persona holding one has no way to find out which it was. So a line can carry a
 marker, and the prompt says it back:
 
 ```
-[Tony] Tony has never been on a boat.
-[Tony] (assumed) Tony is about forty.
+[Wes] Wes has never been on a boat.
+[Wes] (assumed) Wes is about forty.
 ```
 
-> Tony: Tony has never been on a boat. You have also assumed, though nobody said
-> so: Tony is about forty.
+> Wes: Wes has never been on a boat. You have also assumed, though nobody said
+> so: Wes is about forty.
 
 Which means the persona can be wrong out loud — ask, be corrected, or drop it —
 instead of treating a guess as something it was told. Assumptions are also the

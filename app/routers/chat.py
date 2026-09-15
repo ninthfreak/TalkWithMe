@@ -569,7 +569,7 @@ def _who_is_here_block(persona, present: list[str], settings) -> str:
         recalled = grouped.get(name.casefold(), [])
         # Split by how it was come by, because the two are not the same
         # kind of thing to know. A persona that decided somebody was about
-        # forty and filed "Tony is forty" believes it next week exactly as
+        # forty and filed "Wes is forty" believes it next week exactly as
         # firmly as anything it was told, and has no way to find out
         # otherwise — an inference and a fact are indistinguishable once
         # both are prose in the same file.
@@ -1211,7 +1211,7 @@ async def suggest_reply(req: SuggestReplyRequest):
         )
 
     # The same guard the personas get, pointed the other way: strip a
-    # "[Tony]: " prefix the model added, and cut it off if it carries on
+    # "[Wes]: " prefix the model added, and cut it off if it carries on
     # into a persona's reply.
     guard = ReplyGuard(user_label, eligible)
     cleaned = (guard.feed(text) + guard.flush()).strip()

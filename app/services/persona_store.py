@@ -629,7 +629,7 @@ def _write_memories_file(persona_dir: Path, lines: List[str]) -> None:
         raise
 
 
-# A memory is about somebody, and the line says who: "[Tony] ...". The
+# A memory is about somebody, and the line says who: "[Wes] ...". The
 # subject is whatever the transcript calls them, so the human is filed
 # under the persona they are playing rather than under "the user" — play
 # somebody else tomorrow and you are somebody else to the room.
@@ -645,7 +645,7 @@ _SUBJECT_RE = re.compile(r"^\[([^\]\n]{1,%d})\]\s*(.+)$" % MAX_SUBJECT_CHARS)
 
 # How a memory records that it was worked out rather than witnessed.
 #
-# A persona that decides somebody is about forty, and files "Tony is
+# A persona that decides somebody is about forty, and files "Wes is
 # forty", meets them next week believing it the way it believes anything
 # else it was told. That is not what happened, and the persona has no way
 # to find out — an inference is indistinguishable from a fact once both
@@ -719,10 +719,10 @@ def forget_subject(persona_dir: Path, subject: str) -> int:
     — the same rule a rename uses, because it is the same question: which
     lines are about this person.
 
-    A line about somebody else that happens to name them ("[Tony] Tony
+    A line about somebody else that happens to name them ("[Wes] Wes
     met Alex at the bar") is left alone. It is not a memory of Alex, it
-    is a memory of Tony, and deleting it to be thorough would take a fact
-    about Tony with it. Callers show the count instead (see
+    is a memory of Wes, and deleting it to be thorough would take a fact
+    about Wes with it. Callers show the count instead (see
     count_name_mentions) so the choice is the user's rather than a
     surprise.
 
@@ -1062,8 +1062,8 @@ def dedupe_memories(persona_dir: Path) -> int:
     **Exact matches only**, deliberately. Anything cleverer — casefolding,
     similarity, ignoring punctuation — starts making judgements about
     whether two sentences mean the same thing, and the failure mode there
-    is deleting something the persona actually knew. "Tony likes tea" and
-    "Tony likes coffee" are close enough to worry a fuzzy matcher and are
+    is deleting something the persona actually knew. "Wes likes tea" and
+    "Wes likes coffee" are close enough to worry a fuzzy matcher and are
     not the same fact. This function can only ever remove a line that is
     already present, character for character, so the worst it can do is
     nothing.

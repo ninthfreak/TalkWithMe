@@ -82,9 +82,9 @@ class TestRenderConversation:
     def test_every_line_carries_a_speaker(self):
         # Including the human's. An untagged line in a script has no
         # speaker, and the model is being asked who said what.
-        rendered = reflection.render_conversation(_history(), "Tony")
+        rendered = reflection.render_conversation(_history(), "Wes")
         assert rendered == (
-            "[Tony]: I have never been on a boat.\n"
+            "[Wes]: I have never been on a boat.\n"
             "[Alex]: Not once?\n"
             "[Marv]: Hm."
         )
@@ -96,7 +96,7 @@ class TestRenderConversation:
     def test_empty_messages_are_dropped(self):
         rendered = reflection.render_conversation(
             [ChatMessage(role="user", content="   "),
-             ChatMessage(role="assistant", content="Hi.", persona="Alex")], "Tony",
+             ChatMessage(role="assistant", content="Hi.", persona="Alex")], "Wes",
         )
         assert rendered == "[Alex]: Hi."
 
@@ -124,11 +124,11 @@ class TestSpokeIn:
 class TestParseReflection:
     def test_tagged_lines_about_people_present(self):
         saved, skipped = reflection.parse_reflection(
-            "[Tony] Tony has never been on a boat.\n[Marv] Marv sighs at everything.",
-            "Alex", ["Tony", "Marv"],
+            "[Wes] Wes has never been on a boat.\n[Marv] Marv sighs at everything.",
+            "Alex", ["Wes", "Marv"],
         )
         assert saved == [
-            Memory("Tony", "Tony has never been on a boat."),
+            Memory("Wes", "Wes has never been on a boat."),
             Memory("Marv", "Marv sighs at everything."),
         ]
         assert skipped == []
@@ -138,7 +138,7 @@ class TestParseReflection:
         # somebody absent is unreachable — it would sit in the file
         # forever, eating budget, and never be read.
         saved, skipped = reflection.parse_reflection(
-            "[Ghost] Ghost was never here.", "Alex", ["Tony"],
+            "[Ghost] Ghost was never here.", "Alex", ["Wes"],
         )
         assert saved == []
         assert skipped == ["[Ghost] Ghost was never here."]
@@ -149,18 +149,18 @@ class TestParseReflection:
         # later conversation as though it were true of the persona
         # holding it.
         saved, skipped = reflection.parse_reflection(
-            "[Alex] Alex is a friendly assistant.", "Alex", ["Tony", "Alex"],
+            "[Alex] Alex is a friendly assistant.", "Alex", ["Wes", "Alex"],
         )
         assert saved == []
         assert skipped == ["[Alex] Alex is a friendly assistant."]
 
     def test_the_subject_is_spelled_the_way_the_room_spells_it(self):
         # The subject is looked up in the memories file by name, so a
-        # model answering "[tony]" must not create a second Tony.
+        # model answering "[wes]" must not create a second Wes.
         saved, _ = reflection.parse_reflection(
-            "[tony] tony sails.", "Alex", ["Tony"],
+            "[wes] wes sails.", "Alex", ["Wes"],
         )
-        assert saved == [Memory("Tony", "tony sails.")]
+        assert saved == [Memory("Wes", "wes sails.")]
 
     @pytest.mark.parametrize("answer", [
         "nothing", "Nothing.", "none", "N/A", "  nothing at all", "no memories",
@@ -168,7 +168,7 @@ class TestParseReflection:
     def test_nothing_is_an_ordinary_answer(self, answer):
         # And has to be. Most conversations teach nobody anything, and a
         # model that believes it must produce a line will invent one.
-        saved, skipped = reflection.parse_reflection(answer, "Alex", ["Tony"])
+        saved, skipped = reflection.parse_reflection(answer, "Alex", ["Wes"])
         assert saved == []
         assert skipped == []
 
@@ -177,23 +177,23 @@ class TestParseReflection:
         # so a persona that worked something out can be told later that it
         # worked it out.
         saved, skipped = reflection.parse_reflection(
-            "[Tony] (assumed) Tony is about forty.", "Alex", ["Tony"],
+            "[Wes] (assumed) Wes is about forty.", "Alex", ["Wes"],
         )
-        assert saved == [Memory("Tony", "Tony is about forty.", assumed=True)]
+        assert saved == [Memory("Wes", "Wes is about forty.", assumed=True)]
         assert skipped == []
 
     def test_an_unmarked_line_is_taken_as_known(self):
         saved, _ = reflection.parse_reflection(
-            "[Tony] Tony is 43.", "Alex", ["Tony"],
+            "[Wes] Wes is 43.", "Alex", ["Wes"],
         )
         assert saved[0].assumed is False
 
     def test_an_untagged_line_is_skipped_not_guessed_at(self):
         saved, skipped = reflection.parse_reflection(
-            "Tony seems nice.", "Alex", ["Tony"],
+            "Wes seems nice.", "Alex", ["Wes"],
         )
         assert saved == []
-        assert skipped == ["Tony seems nice."]
+        assert skipped == ["Wes seems nice."]
 
 
 # ---------------------------------------------------------------------------
@@ -206,26 +206,26 @@ class TestReflect:
         # tools are offered anywhere, and memories.txt still gets written.
         persona = _persona(tmp_path)
         assert persona.allow_tool_calls is False
-        _stub_llm(monkeypatch, "[Tony] Tony has never been on a boat.")
+        _stub_llm(monkeypatch, "[Wes] Wes has never been on a boat.")
 
         result = _reflect(
-            persona, ["Tony"], _history(), make_settings(), "Tony",
+            persona, ["Wes"], _history(), make_settings(), "Wes",
         )
 
-        assert result.saved == ["[Tony] Tony has never been on a boat."]
-        assert _memories(persona) == "[Tony] Tony has never been on a boat.\n"
+        assert result.saved == ["[Wes] Wes has never been on a boat."]
+        assert _memories(persona) == "[Wes] Wes has never been on a boat.\n"
 
     def test_it_asks_about_the_people_who_were_there(self, tmp_path, monkeypatch):
         captured = []
         _stub_llm(monkeypatch, "nothing", capture=captured)
 
         _reflect(
-            _persona(tmp_path), ["Tony", "Marv"], _history(), make_settings(), "Tony",
+            _persona(tmp_path), ["Wes", "Marv"], _history(), make_settings(), "Wes",
         )
 
         prompt = captured[0][0][-1]["content"]
-        assert "[Tony]: I have never been on a boat." in prompt   # the conversation
-        assert "Tony, Marv" in prompt                              # who to write about
+        assert "[Wes]: I have never been on a boat." in prompt   # the conversation
+        assert "Wes, Marv" in prompt                              # who to write about
         assert "nothing" in prompt                                 # the way out
 
     def test_the_persona_is_never_in_its_own_cast(self, tmp_path, monkeypatch):
@@ -233,10 +233,10 @@ class TestReflect:
         _stub_llm(monkeypatch, "nothing", capture=captured)
 
         _reflect(
-            _persona(tmp_path), ["Alex", "Tony"], _history(), make_settings(), "Tony",
+            _persona(tmp_path), ["Alex", "Wes"], _history(), make_settings(), "Wes",
         )
 
-        assert "Write only about these people: Tony" in captured[0][0][-1]["content"]
+        assert "Write only about these people: Wes" in captured[0][0][-1]["content"]
 
     # -- knowing what it already knows ---------------------------------------
 
@@ -248,16 +248,16 @@ class TestReflect:
         # cannot catch.
         persona = _persona(tmp_path)
         (persona.persona_dir / "memories.txt").write_text(
-            "[Tony] Tony is 43.\n[Tony] (assumed) Tony dislikes his job.\n"
+            "[Wes] Wes is 43.\n[Wes] (assumed) Wes dislikes his job.\n"
         )
         captured = []
         _stub_llm(monkeypatch, "nothing", capture=captured)
 
-        _reflect(persona, ["Tony"], _history(), make_settings(), "Tony")
+        _reflect(persona, ["Wes"], _history(), make_settings(), "Wes")
 
         prompt = captured[0][0][-1]["content"]
-        assert "[Tony] Tony is 43." in prompt
-        assert "[Tony] (assumed) Tony dislikes his job." in prompt
+        assert "[Wes] Wes is 43." in prompt
+        assert "[Wes] (assumed) Wes dislikes his job." in prompt
         assert "only what is NEW" in prompt
 
     def test_memories_about_people_who_are_not_here_are_not_listed(
@@ -267,22 +267,22 @@ class TestReflect:
         # nothing: this conversation cannot restate it.
         persona = _persona(tmp_path)
         (persona.persona_dir / "memories.txt").write_text(
-            "[Tony] Tony is 43.\n[Ghost] Ghost is elsewhere.\n"
+            "[Wes] Wes is 43.\n[Ghost] Ghost is elsewhere.\n"
         )
         captured = []
         _stub_llm(monkeypatch, "nothing", capture=captured)
 
-        _reflect(persona, ["Tony"], _history(), make_settings(), "Tony")
+        _reflect(persona, ["Wes"], _history(), make_settings(), "Wes")
 
         prompt = captured[0][0][-1]["content"]
-        assert "Tony is 43." in prompt
+        assert "Wes is 43." in prompt
         assert "Ghost" not in prompt
 
     def test_with_nothing_saved_it_is_told_so(self, tmp_path, monkeypatch):
         captured = []
         _stub_llm(monkeypatch, "nothing", capture=captured)
 
-        _reflect(_persona(tmp_path), ["Tony"], _history(), make_settings(), "Tony")
+        _reflect(_persona(tmp_path), ["Wes"], _history(), make_settings(), "Wes")
 
         assert "nothing saved about them yet" in captured[0][0][-1]["content"]
 
@@ -290,33 +290,33 @@ class TestReflect:
 
     def test_an_assumption_is_stored_marked(self, tmp_path, monkeypatch):
         persona = _persona(tmp_path)
-        _stub_llm(monkeypatch, "[Tony] (assumed) Tony is about forty.")
+        _stub_llm(monkeypatch, "[Wes] (assumed) Wes is about forty.")
 
-        result = _reflect(persona, ["Tony"], _history(), make_settings(), "Tony")
+        result = _reflect(persona, ["Wes"], _history(), make_settings(), "Wes")
 
-        assert _memories(persona) == "[Tony] (assumed) Tony is about forty.\n"
-        assert result.saved == ["[Tony] (assumed) Tony is about forty."]
+        assert _memories(persona) == "[Wes] (assumed) Wes is about forty.\n"
+        assert result.saved == ["[Wes] (assumed) Wes is about forty."]
 
     def test_the_prompt_shows_how_to_mark_one(self, tmp_path, monkeypatch):
         captured = []
         _stub_llm(monkeypatch, "nothing", capture=captured)
 
-        _reflect(_persona(tmp_path), ["Tony"], _history(), make_settings(), "Tony")
+        _reflect(_persona(tmp_path), ["Wes"], _history(), make_settings(), "Wes")
 
         prompt = captured[0][0][-1]["content"]
         assert "worked something out rather than being told" in prompt
-        assert "[Tony] (assumed) Tony is about forty." in prompt
+        assert "[Wes] (assumed) Wes is about forty." in prompt
 
     def test_no_more_than_the_cap_is_filed(self, tmp_path, monkeypatch):
         # A model answering a "what did you learn" question with a dozen
         # lines has started narrating the conversation back.
         persona = _persona(tmp_path)
         _stub_llm(monkeypatch, "\n".join(
-            f"[Tony] Fact number {i}." for i in range(10)
+            f"[Wes] Fact number {i}." for i in range(10)
         ))
 
         result = _reflect(
-            persona, ["Tony"], _history(), make_settings(), "Tony",
+            persona, ["Wes"], _history(), make_settings(), "Wes",
         )
 
         assert len(result.saved) == reflection.MAX_MEMORIES_PER_REFLECTION
@@ -329,15 +329,15 @@ class TestReflect:
         # same facts by design. Without dedup a persona's whole budget
         # fills with one thing it knows.
         persona = _persona(tmp_path)
-        _stub_llm(monkeypatch, "[Tony] Tony has never been on a boat.")
+        _stub_llm(monkeypatch, "[Wes] Wes has never been on a boat.")
 
         first = _reflect(
-            persona, ["Tony"], _history(), make_settings(), "Tony")
+            persona, ["Wes"], _history(), make_settings(), "Wes")
         second = _reflect(
-            persona, ["Tony"], _history(), make_settings(), "Tony")
+            persona, ["Wes"], _history(), make_settings(), "Wes")
 
         assert first.saved and second.saved == []
-        assert _memories(persona) == "[Tony] Tony has never been on a boat.\n"
+        assert _memories(persona) == "[Wes] Wes has never been on a boat.\n"
 
     def test_a_failing_llm_costs_memories_and_nothing_else(
         self, tmp_path, monkeypatch,
@@ -350,7 +350,7 @@ class TestReflect:
         monkeypatch.setattr(reflection, "chat_completion", boom)
 
         result = _reflect(
-            _persona(tmp_path), ["Tony"], _history(), make_settings(), "Tony",
+            _persona(tmp_path), ["Wes"], _history(), make_settings(), "Wes",
         )
 
         assert result.saved == []
@@ -360,28 +360,28 @@ class TestReflect:
         _stub_llm(monkeypatch, "")
 
         assert (_reflect(
-            persona, ["Tony"], _history(), make_settings(), "Tony")).saved == []
+            persona, ["Wes"], _history(), make_settings(), "Wes")).saved == []
         assert not (persona.persona_dir / "memories.txt").exists()
 
     def test_a_zero_budget_persona_is_not_even_asked(self, tmp_path, monkeypatch):
         captured = []
-        _stub_llm(monkeypatch, "[Tony] Tony sails.", capture=captured)
+        _stub_llm(monkeypatch, "[Wes] Wes sails.", capture=captured)
 
         _reflect(
-            _persona(tmp_path, memory_size=0), ["Tony"], _history(),
-            make_settings(), "Tony",
+            _persona(tmp_path, memory_size=0), ["Wes"], _history(),
+            make_settings(), "Wes",
         )
 
         assert captured == []   # no completion spent on a persona that cannot save
 
     def test_the_global_switch_stops_it(self, tmp_path, monkeypatch):
         captured = []
-        _stub_llm(monkeypatch, "[Tony] Tony sails.", capture=captured)
+        _stub_llm(monkeypatch, "[Wes] Wes sails.", capture=captured)
         settings = make_settings(
             general=GeneralConfig(enable_persona_memories=False))
 
         _reflect(
-            _persona(tmp_path), ["Tony"], _history(), settings, "Tony")
+            _persona(tmp_path), ["Wes"], _history(), settings, "Wes")
 
         assert captured == []
 
@@ -390,7 +390,7 @@ class TestReflect:
         _stub_llm(monkeypatch, "nothing", capture=captured)
 
         _reflect(
-            _persona(tmp_path), ["Tony"], [], make_settings(), "Tony")
+            _persona(tmp_path), ["Wes"], [], make_settings(), "Wes")
 
         assert captured == []
 
@@ -403,15 +403,15 @@ class TestReflectOnConversation:
     def test_everyone_who_spoke_looks_back(self, tmp_path, monkeypatch):
         alex = _persona(tmp_path, "Alex")
         marv = _persona(tmp_path, "Marv")
-        _stub_llm(monkeypatch, "[Tony] Tony has never been on a boat.")
+        _stub_llm(monkeypatch, "[Wes] Wes has never been on a boat.")
 
         results = _reflect_all(
-            _history(), [alex, marv], make_settings(), "Tony", room="TNG",
+            _history(), [alex, marv], make_settings(), "Wes", room="TNG",
         )
 
         assert [r.persona for r in results] == ["Alex", "Marv"]
         assert _memories(alex) == _memories(marv) == (
-            "[Tony] Tony has never been on a boat.\n"
+            "[Wes] Wes has never been on a boat.\n"
         )
 
     def test_a_persona_who_said_nothing_is_not_asked(self, tmp_path, monkeypatch):
@@ -423,7 +423,7 @@ class TestReflectOnConversation:
         _stub_llm(monkeypatch, "nothing")
 
         results = _reflect_all(
-            _history(), [alex, luna], make_settings(), "Tony",
+            _history(), [alex, luna], make_settings(), "Wes",
         )
 
         assert [r.persona for r in results] == ["Alex"]
@@ -437,19 +437,19 @@ class TestReflectOnConversation:
         _stub_llm(monkeypatch, "nothing", capture=captured)
 
         _reflect_all(
-            _history(), [alex, marv], make_settings(), "Tony",
+            _history(), [alex, marv], make_settings(), "Wes",
         )
 
-        # Alex is asked about Marv and Tony; Marv about Alex and Tony.
-        assert "Write only about these people: Marv, Tony" in captured[0][0][-1]["content"]
-        assert "Write only about these people: Alex, Tony" in captured[1][0][-1]["content"]
+        # Alex is asked about Marv and Wes; Marv about Alex and Wes.
+        assert "Write only about these people: Marv, Wes" in captured[0][0][-1]["content"]
+        assert "Write only about these people: Alex, Wes" in captured[1][0][-1]["content"]
 
     def test_a_speaker_who_no_longer_exists_is_skipped(self, tmp_path, monkeypatch):
         # Deleted or renamed between speaking and the conversation ending.
         _stub_llm(monkeypatch, "nothing")
 
         results = _reflect_all(
-            _history(), [_persona(tmp_path, "Alex")], make_settings(), "Tony",
+            _history(), [_persona(tmp_path, "Alex")], make_settings(), "Wes",
         )
 
         assert [r.persona for r in results] == ["Alex"]

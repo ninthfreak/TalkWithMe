@@ -503,7 +503,7 @@ class TestForgetOnePerson:
             personas_root,
             "[Brad] Brad is a banker.",
             "[Brad] (assumed) Brad is about forty.",
-            "[Tony] Tony met Brad at the bar.",
+            "[Wes] Wes met Brad at the bar.",
         )
         (personas_root / "Alex" / "met.txt").write_text("Brad\nLuna\n")
 
@@ -515,7 +515,7 @@ class TestForgetOnePerson:
         }
         # Met with nothing stored is a real state, not an empty row.
         assert rows["Luna"]["memories"] == 0 and rows["Luna"]["met"] is True
-        assert rows["Tony"]["met"] is False
+        assert rows["Wes"]["met"] is False
 
     def test_untagged_lines_are_counted_apart(self, client, personas_root):
         # They belong to nobody, are shown to everyone, and no forget can
@@ -530,9 +530,9 @@ class TestForgetOnePerson:
             personas_root,
             "[Brad] Brad is a banker.",
             "[Brad] Brad hates boats.",
-            "[Tony] Tony has two dogs.",
+            "[Wes] Wes has two dogs.",
         )
-        (personas_root / "Alex" / "met.txt").write_text("Brad\nTony\n")
+        (personas_root / "Alex" / "met.txt").write_text("Brad\nWes\n")
 
         body = client.post("/api/personas/Alex/forget", json={"subjects": ["Brad"]}).json()
 
@@ -540,16 +540,16 @@ class TestForgetOnePerson:
         assert body["met_removed"] == ["Brad"]
         assert body["forgotten"] == ["Brad"]
         assert (personas_root / "Alex" / "memories.txt").read_text() == (
-            "[Tony] Tony has two dogs.\n"
+            "[Wes] Wes has two dogs.\n"
         )
-        assert persona_store.read_acquaintances(personas_root / "Alex") == {"Tony"}
+        assert persona_store.read_acquaintances(personas_root / "Alex") == {"Wes"}
 
     def test_forget_reads_back_what_is_left(self, client, personas_root):
         # The wipe's round trip: what remains comes off disk, not from a
         # prediction about what the delete did.
-        self._remember(personas_root, "[Brad] Brad is a banker.", "[Tony] Tony has dogs.")
+        self._remember(personas_root, "[Brad] Brad is a banker.", "[Wes] Wes has dogs.")
         body = client.post("/api/personas/Alex/forget", json={"subjects": ["Brad"]}).json()
-        assert [r["subject"] for r in body["remaining"]["subjects"]] == ["Tony"]
+        assert [r["subject"] for r in body["remaining"]["subjects"]] == ["Wes"]
 
     def test_forget_is_one_sided(self, client, personas_root):
         # Alex forgetting Luna says nothing about what Luna remembers.
@@ -566,11 +566,11 @@ class TestForgetOnePerson:
         self._remember(
             personas_root,
             "[Brad] Brad is a banker.",
-            "[Tony] Tony has two dogs.",
+            "[Wes] Wes has two dogs.",
             "[Luna] Luna likes tea.",
         )
         body = client.post(
-            "/api/personas/Alex/forget", json={"subjects": ["Brad", "Tony"]},
+            "/api/personas/Alex/forget", json={"subjects": ["Brad", "Wes"]},
         ).json()
         assert body["memories_removed"] == 2
         assert (personas_root / "Alex" / "memories.txt").read_text() == (

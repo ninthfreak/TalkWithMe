@@ -141,7 +141,7 @@ ADD_MEMORY_SPEC = {
             "with, exactly as it is spelled there. Save it about the person it "
             "concerns, never about yourself. "
             "'memory' is a SINGLE LINE of at most 1024 characters, written in your "
-            "own voice about them by name — 'Tony has never been on a boat', not "
+            "own voice about them by name — 'Wes has never been on a boat', not "
             "'The user told me...'. "
             "Set 'assumed' to true when you worked it out rather than being told "
             "it, so you know later which it was. "
@@ -158,14 +158,14 @@ ADD_MEMORY_SPEC = {
                     "type": "string",
                     "description": (
                         "Who the memory is about — the name the transcript tags "
-                        "them with, e.g. 'Tony'."
+                        "them with, e.g. 'Wes'."
                     ),
                 },
                 "memory": {
                     "type": "string",
                     "description": (
                         "A single line of at most 1024 characters, about them by "
-                        "name. Example: 'Tony has never been on a boat and does "
+                        "name. Example: 'Wes has never been on a boat and does "
                         "not intend to start.'"
                     ),
                 },
@@ -173,7 +173,7 @@ ADD_MEMORY_SPEC = {
                     "type": "boolean",
                     "description": (
                         "True if you inferred this rather than being told it — "
-                        "'Tony is about forty' from how he talks, rather than "
+                        "'Wes is about forty' from how he talks, rather than "
                         "because he said so. Defaults to false."
                     ),
                 },

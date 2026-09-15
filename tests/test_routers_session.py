@@ -231,7 +231,7 @@ class TestWipeContext:
         # Leaving the met-list behind would mean a wiped persona still
         # greets everyone as an old acquaintance, which is the one thing
         # a fresh start is for.
-        (personas_root / "Luna" / "met.txt").write_text("Tony\nAlex\n")
+        (personas_root / "Luna" / "met.txt").write_text("Wes\nAlex\n")
 
         body = client.post("/api/session/wipe", json={"memories": True}).json()
 
@@ -244,7 +244,7 @@ class TestWipeContext:
     ):
         # It is state that changes how they behave, so it has to be
         # visible in the inventory or "nothing stored" would be a lie.
-        (personas_root / "Alex" / "met.txt").write_text("Tony\n")
+        (personas_root / "Alex" / "met.txt").write_text("Wes\n")
 
         body = client.get("/api/session/context").json()
 
@@ -445,7 +445,7 @@ class TestReflection:
         app_config.set_personas_cache(rescan_personas(personas_root))
 
         async def fake(messages, **kwargs):
-            return "[Tony] Tony has never been on a boat."
+            return "[Wes] Wes has never been on a boat."
         monkeypatch.setattr(session_router.reflection, "chat_completion", fake)
 
         session.set_current_room("TNG")
@@ -538,7 +538,7 @@ class TestReflection:
         from app.services.reflection import Reflection
 
         async def fake(history, personas, settings, user_label, room=None, roster=None):
-            return [Reflection(persona="Alex", saved=["[Tony] Tony sails."],
+            return [Reflection(persona="Alex", saved=["[Wes] Wes sails."],
                                skipped=["[Ghost] not here"])]
         monkeypatch.setattr(
             session_router.reflection, "reflect_on_conversation", fake)
@@ -548,7 +548,7 @@ class TestReflection:
 
         assert body["room"] == "TNG"
         assert body["personas"] == [
-            {"persona": "Alex", "saved": ["[Tony] Tony sails."], "skipped": 1}
+            {"persona": "Alex", "saved": ["[Wes] Wes sails."], "skipped": 1}
         ]
 
     def test_reflect_now_leaves_the_conversation_alone(

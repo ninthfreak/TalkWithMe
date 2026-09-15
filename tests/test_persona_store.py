@@ -581,20 +581,20 @@ class TestAppendMemory:
     def test_disabled_budget_deletes_stale_file(self, tmp_path):
         d = _dir(tmp_path)
         (d / "memories.txt").write_text("stale\n")
-        result = append_memory(d, "Tony", "The user likes tea.", 0)
+        result = append_memory(d, "Wes", "The user likes tea.", 0)
         assert result == "Error: Memory is not enabled for this persona."
         assert not (d / "memories.txt").exists()
 
     @pytest.mark.parametrize("memory", [None, 42, [], "   ", "\n\t\n", ""])
     def test_no_content_is_reported(self, tmp_path, memory):
         d = _dir(tmp_path)
-        result = append_memory(d, "Tony", memory, DEFAULT_MEMORY_SIZE)
+        result = append_memory(d, "Wes", memory, DEFAULT_MEMORY_SIZE)
         assert result == "Error: The memory was not saved because it had no content."
         assert not (d / "memories.txt").exists()
 
     def test_too_long_memory_is_rejected_not_truncated(self, tmp_path):
         d = _dir(tmp_path)
-        result = append_memory(d, "Tony", "x" * (MAX_MEMORY_LINE_CHARS + 1), DEFAULT_MEMORY_SIZE)
+        result = append_memory(d, "Wes", "x" * (MAX_MEMORY_LINE_CHARS + 1), DEFAULT_MEMORY_SIZE)
         assert result == (
             "Error: The memory was too large to save. "
             f"Max per-memory length is {MAX_MEMORY_LINE_CHARS} characters."
@@ -603,70 +603,71 @@ class TestAppendMemory:
 
     def test_memory_exactly_at_char_limit_is_accepted(self, tmp_path):
         d = _dir(tmp_path)
-        result = append_memory(d, "Tony", "x" * MAX_MEMORY_LINE_CHARS, DEFAULT_MEMORY_SIZE)
+        result = append_memory(d, "Wes", "x" * MAX_MEMORY_LINE_CHARS, DEFAULT_MEMORY_SIZE)
         assert result == "The memory was saved successfully."
 
     def test_too_large_memory_reported_with_configured_limit(self, tmp_path):
         d = _dir(tmp_path)
-        result = append_memory(d, "Tony", "ab" * 4, memory_size=7)  # 8 bytes > 7
+        result = append_memory(d, "Wes", "ab" * 4, memory_size=7)  # 8 bytes > 7
         assert result == "Error: The memory was too large to save. Configured memory limit: 7 bytes"
 
     def test_memory_exactly_at_byte_limit_is_accepted(self, tmp_path):
         d = _dir(tmp_path)
-        # "[Tony] abc" plus a newline. The tag counts against the budget.
-        result = append_memory(d, "Tony", "abc", memory_size=11)
+        # "[Wes] abc" plus a newline. The tag counts against the budget.
+        result = append_memory(d, "Wes", "abc", memory_size=11)
         assert result == "The memory was saved successfully."
-        assert read_memories(d) == "[Tony] abc\n"
+        assert read_memories(d) == "[Wes] abc\n"
 
     def test_success_appends_one_line(self, tmp_path):
         d = _dir(tmp_path)
         (d / "memories.txt").write_text("old\n")
-        assert append_memory(d, "Tony", "The user likes tea.", DEFAULT_MEMORY_SIZE) == (
+        assert append_memory(d, "Wes", "The user likes tea.", DEFAULT_MEMORY_SIZE) == (
             "The memory was saved successfully."
         )
-        assert read_memories(d) == "old\n[Tony] The user likes tea.\n"
+        assert read_memories(d) == "old\n[Wes] The user likes tea.\n"
 
     def test_newlines_are_deleted_not_replaced(self, tmp_path):
         # The spec deletes newline characters ("a\nb" -> "ab"): a memory
         # must be a single line, and replacement would silently change
         # the memory's content.
         d = _dir(tmp_path)
-        assert append_memory(d, "Tony", "a\nb\rc\rd", DEFAULT_MEMORY_SIZE) == (
+        assert append_memory(d, "Wes", "a\nb\rc\rd", DEFAULT_MEMORY_SIZE) == (
             "The memory was saved successfully."
         )
-        assert read_memories(d) == "[Tony] abcd\n"
+        assert read_memories(d) == "[Wes] abcd\n"
 
     def test_edges_are_stripped(self, tmp_path):
         d = _dir(tmp_path)
-        assert append_memory(d, "Tony", "  padded  ", DEFAULT_MEMORY_SIZE) == (
+        assert append_memory(d, "Wes", "  padded  ", DEFAULT_MEMORY_SIZE) == (
             "The memory was saved successfully."
         )
-        assert read_memories(d) == "[Tony] padded\n"
+        assert read_memories(d) == "[Wes] padded\n"
 
     def test_new_blank_lines_are_dropped_from_existing_file(self, tmp_path):
         # The file is rewritten from non-blank lines, so hand-edited
         # blank lines do not survive an append.
         d = _dir(tmp_path)
         (d / "memories.txt").write_text("first\n\n  \nsecond\n")
-        append_memory(d, "Tony", "third", DEFAULT_MEMORY_SIZE)
-        assert read_memories(d) == "first\nsecond\n[Tony] third\n"
+        append_memory(d, "Wes", "third", DEFAULT_MEMORY_SIZE)
+        assert read_memories(d) == "first\nsecond\n[Wes] third\n"
 
     def test_oldest_memories_purged_when_over_limit(self, tmp_path):
         d = _dir(tmp_path)
-        # The new line is "[Tony] a5", 10 bytes with its newline. A
-        # budget of 19 leaves room for it plus the three newest old lines.
+        # The new line is "[Wes] a5", 9 bytes with its newline, and each
+        # old line is 3. A budget of 17 leaves room for it plus the two
+        # newest old lines and not the third.
         (d / "memories.txt").write_text("a1\na2\na3\na4\n")
-        assert append_memory(d, "Tony", "a5", memory_size=19) == "The memory was saved successfully."
-        assert read_memories(d) == "a3\na4\n[Tony] a5\n"
+        assert append_memory(d, "Wes", "a5", memory_size=17) == "The memory was saved successfully."
+        assert read_memories(d) == "a3\na4\n[Wes] a5\n"
 
     def test_purge_never_drops_the_new_memory(self, tmp_path):
         d = _dir(tmp_path)
         # The new memory fits the limit by itself, but combined with the
         # old line it does not: the OLD line must go, never the new one.
         (d / "memories.txt").write_text("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n")  # 41 bytes
-        # "[Tony] new" is 10 bytes; a budget of 11 fits it and nothing else.
-        assert append_memory(d, "Tony", "new", memory_size=11) == "The memory was saved successfully."
-        assert read_memories(d) == "[Tony] new\n"
+        # "[Wes] new" is 10 bytes; a budget of 11 fits it and nothing else.
+        assert append_memory(d, "Wes", "new", memory_size=11) == "The memory was saved successfully."
+        assert read_memories(d) == "[Wes] new\n"
 
     def test_write_failure_is_reported_and_leaves_no_temp_file(self, tmp_path, monkeypatch, caplog):
         d = _dir(tmp_path)
@@ -676,7 +677,7 @@ class TestAppendMemory:
             raise OSError("disk full")
 
         monkeypatch.setattr(persona_store, "_write_memories_file", boom)
-        result = append_memory(d, "Tony", "new", DEFAULT_MEMORY_SIZE)
+        result = append_memory(d, "Wes", "new", DEFAULT_MEMORY_SIZE)
         assert result == "Error: The memory could not be saved."
         assert read_memories(d) == "old\n"  # untouched
         assert not list(d.glob("memories.txt.tmp*"))
@@ -693,7 +694,7 @@ class TestAppendMemory:
             raise OSError("read-only directory")
 
         monkeypatch.setattr(persona_store, "remove_memories_file", boom)
-        result = append_memory(d, "Tony", "The user likes tea.", 0)
+        result = append_memory(d, "Wes", "The user likes tea.", 0)
         assert result == "Error: Memory is not enabled for this persona."
         assert (d / "memories.txt").read_text() == "stale\n"  # survives
         assert "could not delete memories.txt" in caplog.text
@@ -708,17 +709,17 @@ class TestAssumedMemories:
     """
 
     def test_the_marker_round_trips(self):
-        line = "[Tony] (assumed) Tony is about forty."
+        line = "[Wes] (assumed) Wes is about forty."
         memory = persona_store.parse_memory_line(line)
 
-        assert memory == persona_store.Memory("Tony", "Tony is about forty.", True)
+        assert memory == persona_store.Memory("Wes", "Wes is about forty.", True)
         assert memory.stored() == line
 
     @pytest.mark.parametrize("written", [
-        "[Tony] (assumed) He sails.",
-        "[Tony] (Assumed) He sails.",
-        "[Tony] (guess) He sails.",
-        "[Tony] ( guessed ) He sails.",
+        "[Wes] (assumed) He sails.",
+        "[Wes] (Assumed) He sails.",
+        "[Wes] (guess) He sails.",
+        "[Wes] ( guessed ) He sails.",
     ])
     def test_the_ways_a_model_writes_it(self, written):
         # A small closed set: every extra spelling accepted is a phrase
@@ -729,37 +730,37 @@ class TestAssumedMemories:
         assert memory.text == "He sails."
 
     def test_a_plain_bracket_is_left_in_the_text(self):
-        memory = persona_store.parse_memory_line("[Tony] (probably) he sails.")
+        memory = persona_store.parse_memory_line("[Wes] (probably) he sails.")
         assert memory.assumed is False
         assert memory.text == "(probably) he sails."
 
     def test_an_unmarked_memory_is_known(self):
-        assert persona_store.parse_memory_line("[Tony] Tony is 43.").assumed is False
+        assert persona_store.parse_memory_line("[Wes] Wes is 43.").assumed is False
 
     def test_append_writes_the_marker(self, tmp_path):
-        persona_store.append_memory(tmp_path, "Tony", "Tony is about forty.",
+        persona_store.append_memory(tmp_path, "Wes", "Wes is about forty.",
                                     1024, assumed=True)
         assert (tmp_path / "memories.txt").read_text() == (
-            "[Tony] (assumed) Tony is about forty.\n"
+            "[Wes] (assumed) Wes is about forty.\n"
         )
 
     def test_the_same_thing_assumed_and_known_are_two_memories(self, tmp_path):
         # Deduplication compares the stored line, and these are not the
         # same claim: one is what they said, the other what you decided.
-        persona_store.append_memory(tmp_path, "Tony", "Tony sails.", 1024)
-        persona_store.append_memory(tmp_path, "Tony", "Tony sails.", 1024, assumed=True)
+        persona_store.append_memory(tmp_path, "Wes", "Wes sails.", 1024)
+        persona_store.append_memory(tmp_path, "Wes", "Wes sails.", 1024, assumed=True)
 
         assert (tmp_path / "memories.txt").read_text() == (
-            "[Tony] Tony sails.\n[Tony] (assumed) Tony sails.\n"
+            "[Wes] Wes sails.\n[Wes] (assumed) Wes sails.\n"
         )
 
     def test_grouping_keeps_the_marker(self, tmp_path):
         (tmp_path / "memories.txt").write_text(
-            "[Tony] Tony is 43.\n[Tony] (assumed) Tony is unhappy.\n"
+            "[Wes] Wes is 43.\n[Wes] (assumed) Wes is unhappy.\n"
         )
         grouped = persona_store.memories_by_subject(tmp_path)
 
-        assert [m.assumed for m in grouped["tony"]] == [False, True]
+        assert [m.assumed for m in grouped["wes"]] == [False, True]
 
 
 class TestDedupeMemories:
@@ -999,11 +1000,11 @@ class TestForgetSubject:
         self._remember(
             d,
             "[Brad] Brad is a banker.",
-            "[Tony] Tony has two dogs.",
+            "[Wes] Wes has two dogs.",
             "[Brad] Brad hates boats.",
         )
         assert forget_subject(d, "Brad") == 2
-        assert read_memories(d).splitlines() == ["[Tony] Tony has two dogs."]
+        assert read_memories(d).splitlines() == ["[Wes] Wes has two dogs."]
 
     def test_subject_match_is_case_insensitive(self, tmp_path):
         # Same rule a rename uses: the tag is structural, and a persona
@@ -1014,10 +1015,10 @@ class TestForgetSubject:
         assert read_memories(d) == ""
 
     def test_a_mention_inside_someone_elses_memory_survives(self, tmp_path):
-        # It is a memory of Tony that happens to name Brad. Deleting it
-        # to be thorough would take a fact about Tony with it.
+        # It is a memory of Wes that happens to name Brad. Deleting it
+        # to be thorough would take a fact about Wes with it.
         d = _dir(tmp_path)
-        self._remember(d, "[Tony] Tony met Brad at the bar.")
+        self._remember(d, "[Wes] Wes met Brad at the bar.")
         assert forget_subject(d, "Brad") == 0
         assert "Brad" in read_memories(d)
 
@@ -1054,9 +1055,9 @@ class TestForgetAcquaintance:
 
     def test_removes_one_name_and_keeps_the_rest(self, tmp_path):
         d = _dir(tmp_path)
-        (d / "met.txt").write_text("Brad\nTony\n")
+        (d / "met.txt").write_text("Brad\nWes\n")
         assert forget_acquaintance(d, "Brad") is True
-        assert persona_store.read_acquaintances(d) == {"Tony"}
+        assert persona_store.read_acquaintances(d) == {"Wes"}
 
     def test_match_is_case_insensitive(self, tmp_path):
         d = _dir(tmp_path)
@@ -1072,9 +1073,9 @@ class TestForgetAcquaintance:
 
     def test_unknown_name_reports_false(self, tmp_path):
         d = _dir(tmp_path)
-        (d / "met.txt").write_text("Tony\n")
+        (d / "met.txt").write_text("Wes\n")
         assert forget_acquaintance(d, "Brad") is False
-        assert persona_store.read_acquaintances(d) == {"Tony"}
+        assert persona_store.read_acquaintances(d) == {"Wes"}
 
     def test_no_met_file_is_not_an_error(self, tmp_path):
         assert forget_acquaintance(_dir(tmp_path), "Brad") is False
@@ -1090,7 +1091,7 @@ class TestCountNameMentions:
         d = _dir(tmp_path)
         self._remember(
             d,
-            "[Tony] Tony met Brad at the bar.",
+            "[Wes] Wes met Brad at the bar.",
             "[Luna] Luna thinks Brad is funny.",
             "[Brad] Brad is a banker.",
         )
@@ -1099,7 +1100,7 @@ class TestCountNameMentions:
 
     def test_matches_whole_words_only(self, tmp_path):
         d = _dir(tmp_path)
-        self._remember(d, "[Tony] Tony collects Bradbury first editions.")
+        self._remember(d, "[Wes] Wes collects Bradbury first editions.")
         assert count_name_mentions(d, "Brad") == 0
 
     def test_no_memories_is_zero(self, tmp_path):

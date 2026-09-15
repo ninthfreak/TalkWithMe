@@ -311,29 +311,29 @@ class TestExchangeWindowing:
     def test_the_question_survives_a_wide_room(self, manager):
         self._guessing_game(manager)
         messages = manager.build_llm_messages(
-            "sys", "P0", max_turns_for_context=6, user_label="Tony"
+            "sys", "P0", max_turns_for_context=6, user_label="Wes"
         )
         contents = [m["content"] for m in messages]
-        assert "[Tony]: Guess what animal I'm thinking of." in contents
-        assert "[Tony]: It was an otter." in contents
+        assert "[Wes]: Guess what animal I'm thinking of." in contents
+        assert "[Wes]: It was an otter." in contents
 
     def test_one_exchange_of_context_still_holds_every_reply(self, manager):
         # Even at the minimum, an exchange is kept whole.
         self._guessing_game(manager)
         messages = manager.build_llm_messages(
-            "sys", "P0", max_turns_for_context=1, user_label="Tony"
+            "sys", "P0", max_turns_for_context=1, user_label="Wes"
         )
         # The last exchange is the reveal, which has no replies yet.
-        assert [m["content"] for m in messages[1:]] == ["[Tony]: It was an otter."]
+        assert [m["content"] for m in messages[1:]] == ["[Wes]: It was an otter."]
 
     def test_two_exchanges_keeps_the_question_and_all_its_answers(self, manager):
         self._guessing_game(manager)
         messages = manager.build_llm_messages(
-            "sys", "P9", max_turns_for_context=2, user_label="Tony"
+            "sys", "P9", max_turns_for_context=2, user_label="Wes"
         )
         contents = [m["content"] for m in messages[1:]]
-        assert contents[0] == "[Tony]: Guess what animal I'm thinking of."
-        assert contents[-1] == "[Tony]: It was an otter."
+        assert contents[0] == "[Wes]: Guess what animal I'm thinking of."
+        assert contents[-1] == "[Wes]: It was an otter."
         assert len(contents) == 8   # question + 6 guesses + reveal
 
     def test_older_exchanges_are_dropped_whole(self, manager):
@@ -342,13 +342,13 @@ class TestExchangeWindowing:
             manager.add_assistant_message_no_persist(f"answer {i}", "P0")
 
         messages = manager.build_llm_messages(
-            "sys", "P1", max_turns_for_context=2, user_label="Tony"
+            "sys", "P1", max_turns_for_context=2, user_label="Wes"
         )
         contents = [m["content"] for m in messages[1:]]
         # Two complete exchanges, oldest first — never half of one.
         assert contents == [
-            "[Tony]: question 3", "[P0]: answer 3",
-            "[Tony]: question 4", "[P0]: answer 4",
+            "[Wes]: question 3", "[P0]: answer 3",
+            "[Wes]: question 4", "[P0]: answer 4",
         ]
 
     def test_window_does_not_shrink_as_personas_are_added(self, manager):
@@ -363,9 +363,9 @@ class TestExchangeWindowing:
             contents = [
                 x["content"]
                 for x in m.build_llm_messages("sys", "Z", max_turns_for_context=2,
-                                              user_label="Tony")
+                                              user_label="Wes")
             ]
-            assert "[Tony]: the question" in contents, f"lost with {personas} personas"
+            assert "[Wes]: the question" in contents, f"lost with {personas} personas"
 
     def test_history_shorter_than_the_window_is_kept_entirely(self, manager):
         manager.add_user_message_no_persist("only question")

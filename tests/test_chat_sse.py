@@ -561,7 +561,7 @@ class TestPersonaMemory:
         return Persona(name="Alex", system_prompt="You are Alex.",
                        persona_dir=persona_dir, **kwargs)
 
-    def _block(self, persona, present=("Tony",), settings=None):
+    def _block(self, persona, present=("Wes",), settings=None):
         return chat_router._system_prompt_with_memories(
             persona, settings or make_settings(), list(present),
         )
@@ -573,24 +573,24 @@ class TestPersonaMemory:
         result = self._block(self._persona(tmp_path))
         assert result == (
             "You are Alex.\n\nThe people here, and what you know of them:\n"
-            "Tony: you have never met."
+            "Wes: you have never met."
         )
 
     def test_met_before_with_nothing_saved_says_so(self, tmp_path):
         # Distinct from never having met, and the distinction is why the
         # met-list exists: an empty memories file cannot tell them apart.
-        result = self._block(self._persona(tmp_path, met=["Tony"]))
-        assert "Tony: you have met before, but nothing in particular comes to mind." in result
+        result = self._block(self._persona(tmp_path, met=["Wes"]))
+        assert "Wes: you have met before, but nothing in particular comes to mind." in result
 
     def test_memories_are_shown_under_the_person_they_are_about(self, tmp_path):
         persona = self._persona(
             tmp_path,
-            memories="[Tony] Tony has never been on a boat.\n[Marv] Marv sighs at everything.\n",
-            met=["Tony", "Marv"],
+            memories="[Wes] Wes has never been on a boat.\n[Marv] Marv sighs at everything.\n",
+            met=["Wes", "Marv"],
         )
-        result = self._block(persona, present=["Tony"])
+        result = self._block(persona, present=["Wes"])
 
-        assert "Tony: Tony has never been on a boat." in result
+        assert "Wes: Wes has never been on a boat." in result
         # Marv is not in the room, so Marv is not in the prompt.
         assert "Marv" not in result
 
@@ -600,48 +600,48 @@ class TestPersonaMemory:
         persona = self._persona(tmp_path, memories="[Kira] Kira owes everyone money.\n",
                                 met=["Kira"])
         assert "Kira owes everyone money." in self._block(persona, present=["Kira"])
-        assert "owes everyone money" not in self._block(persona, present=["Tony"])
+        assert "owes everyone money" not in self._block(persona, present=["Wes"])
 
     # -- what was worked out, versus what was witnessed -----------------------
 
     def test_an_assumption_is_presented_as_one(self, tmp_path):
-        # A persona that decided somebody was about forty and filed "Tony
+        # A persona that decided somebody was about forty and filed "Wes
         # is forty" believes it next week exactly as firmly as anything it
         # was told, with no way to find out otherwise. Saying which is
         # which is what lets it be wrong out loud.
         persona = self._persona(
-            tmp_path, memories="[Tony] (assumed) Tony is about forty.\n", met=["Tony"],
+            tmp_path, memories="[Wes] (assumed) Wes is about forty.\n", met=["Wes"],
         )
 
         result = self._block(persona)
 
-        assert "Tony: You have assumed, though nobody said so: Tony is about forty." in result
+        assert "Wes: You have assumed, though nobody said so: Wes is about forty." in result
 
     def test_what_was_told_comes_first_and_the_guess_after(self, tmp_path):
         persona = self._persona(
             tmp_path,
-            memories=("[Tony] Tony has never been on a boat.\n"
-                      "[Tony] (assumed) Tony is about forty.\n"),
-            met=["Tony"],
+            memories=("[Wes] Wes has never been on a boat.\n"
+                      "[Wes] (assumed) Wes is about forty.\n"),
+            met=["Wes"],
         )
 
         result = self._block(persona)
 
         assert (
-            "Tony: Tony has never been on a boat. You have also assumed, though "
-            "nobody said so: Tony is about forty."
+            "Wes: Wes has never been on a boat. You have also assumed, though "
+            "nobody said so: Wes is about forty."
         ) in result
 
     def test_an_unmarked_memory_is_still_simply_known(self, tmp_path):
         # The format is additive: every memory written before this existed
         # reads as something the persona was told, which is what it was.
         persona = self._persona(
-            tmp_path, memories="[Tony] Tony is 43.\n", met=["Tony"],
+            tmp_path, memories="[Wes] Wes is 43.\n", met=["Wes"],
         )
 
         result = self._block(persona)
 
-        assert "Tony: Tony is 43." in result
+        assert "Wes: Wes is 43." in result
         assert "assumed" not in result
 
     def test_it_works_with_the_memory_feature_switched_off(self, tmp_path):
@@ -649,16 +649,16 @@ class TestPersonaMemory:
         # whether you have met somebody does not depend on the feature —
         # only the remembered detail does.
         settings = make_settings(general=GeneralConfig(enable_persona_memories=False))
-        persona = self._persona(tmp_path, memories="[Tony] Tony likes tea.\n", met=["Tony"])
+        persona = self._persona(tmp_path, memories="[Wes] Wes likes tea.\n", met=["Wes"])
 
         result = self._block(persona, settings=settings)
 
-        assert "Tony: you have met before, but nothing in particular comes to mind." in result
+        assert "Wes: you have met before, but nothing in particular comes to mind." in result
         assert "likes tea" not in result
 
     def test_a_zero_budget_persona_still_knows_who_it_has_met(self, tmp_path):
-        persona = self._persona(tmp_path, memories="[Tony] Tony likes tea.\n",
-                                met=["Tony"], memory_size=0)
+        persona = self._persona(tmp_path, memories="[Wes] Wes likes tea.\n",
+                                met=["Wes"], memory_size=0)
         result = self._block(persona)
         assert "you have met before" in result
         assert "likes tea" not in result
@@ -668,7 +668,7 @@ class TestPersonaMemory:
 
     def test_a_persona_with_no_directory_is_left_alone(self, tmp_path):
         result = chat_router._system_prompt_with_memories(
-            Persona(name="Alex", system_prompt="You are Alex."), make_settings(), ["Tony"],
+            Persona(name="Alex", system_prompt="You are Alex."), make_settings(), ["Wes"],
         )
         assert result == "You are Alex."
 
@@ -725,35 +725,35 @@ class TestPersonaMemory:
 
     def test_over_limit_memories_purged_oldest_first_on_read(self, tmp_path):
         persona = self._persona(
-            tmp_path, memories="[Tony] aaaa\n[Tony] bbbb\n[Tony] cccc\n",
-            met=["Tony"], memory_size=15,
+            tmp_path, memories="[Wes] aaaa\n[Wes] bbbb\n[Wes] cccc\n",
+            met=["Wes"], memory_size=15,
         )
         memories_file = persona.persona_dir / "memories.txt"
 
         result = self._block(persona)
 
-        assert "Tony: cccc" in result
+        assert "Wes: cccc" in result
         assert "aaaa" not in result
-        assert memories_file.read_text() == "[Tony] cccc\n"
+        assert memories_file.read_text() == "[Wes] cccc\n"
 
     def test_within_budget_memories_left_untouched_on_read(self, tmp_path):
-        persona = self._persona(tmp_path, memories="[Tony] aaaa\n[Tony] bbbb\n",
-                                met=["Tony"], memory_size=8192)
+        persona = self._persona(tmp_path, memories="[Wes] aaaa\n[Wes] bbbb\n",
+                                met=["Wes"], memory_size=8192)
         memories_file = persona.persona_dir / "memories.txt"
 
         result = self._block(persona)
 
-        assert "Tony: aaaa bbbb" in result
-        assert memories_file.read_text() == "[Tony] aaaa\n[Tony] bbbb\n"
+        assert "Wes: aaaa bbbb" in result
+        assert memories_file.read_text() == "[Wes] aaaa\n[Wes] bbbb\n"
 
     def test_single_memory_exceeding_budget_deletes_file_on_read(self, tmp_path):
-        persona = self._persona(tmp_path, memories="[Tony] aaaaaaaaaa\n",
-                                met=["Tony"], memory_size=10)
+        persona = self._persona(tmp_path, memories="[Wes] aaaaaaaaaa\n",
+                                met=["Wes"], memory_size=10)
         memories_file = persona.persona_dir / "memories.txt"
 
         result = self._block(persona)
 
-        assert "Tony: you have met before" in result
+        assert "Wes: you have met before" in result
         assert not memories_file.exists()
 
     # -- integration: injection reaches the LLM -------------------------------
@@ -761,7 +761,7 @@ class TestPersonaMemory:
     def test_injected_memories_reach_the_llm_payload(self, client, monkeypatch, tmp_path):
         alex_dir = tmp_path / "Alex"
         alex_dir.mkdir(parents=True)
-        (alex_dir / "memories.txt").write_text("[User] Tony likes tea.\n")
+        (alex_dir / "memories.txt").write_text("[User] Wes likes tea.\n")
         config = make_personas()
         config.personas[0] = Persona(
             name="Alex",
@@ -787,7 +787,7 @@ class TestPersonaMemory:
         system_message = seen[0][0]
         assert system_message["role"] == "system"
         assert "The people here, and what you know of them:" in system_message["content"]
-        assert "User: Tony likes tea." in system_message["content"]
+        assert "User: Wes likes tea." in system_message["content"]
 
     def test_external_over_limit_memories_purged_before_llm_payload(self, client, monkeypatch, tmp_path):
         # The scenario the read-path enforcement exists for: an external

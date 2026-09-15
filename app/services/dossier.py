@@ -10,17 +10,17 @@ accumulate more than a prompt can hold::
        Marion/
          memories.txt          what Marion carries everywhere (unchanged)
          notes/
-           tony.txt            Marion's dossier on Tony
+           wes.txt             Marion's dossier on Wes
            kira.txt            Marion's dossier on Kira
 
 One file per person being interviewed, named by the casefolded subject so
 a hand-edit cannot split somebody into two files. The line format is the
 memories format with two additions::
 
-     [Tony] #work #vickers @1978 Started at Vickers straight from school.
-     [Tony] (assumed) #work He resented the move to management.
-     [Tony] (open) #work Why did he leave Vickers, really?
-     [Tony] #health (sensitive) He would rather not discuss 2003.
+     [Wes] #work #vickers @1978 Started at Vickers straight from school.
+     [Wes] (assumed) #work He resented the move to management.
+     [Wes] (open) #work Why did he leave Vickers, really?
+     [Wes] #health (sensitive) He would rather not discuss 2003.
 
 ``#topic`` is what makes a selective read possible; ``@when`` is the era
 the fact is *about* (not when it was written down), which is what lets a
@@ -287,7 +287,7 @@ def notes_dir(persona_dir: Path) -> Path:
 def _subject_filename(subject: str) -> str:
     """The file a subject's notes live in.
 
-    Casefolded, so a hand-edit that writes "[tony]" cannot start a second
+    Casefolded, so a hand-edit that writes "[wes]" cannot start a second
     dossier on the same person. The display spelling survives inside the
     lines, which is where the model reads it from.
     """
